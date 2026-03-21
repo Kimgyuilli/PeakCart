@@ -1,4 +1,4 @@
-# PeekCart — 고가용성 이커머스 플랫폼
+# PeekCart — 고가용성 이커머스 플랫폼 
 
 > **대용량 트래픽 환경을 고려한 이커머스 설계 및 구현**
 > Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes

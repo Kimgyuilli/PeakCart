@@ -33,6 +33,7 @@ logs/
 *.class
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+.sdkmanrc
 
 # Environment
 .env

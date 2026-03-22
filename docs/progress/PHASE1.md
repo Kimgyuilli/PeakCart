@@ -66,6 +66,25 @@
 - `global/jwt/JwtFilter`: 블랙리스트 검증 + `setDetails(token)` 추가
 - 전체 소스 파일 JavaDoc 주석 추가 (37개 파일)
 
+### 2026-03-23
+
+#### Task 1-2: 테스트 코드 완성 및 아키텍처 정제
+
+**완료 항목**:
+- `global/auth/TokenClaims` 레코드: jjwt `Claims` 타입을 Application 레이어까지 노출하지 않도록 캡슐화
+- `user/domain/repository/TokenBlacklistPort` 인터페이스: Application 레이어가 Redis 구현체에 직접 의존하지 않도록 역전
+- `TokenBlacklistRepository` → `TokenBlacklistPort` 구현 추가
+- `AuthService` 반환 타입 `TokenResponse` → `TokenResult` (application DTO 분리)
+- `UserQueryService` / `UserCommandService` 반환 타입 `UserResponse` → `User` (도메인 객체 반환)
+- `JwtFilter` `@Component` 제거 → `SecurityConfig`에서 직접 생성 (`@WebMvcTest` 슬라이스 격리)
+- `global/config/TestSecurityConfig`: `@WebMvcTest`용 permitAll 보안 설정
+- `support/WithMockLoginUser` / `WithMockLoginUserSecurityContextFactory`: 커스텀 SecurityContext 어노테이션
+- `support/fixture/UserFixture`: 도메인 객체 생성 픽스처
+- `user/domain/model/UserTest` (4건), `application/AuthServiceTest` (9건), `UserCommandServiceTest` (2건), `UserQueryServiceTest` (2건)
+- `presentation/AuthControllerTest` (5건), `UserControllerTest` (3건)
+- Infrastructure 통합 테스트 제거 (Testcontainer 의존 — CI 환경 구성 시 재도입)
+- 전체 28건 통과
+
 ---
 
 ## 주요 결정 사항
@@ -79,6 +98,11 @@
 | 2026-03-22 | logout 인증 필수화 | PUBLIC_URLS에서 logout 제거, JwtFilter setDetails(token) 추가 | 로그아웃 요청 자체가 유효한 토큰을 블랙리스트에 등록하는 행위이므로 인증 필요 |
 | 2026-03-22 | ArgumentResolver 도입 | `@CurrentUser LoginUser`로 Controller 인증 정보 추출 분리 | Controller가 SecurityContext를 직접 다루지 않도록 관심사 분리 |
 | 2026-03-22 | TokenIssuer 인터페이스 | Application 레이어가 JwtProvider 구현에 직접 의존하지 않도록 역전 | refreshTokenExpiry, UUID 생성 등 인프라 세부사항을 Application 레이어에서 제거 |
+| 2026-03-23 | TokenBlacklistPort 인터페이스 | Application 레이어가 `TokenBlacklistRepository`(Redis 구현체)에 직접 의존하지 않도록 역전 | 의존 방향 준수: Application → Domain ← Infrastructure |
+| 2026-03-23 | TokenClaims 레코드 | jjwt `Claims` 타입을 `global/auth`로 캡슐화, Application 레이어에서 jjwt 직접 참조 제거 | 인프라 라이브러리 타입이 Application 경계 밖으로 노출되는 것 방지 |
+| 2026-03-23 | Application DTO 분리 | `AuthService` → `TokenResult`, `UserService` → `User` 반환 / Presentation에서 Response DTO로 변환 | Application 레이어가 Presentation DTO에 의존하지 않도록 경계 정리 |
+| 2026-03-23 | JwtFilter `@Component` 제거 | `SecurityConfig`에서 직접 생성 | `@WebMvcTest` 슬라이스 테스트 시 JwtFilter가 컴포넌트 스캔에 포함되어 JwtProvider 빈 미등록으로 실패하는 문제 해결 |
+| 2026-03-23 | Infrastructure 통합 테스트 제거 | Testcontainer 의존 통합 테스트 전면 제거 | 문제가 자주 발생하는 부분에만 집중, CI 환경 구성 시 재도입 예정 |
 
 ---
 

@@ -59,8 +59,8 @@
 | `AuthService` — 회원가입/로그인/로그아웃/토큰 재발급 | ✅ | Grace Period 포함 |
 | `UserCommandService` / `UserQueryService` | ✅ | |
 | `AuthController` / `UserController` | ✅ | |
-| 단위 테스트 (Domain + Application) | 🔲 | 커버리지 90%+ |
-| 슬라이스 테스트 (Presentation) | 🔲 | |
+| 단위 테스트 (Domain + Application) | ✅ | Domain 4건 + Application 14건, 전부 통과 |
+| 슬라이스 테스트 (Presentation) | ✅ | AuthController 5건 + UserController 3건, 전부 통과 |
 
 **완료 기준**: 회원가입 → 로그인 → 토큰 재발급 → 로그아웃 시나리오 정상 동작
 

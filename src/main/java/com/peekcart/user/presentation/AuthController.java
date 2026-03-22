@@ -1,5 +1,7 @@
 package com.peekcart.user.presentation;
 
+import com.peekcart.global.auth.CurrentUser;
+import com.peekcart.global.auth.LoginUser;
 import com.peekcart.global.response.ApiResponse;
 import com.peekcart.user.application.AuthService;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
@@ -10,7 +12,6 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,9 +40,8 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(Authentication authentication) {
-        String token = (String) authentication.getDetails();
-        authService.logout(token);
+    public ResponseEntity<ApiResponse<Void>> logout(@CurrentUser LoginUser loginUser) {
+        authService.logout(loginUser.accessToken());
         return ResponseEntity.ok(ApiResponse.ok());
     }
 }

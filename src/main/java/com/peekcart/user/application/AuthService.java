@@ -98,10 +98,18 @@ public class AuthService {
     }
 
     private TokenResult rotateToken(RefreshToken token, String oldRefreshToken) {
+        if (token.isExpired()) {
+            refreshTokenRepository.deleteByToken(oldRefreshToken);
+            throw new UserException(ErrorCode.USR_005);
+        }
         User user = userRepository.findById(token.getUserId())
                 .orElseThrow(() -> new UserException(ErrorCode.USR_003));
         tokenBlacklistPort.addGracePeriod(oldRefreshToken, user.getId(), 10);
-        refreshTokenRepository.deleteByToken(oldRefreshToken);
+        boolean deleted = refreshTokenRepository.deleteByToken(oldRefreshToken);
+        if (!deleted) {
+            // 동시 요청이 먼저 처리됨 — 이중 발급 방지
+            throw new UserException(ErrorCode.USR_004);
+        }
         return issueTokens(user);
     }
 
@@ -110,6 +118,8 @@ public class AuthService {
                 .orElseThrow(() -> new UserException(ErrorCode.USR_004));
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserException(ErrorCode.USR_003));
+        // 첫 번째 로테이션이 저장한 고아 토큰을 정리하고 재발급
+        refreshTokenRepository.deleteByUserId(userId);
         return issueTokens(user);
     }
 

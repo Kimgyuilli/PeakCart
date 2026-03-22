@@ -163,6 +163,7 @@ class AuthServiceTest {
         RefreshToken storedToken = UserFixture.refreshToken(user.getId(), REFRESH_TOKEN_VALUE);
         given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(storedToken));
         given(userRepository.findById(user.getId())).willReturn(Optional.of(user));
+        given(refreshTokenRepository.deleteByToken(REFRESH_TOKEN_VALUE)).willReturn(true);
         given(tokenIssuer.issue(anyLong(), anyString())).willReturn(issuedTokens());
 
         TokenResult result = authService.refresh(REFRESH_TOKEN_VALUE);
@@ -173,8 +174,37 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("refresh: DB에 없지만 그레이스 피리어드가 유효하면 새 토큰을 발급한다")
-    void refresh_gracePeriodActive_issuesNewToken() {
+    @DisplayName("refresh: 만료된 토큰이면 USR-005 예외가 발생한다")
+    void refresh_expiredToken_throwsUSR005() {
+        User user = UserFixture.userWithId();
+        RefreshToken expiredToken = UserFixture.expiredRefreshToken(user.getId(), REFRESH_TOKEN_VALUE);
+        given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(expiredToken));
+        given(refreshTokenRepository.deleteByToken(REFRESH_TOKEN_VALUE)).willReturn(true);
+
+        assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
+                .isInstanceOf(UserException.class)
+                .extracting(e -> ((UserException) e).getErrorCode())
+                .isEqualTo(ErrorCode.USR_005);
+    }
+
+    @Test
+    @DisplayName("refresh: 동시 요청으로 토큰이 이미 삭제된 경우 USR-004 예외가 발생한다")
+    void refresh_concurrentRotation_throwsUSR004() {
+        User user = UserFixture.userWithId();
+        RefreshToken storedToken = UserFixture.refreshToken(user.getId(), REFRESH_TOKEN_VALUE);
+        given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(storedToken));
+        given(userRepository.findById(user.getId())).willReturn(Optional.of(user));
+        given(refreshTokenRepository.deleteByToken(REFRESH_TOKEN_VALUE)).willReturn(false);
+
+        assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
+                .isInstanceOf(UserException.class)
+                .extracting(e -> ((UserException) e).getErrorCode())
+                .isEqualTo(ErrorCode.USR_004);
+    }
+
+    @Test
+    @DisplayName("refresh: DB에 없지만 그레이스 피리어드가 유효하면 고아 토큰을 정리하고 새 토큰을 발급한다")
+    void refresh_gracePeriodActive_cleansUpAndIssuesNewToken() {
         User user = UserFixture.userWithId();
         given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
         given(tokenBlacklistPort.getGracePeriodUserId(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(user.getId()));
@@ -184,6 +214,7 @@ class AuthServiceTest {
         TokenResult result = authService.refresh(REFRESH_TOKEN_VALUE);
 
         assertThat(result.accessToken()).isEqualTo(ACCESS_TOKEN);
+        then(refreshTokenRepository).should().deleteByUserId(user.getId());
     }
 
     @Test

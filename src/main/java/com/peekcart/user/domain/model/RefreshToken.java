@@ -47,4 +47,9 @@ public class RefreshToken extends BaseTimeEntity {
     public static RefreshToken create(Long userId, String token, LocalDateTime expiresAt) {
         return new RefreshToken(userId, token, expiresAt);
     }
+
+    /** 현재 시각 기준으로 만료 여부를 반환한다. */
+    public boolean isExpired() {
+        return LocalDateTime.now().isAfter(this.expiresAt);
+    }
 }

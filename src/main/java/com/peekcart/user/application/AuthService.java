@@ -1,11 +1,11 @@
 package com.peekcart.user.application;
 
+import com.peekcart.global.auth.TokenIssuer;
 import com.peekcart.global.exception.ErrorCode;
-import com.peekcart.global.jwt.JwtProvider;
-import com.peekcart.user.domain.model.RefreshToken;
-import com.peekcart.user.domain.repository.RefreshTokenRepository;
-import com.peekcart.user.domain.model.User;
 import com.peekcart.user.domain.exception.UserException;
+import com.peekcart.user.domain.model.RefreshToken;
+import com.peekcart.user.domain.model.User;
+import com.peekcart.user.domain.repository.RefreshTokenRepository;
 import com.peekcart.user.domain.repository.UserRepository;
 import com.peekcart.user.infrastructure.redis.TokenBlacklistRepository;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
@@ -13,13 +13,10 @@ import com.peekcart.user.presentation.dto.request.SignupRequest;
 import com.peekcart.user.presentation.dto.response.TokenResponse;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
 
 /**
  * 회원가입 / 로그인 / 로그아웃 / 토큰 재발급을 처리하는 애플리케이션 서비스.
@@ -32,14 +29,8 @@ public class AuthService {
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final TokenBlacklistRepository tokenBlacklistRepository;
-    private final JwtProvider jwtProvider;
+    private final TokenIssuer tokenIssuer;
     private final PasswordEncoder passwordEncoder;
-
-    @Value("${app.jwt.access-token-expiry}")
-    private long accessTokenExpiry;
-
-    @Value("${app.jwt.refresh-token-expiry}")
-    private long refreshTokenExpiry;
 
     /**
      * 신규 회원을 등록하고 토큰을 발급한다.
@@ -82,10 +73,10 @@ public class AuthService {
      * @throws com.peekcart.user.domain.exception.UserException 유효하지 않은 토큰이면 {@code USR-004}
      */
     public void logout(String accessToken) {
-        if (!jwtProvider.isValid(accessToken)) {
+        if (!tokenIssuer.isValid(accessToken)) {
             throw new UserException(ErrorCode.USR_004);
         }
-        Claims claims = jwtProvider.parseToken(accessToken);
+        Claims claims = tokenIssuer.parseToken(accessToken);
         long ttlSeconds = (claims.getExpiration().getTime() - System.currentTimeMillis()) / 1000;
         if (ttlSeconds > 0) {
             tokenBlacklistRepository.addToBlacklist(accessToken, ttlSeconds);
@@ -133,13 +124,11 @@ public class AuthService {
     }
 
     /**
-     * 액세스 토큰과 리프레시 토큰을 생성하고 리프레시 토큰을 DB에 저장한다.
+     * 액세스 토큰과 리프레시 토큰을 발급하고 리프레시 토큰을 DB에 저장한다.
      */
     private TokenResponse issueTokens(User user) {
-        String accessToken = jwtProvider.createAccessToken(user.getId(), user.getRole().name());
-        String refreshTokenValue = UUID.randomUUID().toString();
-        LocalDateTime expiresAt = LocalDateTime.now().plusSeconds(refreshTokenExpiry / 1000);
-        refreshTokenRepository.save(RefreshToken.create(user.getId(), refreshTokenValue, expiresAt));
-        return new TokenResponse(accessToken, refreshTokenValue);
+        TokenIssuer.IssuedTokens issued = tokenIssuer.issue(user.getId(), user.getRole().name());
+        refreshTokenRepository.save(RefreshToken.create(user.getId(), issued.refreshTokenValue(), issued.refreshTokenExpiresAt()));
+        return new TokenResponse(issued.accessToken(), issued.refreshTokenValue());
     }
 }

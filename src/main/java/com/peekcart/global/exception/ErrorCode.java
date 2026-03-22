@@ -34,7 +34,8 @@ public enum ErrorCode {
 
     // System
     SYS_001(HttpStatus.INTERNAL_SERVER_ERROR, "SYS-001", "내부 서버 오류가 발생했습니다."),
-    SYS_002(HttpStatus.SERVICE_UNAVAILABLE, "SYS-002", "외부 API 호출에 실패했습니다.");
+    SYS_002(HttpStatus.SERVICE_UNAVAILABLE, "SYS-002", "외부 API 호출에 실패했습니다."),
+    SYS_004(HttpStatus.FORBIDDEN, "SYS-004", "접근 권한이 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

@@ -2,6 +2,8 @@ package com.peekcart.global.config;
 
 import com.peekcart.global.jwt.JwtFilter;
 import com.peekcart.global.jwt.JwtProvider;
+import com.peekcart.global.security.JwtAccessDeniedHandler;
+import com.peekcart.global.security.JwtAuthenticationEntryPoint;
 import com.peekcart.user.domain.repository.TokenBlacklistPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -28,6 +30,8 @@ public class SecurityConfig {
 
     private final JwtProvider jwtProvider;
     private final TokenBlacklistPort tokenBlacklistPort;
+    private final JwtAuthenticationEntryPoint authenticationEntryPoint;
+    private final JwtAccessDeniedHandler accessDeniedHandler;
 
     private static final String[] PUBLIC_URLS = {
             "/api/v1/auth/signup",
@@ -52,6 +56,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_URLS).permitAll()
                         .anyRequest().authenticated()
+                )
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler)
                 )
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 

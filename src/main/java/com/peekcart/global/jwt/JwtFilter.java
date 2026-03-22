@@ -1,6 +1,7 @@
 package com.peekcart.global.jwt;
 
 import com.peekcart.global.auth.TokenClaims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,14 +32,19 @@ public class JwtFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String token = resolveToken(request);
-        if (token != null && jwtProvider.isValid(token) && !tokenBlacklistPort.isBlacklisted(token)) {
-            TokenClaims claims = jwtProvider.parseToken(token);
-
-            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                    claims.userId(), null, List.of(new SimpleGrantedAuthority("ROLE_" + claims.role()))
-            );
-            authentication.setDetails(token);
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+        if (token != null) {
+            try {
+                TokenClaims claims = jwtProvider.parseToken(token);
+                if (!tokenBlacklistPort.isBlacklisted(token)) {
+                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                            claims.userId(), null, List.of(new SimpleGrantedAuthority("ROLE_" + claims.role()))
+                    );
+                    authentication.setDetails(token);
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
+            } catch (JwtException | IllegalArgumentException ignored) {
+                // 유효하지 않은 토큰 — SecurityContext에 인증 정보를 설정하지 않고 통과
+            }
         }
         filterChain.doFilter(request, response);
     }

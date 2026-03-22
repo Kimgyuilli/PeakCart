@@ -1,6 +1,6 @@
 package com.peekcart.global.jwt;
 
-import io.jsonwebtoken.Claims;
+import com.peekcart.global.auth.TokenClaims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,12 +34,10 @@ public class JwtFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String token = resolveToken(request);
         if (token != null && jwtProvider.isValid(token) && !tokenBlacklistRepository.isBlacklisted(token)) {
-            Claims claims = jwtProvider.parseToken(token);
-            Long userId = Long.parseLong(claims.getSubject());
-            String role = claims.get("role", String.class);
+            TokenClaims claims = jwtProvider.parseToken(token);
 
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                    userId, null, List.of(new SimpleGrantedAuthority("ROLE_" + role))
+                    claims.userId(), null, List.of(new SimpleGrantedAuthority("ROLE_" + claims.role()))
             );
             authentication.setDetails(token);
             SecurityContextHolder.getContext().setAuthentication(authentication);

@@ -2,8 +2,8 @@ package com.peekcart.user.application;
 
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.user.domain.exception.UserException;
+import com.peekcart.user.domain.model.User;
 import com.peekcart.user.domain.repository.UserRepository;
-import com.peekcart.user.presentation.dto.response.UserResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,12 +22,11 @@ public class UserQueryService {
      * 현재 로그인한 회원 정보를 조회한다.
      *
      * @param userId 조회할 회원 PK
-     * @return 회원 정보
-     * @throws com.peekcart.user.domain.exception.UserException 회원이 없으면 {@code USR-003}
+     * @return 회원 도메인 객체
+     * @throws UserException 회원이 없으면 {@code USR-003}
      */
-    public UserResponse getMe(Long userId) {
+    public User getMe(Long userId) {
         return userRepository.findById(userId)
-                .map(user -> new UserResponse(user.getId(), user.getEmail(), user.getName(), user.getRole().name()))
                 .orElseThrow(() -> new UserException(ErrorCode.USR_003));
     }
 }

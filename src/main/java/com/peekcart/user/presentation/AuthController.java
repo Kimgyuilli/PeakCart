@@ -30,17 +30,18 @@ public class AuthController {
 
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<TokenResponse>> signup(@Valid @RequestBody SignupRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.of(authService.signup(request)));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.of(TokenResponse.from(authService.signup(request))));
     }
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<TokenResponse>> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(ApiResponse.of(authService.login(request)));
+        return ResponseEntity.ok(ApiResponse.of(TokenResponse.from(authService.login(request))));
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<TokenResponse>> refresh(@Valid @RequestBody RefreshRequest request) {
-        return ResponseEntity.ok(ApiResponse.of(authService.refresh(request.refreshToken())));
+        return ResponseEntity.ok(ApiResponse.of(TokenResponse.from(authService.refresh(request.refreshToken()))));
     }
 
     @PostMapping("/logout")

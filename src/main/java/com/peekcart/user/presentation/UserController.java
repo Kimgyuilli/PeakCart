@@ -28,7 +28,7 @@ public class UserController {
     @GetMapping("/me")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<UserResponse>> getMe(@CurrentUser LoginUser loginUser) {
-        return ResponseEntity.ok(ApiResponse.of(userQueryService.getMe(loginUser.userId())));
+        return ResponseEntity.ok(ApiResponse.of(UserResponse.from(userQueryService.getMe(loginUser.userId()))));
     }
 
     @PutMapping("/me")
@@ -37,6 +37,6 @@ public class UserController {
             @CurrentUser LoginUser loginUser,
             @Valid @RequestBody UpdateProfileRequest request
     ) {
-        return ResponseEntity.ok(ApiResponse.of(userCommandService.updateMe(loginUser.userId(), request)));
+        return ResponseEntity.ok(ApiResponse.of(UserResponse.from(userCommandService.updateMe(loginUser.userId(), request))));
     }
 }

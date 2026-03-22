@@ -1,5 +1,6 @@
 package com.peekcart.user.infrastructure.redis;
 
+import com.peekcart.user.domain.repository.TokenBlacklistPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Repository;
@@ -14,7 +15,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Repository
 @RequiredArgsConstructor
-public class TokenBlacklistRepository {
+public class TokenBlacklistRepository implements TokenBlacklistPort {
 
     private static final String BLACKLIST_PREFIX = "bl:";
     private static final String GRACE_PERIOD_PREFIX = "gp:";

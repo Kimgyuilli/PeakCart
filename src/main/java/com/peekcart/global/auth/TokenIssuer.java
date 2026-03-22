@@ -1,7 +1,5 @@
 package com.peekcart.global.auth;
 
-import io.jsonwebtoken.Claims;
-
 import java.time.LocalDateTime;
 
 /**
@@ -31,9 +29,9 @@ public interface TokenIssuer {
      * 액세스 토큰을 파싱하여 클레임을 반환한다.
      *
      * @param token JWT 문자열
-     * @return 파싱된 {@link Claims}
+     * @return 파싱된 {@link TokenClaims}
      */
-    Claims parseToken(String token);
+    TokenClaims parseToken(String token);
 
     /**
      * 발급된 액세스 토큰과 리프레시 토큰 정보를 담는 값 객체.

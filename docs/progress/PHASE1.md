@@ -28,8 +28,25 @@
 - `docs/TASKS.md` 태스크 관리 문서 초기화
 - `settings.gradle` 생성
 
-**진행 중**:
-- Task 1-1: 프로젝트 초기 설정 (build.gradle, docker-compose.yml, application.yml 등)
+---
+
+### 2026-03-22
+
+#### Task 1-1: 프로젝트 초기 설정 완료
+
+**완료 항목**:
+- `build.gradle`: Spring Boot 3.5.x 기반 전체 의존성 구성 (Web, Security, JPA, Redis, MySQL, Flyway, JWT, Swagger, Lombok)
+- `docker-compose.yml`: MySQL 8.0 + Redis 7.2 로컬 환경
+- `application.yml` / `application-local.yml`: 프로파일 분리, JPA/Flyway/JWT 설정
+- `db/migration/V1__init_schema.sql`: Phase 1 전체 스키마 (13개 테이블 + 인덱스)
+- `global/response/ApiResponse`: 표준 성공 응답 포맷
+- `global/exception/ErrorCode`: 도메인별 에러 코드 체계 (USR/PRD/ORD/PAY/SYS)
+- `global/exception/BusinessException`: 추상 예외 기반 클래스
+- `global/exception/GlobalExceptionHandler`: 전역 예외 핸들러 (에러 응답 포맷 통일)
+- `global/config/SecurityConfig`: JWT 필터 연동, Stateless 세션, 공개 경로 허용
+- `global/config/RedisConfig`: 블랙리스트용 `RedisTemplate<String, String>` 설정
+- `global/jwt/JwtProvider`: Access Token 생성/검증 (jjwt 0.12.6)
+- `global/jwt/JwtFilter`: 요청별 Bearer 토큰 파싱 → SecurityContext 주입
 
 ---
 
@@ -38,6 +55,8 @@
 | 날짜 | 항목 | 결정 | 근거 |
 |------|------|------|------|
 | 2026-03-21 | 문서 구조 | `docs/01~07` 분리, README를 진입점으로 | 역할별 접근 용이성, 원본 보존 |
+| 2026-03-22 | JWT 블랙리스트 | DB 저장 + Redis 블랙리스트 분리 구조 | 영속성(DB) + 즉시 무효화(Redis) 역할 분리 |
+| 2026-03-22 | `application-local.yml` | `.gitignore` 처리 (미커밋) | 개발자별 로컬 설정 분리, 시크릿 노출 방지 |
 
 ---
 
@@ -74,8 +93,8 @@
 - [ ] 15분 타임아웃 → 주문 자동 취소 + 재고 복구
 
 ### 기술 검증
-- [ ] Docker Compose (`MySQL + Redis`) 정상 구동
-- [ ] Flyway V1 마이그레이션 정상 적용
+- [x] Docker Compose (`MySQL + Redis`) 정상 구동
+- [x] Flyway V1 마이그레이션 정상 적용
 - [ ] Swagger UI 모든 API 명세 확인
 - [ ] 단위 테스트: Domain 90%+, Application 80%+
 - [ ] 낙관적 락 (`inventories.version`) 동시성 보호 확인

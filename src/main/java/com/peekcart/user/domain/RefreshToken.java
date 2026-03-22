@@ -1,6 +1,6 @@
 package com.peekcart.user.domain;
 
-import com.peekcart.global.BaseTimeEntity;
+import com.peekcart.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;

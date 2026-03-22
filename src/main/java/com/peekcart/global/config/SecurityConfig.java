@@ -14,6 +14,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+/**
+ * Spring Security 설정. Stateless JWT 방식으로 동작하며
+ * 인증이 필요 없는 공개 URL을 제외한 모든 요청에 인증을 요구한다.
+ */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
@@ -31,6 +35,9 @@ public class SecurityConfig {
             "/api-docs/**"
     };
 
+    /**
+     * 세션 비활성화, CSRF 비활성화, JWT 필터 등록, URL 인가 규칙을 구성한다.
+     */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -45,6 +52,7 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /** BCrypt 기반 패스워드 인코더를 빈으로 등록한다. */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();

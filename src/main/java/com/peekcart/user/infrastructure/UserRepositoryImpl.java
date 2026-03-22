@@ -7,6 +7,9 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 
+/**
+ * {@link com.peekcart.user.domain.repository.UserRepository}의 JPA 구현체.
+ */
 @Repository
 @RequiredArgsConstructor
 public class UserRepositoryImpl implements UserRepository {

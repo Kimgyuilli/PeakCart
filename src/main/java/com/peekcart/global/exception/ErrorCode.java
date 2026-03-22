@@ -4,6 +4,10 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 
+/**
+ * 전 도메인에서 공통으로 사용하는 에러 코드 정의.
+ * 접두사 규칙: USR / PRD / ORD / PAY / SYS
+ */
 @Getter
 @RequiredArgsConstructor
 public enum ErrorCode {

@@ -17,6 +17,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.List;
 
+/**
+ * 요청마다 {@code Authorization} 헤더에서 Bearer 토큰을 추출하고
+ * 유효성 검증 후 {@code SecurityContext}에 인증 정보를 설정하는 필터.
+ * 블랙리스트에 등록된 토큰은 인증을 거부한다.
+ */
 @Component
 @RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
@@ -42,6 +47,11 @@ public class JwtFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    /**
+     * {@code Authorization: Bearer <token>} 헤더에서 토큰 값만 추출한다.
+     *
+     * @return 토큰 문자열, 헤더가 없거나 형식이 맞지 않으면 {@code null}
+     */
     private String resolveToken(HttpServletRequest request) {
         String header = request.getHeader("Authorization");
         if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {

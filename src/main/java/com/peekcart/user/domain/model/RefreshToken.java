@@ -8,6 +8,10 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
+/**
+ * 리프레시 토큰 도메인 엔티티.
+ * 토큰 로테이션 시 기존 레코드를 삭제하고 새 레코드를 삽입한다.
+ */
 @Entity
 @Table(name = "refresh_tokens")
 @Getter
@@ -33,6 +37,13 @@ public class RefreshToken extends BaseTimeEntity {
         this.expiresAt = expiresAt;
     }
 
+    /**
+     * 새 리프레시 토큰 인스턴스를 생성한다.
+     *
+     * @param userId    토큰 소유자 ID
+     * @param token     UUID 기반 토큰 값
+     * @param expiresAt 만료 일시
+     */
     public static RefreshToken create(Long userId, String token, LocalDateTime expiresAt) {
         return new RefreshToken(userId, token, expiresAt);
     }

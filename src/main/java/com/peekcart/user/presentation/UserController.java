@@ -13,6 +13,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * 회원 정보 API 엔드포인트.
+ * 내 정보 조회 및 프로필 수정을 처리한다.
+ */
 @RestController
 @RequestMapping("/api/v1/users")
 @RequiredArgsConstructor

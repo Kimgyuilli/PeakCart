@@ -5,6 +5,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
+/**
+ * {@link RefreshToken} 엔티티에 대한 Spring Data JPA 리포지터리.
+ */
 public interface RefreshTokenJpaRepository extends JpaRepository<RefreshToken, Long> {
     Optional<RefreshToken> findByToken(String token);
     void deleteByToken(String token);

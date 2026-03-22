@@ -32,6 +32,9 @@ public class LoginUserArgumentResolver implements HandlerMethodArgumentResolver 
     public LoginUser resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
                                      NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new IllegalStateException("인증 정보가 없습니다.");
+        }
         Long userId = (Long) authentication.getPrincipal();
         String accessToken = (String) authentication.getDetails();
         return new LoginUser(userId, accessToken);

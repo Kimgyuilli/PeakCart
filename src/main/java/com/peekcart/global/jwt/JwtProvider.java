@@ -2,6 +2,7 @@ package com.peekcart.global.jwt;
 
 import com.peekcart.global.auth.TokenClaims;
 import com.peekcart.global.auth.TokenIssuer;
+import com.peekcart.global.auth.TokenParseException;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -51,30 +52,23 @@ public class JwtProvider implements TokenIssuer {
     }
 
     /**
-     * 액세스 토큰의 서명과 만료 여부를 검사한다.
-     */
-    @Override
-    public boolean isValid(String token) {
-        try {
-            parseClaims(token);
-            return true;
-        } catch (JwtException | IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    /**
      * 액세스 토큰을 파싱하여 {@link TokenClaims}로 반환한다.
      * jjwt의 {@code Claims} 타입을 외부에 노출하지 않는다.
+     *
+     * @throws TokenParseException 서명이 유효하지 않거나 토큰이 만료된 경우
      */
     @Override
     public TokenClaims parseToken(String token) {
-        Claims claims = parseClaims(token);
-        return new TokenClaims(
-                Long.parseLong(claims.getSubject()),
-                claims.get("role", String.class),
-                claims.getExpiration().toInstant()
-        );
+        try {
+            Claims claims = parseClaims(token);
+            return new TokenClaims(
+                    Long.parseLong(claims.getSubject()),
+                    claims.get("role", String.class),
+                    claims.getExpiration().toInstant()
+            );
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new TokenParseException(e);
+        }
     }
 
     private String createAccessToken(Long userId, String role) {

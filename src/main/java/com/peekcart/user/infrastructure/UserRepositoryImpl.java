@@ -1,7 +1,7 @@
 package com.peekcart.user.infrastructure;
 
-import com.peekcart.user.domain.User;
-import com.peekcart.user.domain.UserRepository;
+import com.peekcart.user.domain.model.User;
+import com.peekcart.user.domain.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 

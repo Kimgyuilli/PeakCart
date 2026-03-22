@@ -1,4 +1,4 @@
-package com.peekcart.user.domain;
+package com.peekcart.user.domain.model;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;

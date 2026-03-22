@@ -1,4 +1,4 @@
-package com.peekcart.user.domain;
+package com.peekcart.user.domain.model;
 
 import com.peekcart.global.entity.BaseTimeEntity;
 import jakarta.persistence.*;

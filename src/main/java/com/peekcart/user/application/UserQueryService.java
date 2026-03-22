@@ -1,8 +1,8 @@
 package com.peekcart.user.application;
 
 import com.peekcart.global.exception.ErrorCode;
-import com.peekcart.user.domain.UserException;
-import com.peekcart.user.domain.UserRepository;
+import com.peekcart.user.domain.exception.UserException;
+import com.peekcart.user.domain.repository.UserRepository;
 import com.peekcart.user.presentation.dto.response.UserResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

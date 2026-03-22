@@ -3,7 +3,7 @@ package com.peekcart.user.presentation;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.global.response.ApiResponse;
 import com.peekcart.user.application.AuthService;
-import com.peekcart.user.domain.UserException;
+import com.peekcart.user.domain.exception.UserException;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
 import com.peekcart.user.presentation.dto.request.RefreshRequest;
 import com.peekcart.user.presentation.dto.request.SignupRequest;

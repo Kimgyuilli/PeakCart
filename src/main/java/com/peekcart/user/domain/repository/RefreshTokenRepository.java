@@ -1,4 +1,6 @@
-package com.peekcart.user.domain;
+package com.peekcart.user.domain.repository;
+
+import com.peekcart.user.domain.model.RefreshToken;
 
 import java.util.Optional;
 

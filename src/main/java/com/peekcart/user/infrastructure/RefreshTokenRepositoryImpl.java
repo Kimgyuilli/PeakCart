@@ -1,7 +1,7 @@
 package com.peekcart.user.infrastructure;
 
-import com.peekcart.user.domain.RefreshToken;
-import com.peekcart.user.domain.RefreshTokenRepository;
+import com.peekcart.user.domain.model.RefreshToken;
+import com.peekcart.user.domain.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 

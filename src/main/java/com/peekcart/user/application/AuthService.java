@@ -2,11 +2,11 @@ package com.peekcart.user.application;
 
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.global.jwt.JwtProvider;
-import com.peekcart.user.domain.RefreshToken;
-import com.peekcart.user.domain.RefreshTokenRepository;
-import com.peekcart.user.domain.User;
-import com.peekcart.user.domain.UserException;
-import com.peekcart.user.domain.UserRepository;
+import com.peekcart.user.domain.model.RefreshToken;
+import com.peekcart.user.domain.repository.RefreshTokenRepository;
+import com.peekcart.user.domain.model.User;
+import com.peekcart.user.domain.exception.UserException;
+import com.peekcart.user.domain.repository.UserRepository;
 import com.peekcart.user.infrastructure.redis.TokenBlacklistRepository;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
 import com.peekcart.user.presentation.dto.request.SignupRequest;

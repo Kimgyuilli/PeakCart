@@ -1,4 +1,4 @@
-package com.peekcart.user.domain;
+package com.peekcart.user.domain.exception;
 
 import com.peekcart.global.exception.BusinessException;
 import com.peekcart.global.exception.ErrorCode;

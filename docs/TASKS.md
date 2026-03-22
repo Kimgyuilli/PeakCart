@@ -23,7 +23,7 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `settings.gradle` 생성 | ✅ | |
+| `settings.gradle` 생성 | 🔲 | |
 | `build.gradle` 작성 (의존성 포함) | 🔲 | |
 | `docker-compose.yml` 작성 (MySQL + Redis) | 🔲 | |
 | `application.yml` / `application-local.yml` | 🔲 | |
@@ -37,7 +37,6 @@
 | `global/config/RedisConfig.java` | 🔲 | JWT 블랙리스트 전용 |
 | `global/jwt/JwtProvider.java` | 🔲 | |
 | `global/jwt/JwtFilter.java` | 🔲 | |
-
 **완료 기준**: 애플리케이션 구동 + Swagger UI 접근 + Docker Compose 정상 실행
 
 ---
@@ -178,4 +177,4 @@
 | 2026-03-21 | 문서 구조화 | README.md(진입점), docs/01~07 분리, 00-lagacy.md 보존 |
 | 2026-03-21 | CLAUDE.md | 프로젝트 규칙 추가 |
 | 2026-03-21 | TASKS.md | 태스크 관리 문서 초기화 |
-| 2026-03-21 | settings.gradle | 루트 프로젝트 설정 |
+| 2026-03-22 | Task 1-1 | 프로젝트 초기 설정 완료 (Gradle, Docker Compose, Flyway 스키마, global 공통 클래스) |

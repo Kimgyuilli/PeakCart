@@ -1,6 +1,8 @@
 package com.peekcart.global.config;
 
 import com.peekcart.global.jwt.JwtFilter;
+import com.peekcart.global.jwt.JwtProvider;
+import com.peekcart.user.domain.repository.TokenBlacklistPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,7 +26,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JwtFilter jwtFilter;
+    private final JwtProvider jwtProvider;
+    private final TokenBlacklistPort tokenBlacklistPort;
 
     private static final String[] PUBLIC_URLS = {
             "/api/v1/auth/signup",
@@ -37,9 +40,12 @@ public class SecurityConfig {
 
     /**
      * 세션 비활성화, CSRF 비활성화, JWT 필터 등록, URL 인가 규칙을 구성한다.
+     * {@link JwtFilter}는 빈으로 등록하지 않고 여기서 직접 생성하여 컴포넌트 스캔 대상에서 제외한다.
      */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        JwtFilter jwtFilter = new JwtFilter(jwtProvider, tokenBlacklistPort);
+
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

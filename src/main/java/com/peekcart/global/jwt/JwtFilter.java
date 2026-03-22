@@ -5,12 +5,11 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import com.peekcart.user.infrastructure.redis.TokenBlacklistRepository;
+import com.peekcart.user.domain.repository.TokenBlacklistPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -22,18 +21,17 @@ import java.util.List;
  * 유효성 검증 후 {@code SecurityContext}에 인증 정보를 설정하는 필터.
  * 블랙리스트에 등록된 토큰은 인증을 거부한다.
  */
-@Component
 @RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
-    private final TokenBlacklistRepository tokenBlacklistRepository;
+    private final TokenBlacklistPort tokenBlacklistPort;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String token = resolveToken(request);
-        if (token != null && jwtProvider.isValid(token) && !tokenBlacklistRepository.isBlacklisted(token)) {
+        if (token != null && jwtProvider.isValid(token) && !tokenBlacklistPort.isBlacklisted(token)) {
             TokenClaims claims = jwtProvider.parseToken(token);
 
             UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(

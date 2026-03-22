@@ -1,7 +1,9 @@
 package com.peekcart.user.application;
 
+import com.peekcart.global.auth.TokenBlacklistPort;
 import com.peekcart.global.auth.TokenClaims;
 import com.peekcart.global.auth.TokenIssuer;
+import com.peekcart.global.auth.TokenParseException;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.support.ServiceTest;
 import com.peekcart.support.fixture.UserFixture;
@@ -10,7 +12,6 @@ import com.peekcart.user.domain.exception.UserException;
 import com.peekcart.user.domain.model.RefreshToken;
 import com.peekcart.user.domain.model.User;
 import com.peekcart.user.domain.repository.RefreshTokenRepository;
-import com.peekcart.user.domain.repository.TokenBlacklistPort;
 import com.peekcart.user.domain.repository.UserRepository;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
 import com.peekcart.user.presentation.dto.request.SignupRequest;
@@ -134,7 +135,6 @@ class AuthServiceTest {
     @DisplayName("logout: 유효한 토큰이면 블랙리스트 등록 후 리프레시 토큰을 삭제한다")
     void logout_success() {
         Instant expiration = Instant.now().plusSeconds(3600);
-        given(tokenIssuer.isValid(ACCESS_TOKEN)).willReturn(true);
         given(tokenIssuer.parseToken(ACCESS_TOKEN)).willReturn(tokenClaims(1L, expiration));
 
         authService.logout(ACCESS_TOKEN);
@@ -146,7 +146,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("logout: 유효하지 않은 토큰이면 USR-004 예외가 발생한다")
     void logout_invalidToken_throwsUSR004() {
-        given(tokenIssuer.isValid(ACCESS_TOKEN)).willReturn(false);
+        given(tokenIssuer.parseToken(ACCESS_TOKEN)).willThrow(new TokenParseException(new RuntimeException()));
 
         assertThatThrownBy(() -> authService.logout(ACCESS_TOKEN))
                 .isInstanceOf(UserException.class)
@@ -207,7 +207,7 @@ class AuthServiceTest {
     void refresh_gracePeriodActive_cleansUpAndIssuesNewToken() {
         User user = UserFixture.userWithId();
         given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
-        given(tokenBlacklistPort.getGracePeriodUserId(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(user.getId()));
+        given(tokenBlacklistPort.consumeGracePeriod(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(user.getId()));
         given(userRepository.findById(user.getId())).willReturn(Optional.of(user));
         given(tokenIssuer.issue(anyLong(), anyString())).willReturn(issuedTokens());
 
@@ -221,7 +221,7 @@ class AuthServiceTest {
     @DisplayName("refresh: DB에 없고 그레이스 피리어드도 만료되면 USR-004 예외가 발생한다")
     void refresh_gracePeriodExpired_throwsUSR004() {
         given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
-        given(tokenBlacklistPort.getGracePeriodUserId(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
+        given(tokenBlacklistPort.consumeGracePeriod(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
                 .isInstanceOf(UserException.class)

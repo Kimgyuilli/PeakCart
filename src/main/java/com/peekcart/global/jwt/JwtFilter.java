@@ -1,12 +1,12 @@
 package com.peekcart.global.jwt;
 
+import com.peekcart.global.auth.TokenBlacklistPort;
 import com.peekcart.global.auth.TokenClaims;
-import io.jsonwebtoken.JwtException;
+import com.peekcart.global.auth.TokenParseException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import com.peekcart.user.domain.repository.TokenBlacklistPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -42,7 +42,7 @@ public class JwtFilter extends OncePerRequestFilter {
                     authentication.setDetails(token);
                     SecurityContextHolder.getContext().setAuthentication(authentication);
                 }
-            } catch (JwtException | IllegalArgumentException ignored) {
+            } catch (TokenParseException ignored) {
                 // 유효하지 않은 토큰 — SecurityContext에 인증 정보를 설정하지 않고 통과
             }
         }

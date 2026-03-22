@@ -4,7 +4,7 @@ import com.peekcart.global.jwt.JwtFilter;
 import com.peekcart.global.jwt.JwtProvider;
 import com.peekcart.global.security.JwtAccessDeniedHandler;
 import com.peekcart.global.security.JwtAuthenticationEntryPoint;
-import com.peekcart.user.domain.repository.TokenBlacklistPort;
+import com.peekcart.global.auth.TokenBlacklistPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

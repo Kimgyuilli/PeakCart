@@ -1,6 +1,6 @@
 package com.peekcart.user.infrastructure.redis;
 
-import com.peekcart.user.domain.repository.TokenBlacklistPort;
+import com.peekcart.global.auth.TokenBlacklistPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Repository;
@@ -54,13 +54,14 @@ public class TokenBlacklistRepository implements TokenBlacklistPort {
     }
 
     /**
-     * 그레이스 피리어드가 유효한 토큰에서 소유자 ID를 조회한다.
+     * 그레이스 피리어드가 유효한 토큰에서 소유자 ID를 원자적으로 조회하고 즉시 삭제한다.
+     * Redis GETDEL 명령어로 조회와 삭제가 원자적으로 처리되어 동시 요청에 의한 이중 발급을 방지한다.
      *
      * @param token 구 리프레시 토큰
-     * @return 소유자 userId, 그레이스 피리어드가 만료됐으면 {@code empty}
+     * @return 소유자 userId, 그레이스 피리어드가 없거나 만료됐으면 {@code empty}
      */
-    public Optional<Long> getGracePeriodUserId(String token) {
-        String value = redisTemplate.opsForValue().get(GRACE_PERIOD_PREFIX + token);
+    public Optional<Long> consumeGracePeriod(String token) {
+        String value = redisTemplate.opsForValue().getAndDelete(GRACE_PERIOD_PREFIX + token);
         return Optional.ofNullable(value).map(Long::parseLong);
     }
 }

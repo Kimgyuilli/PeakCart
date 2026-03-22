@@ -1,14 +1,15 @@
 package com.peekcart.user.application;
 
+import com.peekcart.global.auth.TokenBlacklistPort;
 import com.peekcart.global.auth.TokenClaims;
 import com.peekcart.global.auth.TokenIssuer;
+import com.peekcart.global.auth.TokenParseException;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.user.application.dto.TokenResult;
 import com.peekcart.user.domain.exception.UserException;
 import com.peekcart.user.domain.model.RefreshToken;
 import com.peekcart.user.domain.model.User;
 import com.peekcart.user.domain.repository.RefreshTokenRepository;
-import com.peekcart.user.domain.repository.TokenBlacklistPort;
 import com.peekcart.user.domain.repository.UserRepository;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
 import com.peekcart.user.presentation.dto.request.SignupRequest;
@@ -67,15 +68,19 @@ public class AuthService {
 
     /**
      * 액세스 토큰을 블랙리스트에 등록하고 모든 리프레시 토큰을 삭제한다.
+     * 정상 흐름에서 이 메서드는 JwtFilter를 통과한 유효한 토큰만 받으나,
+     * 방어적으로 파싱 실패 시 USR-004를 던진다.
      *
      * @param accessToken 로그아웃할 액세스 토큰
      * @throws UserException 유효하지 않은 토큰이면 {@code USR-004}
      */
     public void logout(String accessToken) {
-        if (!tokenIssuer.isValid(accessToken)) {
+        TokenClaims claims;
+        try {
+            claims = tokenIssuer.parseToken(accessToken);
+        } catch (TokenParseException e) {
             throw new UserException(ErrorCode.USR_004);
         }
-        TokenClaims claims = tokenIssuer.parseToken(accessToken);
         long ttlSeconds = (claims.expiration().toEpochMilli() - System.currentTimeMillis()) / 1000;
         if (ttlSeconds > 0) {
             tokenBlacklistPort.addToBlacklist(accessToken, ttlSeconds);
@@ -114,7 +119,7 @@ public class AuthService {
     }
 
     private TokenResult refreshViaGracePeriod(String oldRefreshToken) {
-        Long userId = tokenBlacklistPort.getGracePeriodUserId(oldRefreshToken)
+        Long userId = tokenBlacklistPort.consumeGracePeriod(oldRefreshToken)
                 .orElseThrow(() -> new UserException(ErrorCode.USR_004));
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserException(ErrorCode.USR_003));

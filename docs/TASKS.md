@@ -18,25 +18,25 @@
 ## Phase 1 Tasks
 
 ### Task 1-1: 프로젝트 초기 설정
-**상태**: 🔄 진행 중
+**상태**: ✅ 완료
 **목표**: 빌드 구성, 공통 구조, 로컬 개발 환경 세팅 완료
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `settings.gradle` 생성 | 🔲 | |
-| `build.gradle` 작성 (의존성 포함) | 🔲 | |
-| `docker-compose.yml` 작성 (MySQL + Redis) | 🔲 | |
-| `application.yml` / `application-local.yml` | 🔲 | |
-| `V1__init_schema.sql` Flyway 초기 스키마 | 🔲 | Phase 1 ERD 기준 |
-| `PeekCartApplication.java` | 🔲 | |
-| `global/response/ApiResponse.java` | 🔲 | 표준 응답 포맷 |
-| `global/exception/ErrorCode.java` | 🔲 | 도메인별 에러 코드 |
-| `global/exception/BusinessException.java` | 🔲 | 추상 예외 클래스 |
-| `global/exception/GlobalExceptionHandler.java` | 🔲 | |
-| `global/config/SecurityConfig.java` | 🔲 | |
-| `global/config/RedisConfig.java` | 🔲 | JWT 블랙리스트 전용 |
-| `global/jwt/JwtProvider.java` | 🔲 | |
-| `global/jwt/JwtFilter.java` | 🔲 | |
+| `settings.gradle` 생성 | ✅ | |
+| `build.gradle` 작성 (의존성 포함) | ✅ | |
+| `docker-compose.yml` 작성 (MySQL + Redis) | ✅ | |
+| `application.yml` / `application-local.yml` | ✅ | |
+| `V1__init_schema.sql` Flyway 초기 스키마 | ✅ | Phase 1 ERD 기준 |
+| `PeekCartApplication.java` | ✅ | |
+| `global/response/ApiResponse.java` | ✅ | 표준 응답 포맷 |
+| `global/exception/ErrorCode.java` | ✅ | 도메인별 에러 코드 |
+| `global/exception/BusinessException.java` | ✅ | 추상 예외 클래스 |
+| `global/exception/GlobalExceptionHandler.java` | ✅ | |
+| `global/config/SecurityConfig.java` | ✅ | |
+| `global/config/RedisConfig.java` | ✅ | JWT 블랙리스트 전용 |
+| `global/jwt/JwtProvider.java` | ✅ | |
+| `global/jwt/JwtFilter.java` | ✅ | |
 **완료 기준**: 애플리케이션 구동 + Swagger UI 접근 + Docker Compose 정상 실행
 
 ---

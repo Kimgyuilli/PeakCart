@@ -5,6 +5,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import com.peekcart.user.infrastructure.redis.TokenBlacklistRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -21,12 +22,13 @@ import java.util.List;
 public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
+    private final TokenBlacklistRepository tokenBlacklistRepository;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String token = resolveToken(request);
-        if (token != null && jwtProvider.isValid(token)) {
+        if (token != null && jwtProvider.isValid(token) && !tokenBlacklistRepository.isBlacklisted(token)) {
             Claims claims = jwtProvider.parseToken(token);
             Long userId = Long.parseLong(claims.getSubject());
             String role = claims.get("role", String.class);

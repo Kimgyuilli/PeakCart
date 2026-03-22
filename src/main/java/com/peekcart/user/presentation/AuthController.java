@@ -1,19 +1,16 @@
 package com.peekcart.user.presentation;
 
-import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.global.response.ApiResponse;
 import com.peekcart.user.application.AuthService;
-import com.peekcart.user.domain.exception.UserException;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
 import com.peekcart.user.presentation.dto.request.RefreshRequest;
 import com.peekcart.user.presentation.dto.request.SignupRequest;
 import com.peekcart.user.presentation.dto.response.TokenResponse;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.util.StringUtils;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,12 +39,9 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request) {
-        String header = request.getHeader("Authorization");
-        if (!StringUtils.hasText(header) || !header.startsWith("Bearer ")) {
-            throw new UserException(ErrorCode.USR_004);
-        }
-        authService.logout(header.substring(7));
+    public ResponseEntity<ApiResponse<Void>> logout(Authentication authentication) {
+        String token = (String) authentication.getDetails();
+        authService.logout(token);
         return ResponseEntity.ok(ApiResponse.ok());
     }
 }

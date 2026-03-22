@@ -53,6 +53,4 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(errorCode.getHttpStatus().value(), errorCode.getCode(), errorCode.getMessage(), Instant.now()));
     }
 
-    /** 에러 응답 본문 포맷. */
-    public record ErrorResponse(int status, String code, String message, Instant timestamp) {}
 }

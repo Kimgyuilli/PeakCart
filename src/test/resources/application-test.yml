@@ -1,0 +1,5 @@
+app:
+  jwt:
+    secret: test-secret-key-that-is-at-least-32-bytes-long-ok
+    access-token-expiry: 3600000    # 1시간
+    refresh-token-expiry: 604800000 # 7일

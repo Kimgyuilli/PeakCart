@@ -42,21 +42,23 @@
 ---
 
 ### Task 1-2: User 도메인
-**상태**: 🔲 대기
+**상태**: ✅ 완료
 **목표**: 회원가입/로그인, JWT 인증, RBAC 구현
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `User` Entity + 비즈니스 로직 | 🔲 | |
-| `RefreshToken` Entity | 🔲 | DB 저장 |
-| `Address` Entity | 🔲 | |
-| `UserRole` Enum (VO) | 🔲 | |
-| `UserRepository` 인터페이스 | 🔲 | |
-| `UserRepositoryImpl` + `UserJpaRepository` | 🔲 | |
-| `TokenBlacklistRepository` (Redis) | 🔲 | 블랙리스트 전용 |
-| `AuthService` — 회원가입/로그인/로그아웃/토큰 재발급 | 🔲 | Grace Period 포함 |
-| `UserCommandService` / `UserQueryService` | 🔲 | |
-| `AuthController` / `UserController` | 🔲 | |
+| `User` Entity + 비즈니스 로직 | ✅ | BaseEntity 상속, create/matchesPassword/updateProfile |
+| `RefreshToken` Entity | ✅ | BaseTimeEntity 상속, DB 저장 |
+| `Address` Entity | ✅ | |
+| `UserRole` Enum (VO) | ✅ | |
+| `UserRepository` 인터페이스 | ✅ | |
+| `UserRepositoryImpl` + `UserJpaRepository` | ✅ | |
+| `RefreshTokenRepository` 인터페이스 | ✅ | |
+| `RefreshTokenRepositoryImpl` + `RefreshTokenJpaRepository` | ✅ | |
+| `TokenBlacklistRepository` (Redis) | ✅ | 블랙리스트(bl:) + 그레이스 피리어드(gp:) |
+| `AuthService` — 회원가입/로그인/로그아웃/토큰 재발급 | ✅ | Grace Period 포함 |
+| `UserCommandService` / `UserQueryService` | ✅ | |
+| `AuthController` / `UserController` | ✅ | |
 | 단위 테스트 (Domain + Application) | 🔲 | 커버리지 90%+ |
 | 슬라이스 테스트 (Presentation) | 🔲 | |
 
@@ -178,3 +180,4 @@
 | 2026-03-21 | CLAUDE.md | 프로젝트 규칙 추가 |
 | 2026-03-21 | TASKS.md | 태스크 관리 문서 초기화 |
 | 2026-03-22 | Task 1-1 | 프로젝트 초기 설정 완료 (Gradle, Docker Compose, Flyway 스키마, global 공통 클래스) |
+| 2026-03-22 | Task 1-2 | User 도메인 구현 완료 (회원가입/로그인/로그아웃/토큰 재발급, JWT 인증, RBAC, Grace Period) |

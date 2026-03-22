@@ -48,6 +48,24 @@
 - `global/jwt/JwtProvider`: Access Token 생성/검증 (jjwt 0.12.6)
 - `global/jwt/JwtFilter`: 요청별 Bearer 토큰 파싱 → SecurityContext 주입
 
+#### Task 1-2: User 도메인 구현 완료
+
+**완료 항목**:
+- `global/entity/BaseTimeEntity` / `BaseEntity`: created_at / updated_at 공통 필드 계층 분리
+- `global/auth/TokenIssuer`: 토큰 발급 추상화 인터페이스 (isValid, parseToken 포함)
+- `global/auth/LoginUser` / `@CurrentUser` / `LoginUserArgumentResolver`: Controller 인증 정보 추출 분리
+- `global/config/WebMvcConfig`: ArgumentResolver 등록
+- `user/domain/model/`: User, RefreshToken, Address, UserRole (model/repository/exception 패키지 분리)
+- `user/domain/repository/`: UserRepository, RefreshTokenRepository 인터페이스
+- `user/infrastructure/`: UserJpaRepository, UserRepositoryImpl, RefreshTokenJpaRepository, RefreshTokenRepositoryImpl
+- `user/infrastructure/redis/TokenBlacklistRepository`: 블랙리스트(bl:) + 그레이스 피리어드(gp:) Redis 저장소
+- `user/application/AuthService`: 회원가입/로그인/로그아웃/토큰 재발급 (Refresh Token Rotation + Grace Period 10초)
+- `user/application/UserCommandService` / `UserQueryService`
+- `user/presentation/AuthController` / `UserController` + DTO (request/response 패키지 분리)
+- `global/config/SecurityConfig`: logout 엔드포인트 인증 필수화
+- `global/jwt/JwtFilter`: 블랙리스트 검증 + `setDetails(token)` 추가
+- 전체 소스 파일 JavaDoc 주석 추가 (37개 파일)
+
 ---
 
 ## 주요 결정 사항
@@ -57,6 +75,10 @@
 | 2026-03-21 | 문서 구조 | `docs/01~07` 분리, README를 진입점으로 | 역할별 접근 용이성, 원본 보존 |
 | 2026-03-22 | JWT 블랙리스트 | DB 저장 + Redis 블랙리스트 분리 구조 | 영속성(DB) + 즉시 무효화(Redis) 역할 분리 |
 | 2026-03-22 | `application-local.yml` | `.gitignore` 처리 (미커밋) | 개발자별 로컬 설정 분리, 시크릿 노출 방지 |
+| 2026-03-22 | BaseEntity 계층 | `BaseTimeEntity`(created_at) → `BaseEntity`(+updated_at) 분리 | RefreshToken은 updated_at 컬럼 없음, ddl-auto: validate 충돌 방지 |
+| 2026-03-22 | logout 인증 필수화 | PUBLIC_URLS에서 logout 제거, JwtFilter setDetails(token) 추가 | 로그아웃 요청 자체가 유효한 토큰을 블랙리스트에 등록하는 행위이므로 인증 필요 |
+| 2026-03-22 | ArgumentResolver 도입 | `@CurrentUser LoginUser`로 Controller 인증 정보 추출 분리 | Controller가 SecurityContext를 직접 다루지 않도록 관심사 분리 |
+| 2026-03-22 | TokenIssuer 인터페이스 | Application 레이어가 JwtProvider 구현에 직접 의존하지 않도록 역전 | refreshTokenExpiry, UUID 생성 등 인프라 세부사항을 Application 레이어에서 제거 |
 
 ---
 
@@ -70,11 +92,11 @@
 ## Phase 1 완료 시 체크리스트
 
 ### 기능 동작
-- [ ] `POST /api/v1/auth/signup` — 회원가입
-- [ ] `POST /api/v1/auth/login` — 로그인 (JWT 발급)
-- [ ] `POST /api/v1/auth/refresh` — 토큰 재발급 (Grace Period)
-- [ ] `POST /api/v1/auth/logout` — 로그아웃 (Redis 블랙리스트)
-- [ ] `GET/PUT /api/v1/users/me` — 내 정보 조회/수정
+- [x] `POST /api/v1/auth/signup` — 회원가입
+- [x] `POST /api/v1/auth/login` — 로그인 (JWT 발급)
+- [x] `POST /api/v1/auth/refresh` — 토큰 재발급 (Grace Period)
+- [x] `POST /api/v1/auth/logout` — 로그아웃 (Redis 블랙리스트)
+- [x] `GET/PUT /api/v1/users/me` — 내 정보 조회/수정
 - [ ] `GET /api/v1/products` — 상품 목록 (페이징, 카테고리 필터)
 - [ ] `GET /api/v1/products/{id}` — 상품 상세
 - [ ] 관리자 상품 CRUD (`/api/v1/admin/products`)

@@ -6,5 +6,5 @@ public interface RefreshTokenRepository {
     Optional<RefreshToken> findByToken(String token);
     void deleteByToken(String token);
     void deleteByUserId(Long userId);
-    RefreshToken save(RefreshToken refreshToken);
+    void save(RefreshToken refreshToken);
 }

@@ -1,4 +1,4 @@
-package com.peekcart.user.presentation.dto;
+package com.peekcart.user.presentation.dto.response;
 
 public record UserResponse(
         Long id,

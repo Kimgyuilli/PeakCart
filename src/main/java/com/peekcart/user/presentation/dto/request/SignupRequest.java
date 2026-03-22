@@ -1,4 +1,4 @@
-package com.peekcart.user.presentation.dto;
+package com.peekcart.user.presentation.dto.request;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;

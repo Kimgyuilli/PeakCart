@@ -28,6 +28,9 @@ public enum ErrorCode {
     ORD_001(HttpStatus.NOT_FOUND, "ORD-001", "주문을 찾을 수 없습니다."),
     ORD_002(HttpStatus.BAD_REQUEST, "ORD-002", "이미 취소된 주문입니다."),
     ORD_003(HttpStatus.BAD_REQUEST, "ORD-003", "유효하지 않은 주문 상태 전이입니다."),
+    ORD_004(HttpStatus.BAD_REQUEST, "ORD-004", "장바구니가 비어있습니다."),
+    ORD_005(HttpStatus.BAD_REQUEST, "ORD-005", "수량은 1 이상이어야 합니다."),
+    ORD_006(HttpStatus.NOT_FOUND, "ORD-006", "장바구니를 찾을 수 없습니다."),
 
     // Payment
     PAY_001(HttpStatus.BAD_REQUEST, "PAY-001", "결제 금액이 일치하지 않습니다."),

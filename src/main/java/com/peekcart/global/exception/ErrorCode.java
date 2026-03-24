@@ -22,6 +22,7 @@ public enum ErrorCode {
     // Product
     PRD_001(HttpStatus.NOT_FOUND, "PRD-001", "상품을 찾을 수 없습니다."),
     PRD_002(HttpStatus.CONFLICT, "PRD-002", "재고가 부족합니다."),
+    PRD_003(HttpStatus.NOT_FOUND, "PRD-003", "카테고리를 찾을 수 없습니다."),
 
     // Order
     ORD_001(HttpStatus.NOT_FOUND, "ORD-001", "주문을 찾을 수 없습니다."),

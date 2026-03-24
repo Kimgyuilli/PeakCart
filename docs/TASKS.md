@@ -67,7 +67,7 @@
 ---
 
 ### Task 1-3: Product 도메인
-**상태**: 🔄 진행 중
+**상태**: ✅ 완료
 **목표**: 상품 CRUD (관리자), 목록/상세 조회, 재고 관리
 
 | 항목 | 상태 | 비고 |
@@ -81,7 +81,7 @@
 | `ProductQueryService` (목록/상세, 페이징) | ✅ | ON_SALE 필터, categoryId 옵션 |
 | `InventoryService` (재고 차감/복구) | ✅ | Order 도메인 호출 대상 |
 | `ProductController` / `AdminProductController` | ✅ | RBAC 적용, SecurityConfig 공개 URL 추가 |
-| 단위 테스트 | 🔲 | 코드 리뷰 후 작성 예정 |
+| 단위 테스트 | ✅ | Domain 11건 + Application 16건 + Presentation 10건, 전부 통과 |
 
 **완료 기준**: 상품 등록 → 목록 조회 (페이징/카테고리 필터) → 상세 조회 정상 동작
 
@@ -181,4 +181,4 @@
 | 2026-03-21 | TASKS.md | 태스크 관리 문서 초기화 |
 | 2026-03-22 | Task 1-1 | 프로젝트 초기 설정 완료 (Gradle, Docker Compose, Flyway 스키마, global 공통 클래스) |
 | 2026-03-22 | Task 1-2 | User 도메인 구현 완료 (회원가입/로그인/로그아웃/토큰 재발급, JWT 인증, RBAC, Grace Period) |
-| 2026-03-25 | Task 1-3 (진행 중) | Product 도메인 프로덕션 코드 완료 (엔티티, Repository, 서비스, Controller, SecurityConfig) — 단위 테스트 미작성 |
+| 2026-03-25 | Task 1-3 | Product 도메인 완료 (엔티티, Repository, 서비스, Controller, 코드리뷰 개선, 단위 테스트 37건) |

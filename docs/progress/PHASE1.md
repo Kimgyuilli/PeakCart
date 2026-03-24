@@ -66,6 +66,34 @@
 - `global/jwt/JwtFilter`: 블랙리스트 검증 + `setDetails(token)` 추가
 - 전체 소스 파일 JavaDoc 주석 추가 (37개 파일)
 
+### 2026-03-25
+
+#### Task 1-3: Product 도메인 구현 (프로덕션 코드)
+
+**완료 항목**:
+- `product/domain/model/ProductStatus`: ON_SALE / SOLD_OUT / DISCONTINUED Enum
+- `product/domain/model/Category`: 자기 참조(parent_id) 엔티티, 타임스탬프 없음
+- `product/domain/model/Product`: BaseTimeEntity 상속, update/discontinue/isOnSale 비즈니스 메서드
+- `product/domain/model/Inventory`: @Version 낙관적 락, @UpdateTimestamp, decrease/restore 비즈니스 메서드
+- `product/domain/exception/ProductException`: BusinessException 상속
+- `product/domain/repository/`: ProductRepository, CategoryRepository, InventoryRepository 인터페이스
+- `product/infrastructure/`: JPA Repository 3개 + RepositoryImpl 3개
+- `global/exception/ErrorCode`: PRD_003(카테고리 미존재) 추가
+- `product/application/ProductCommandService`: create(Product+Inventory 단일 트랜잭션), update, delete(soft)
+- `product/application/ProductQueryService`: ON_SALE 목록 페이징, categoryId 필터, 상세 조회
+- `product/application/InventoryService`: decreaseStock/restoreStock (Order 도메인 호출 대상)
+- `product/application/dto/ProductDetailDto`: Application 레이어 DTO
+- `product/presentation/dto/request/`: CreateProductRequest, UpdateProductRequest
+- `product/presentation/dto/response/`: ProductResponse(목록용), ProductDetailResponse(상세용)
+- `product/presentation/ProductController`: GET /api/v1/products, GET /api/v1/products/{id} (공개)
+- `product/presentation/AdminProductController`: POST/PUT/DELETE /api/v1/admin/products (hasRole ADMIN)
+- `global/config/SecurityConfig`: /api/v1/products/** 공개 URL 추가
+
+**미완료 항목**:
+- 단위 테스트: 코드 리뷰 후 작성 예정
+
+---
+
 ### 2026-03-23
 
 #### Task 1-2: 테스트 코드 완성 및 아키텍처 정제
@@ -103,6 +131,9 @@
 | 2026-03-23 | Application DTO 분리 | `AuthService` → `TokenResult`, `UserService` → `User` 반환 / Presentation에서 Response DTO로 변환 | Application 레이어가 Presentation DTO에 의존하지 않도록 경계 정리 |
 | 2026-03-23 | JwtFilter `@Component` 제거 | `SecurityConfig`에서 직접 생성 | `@WebMvcTest` 슬라이스 테스트 시 JwtFilter가 컴포넌트 스캔에 포함되어 JwtProvider 빈 미등록으로 실패하는 문제 해결 |
 | 2026-03-23 | Infrastructure 통합 테스트 제거 | Testcontainer 의존 통합 테스트 전면 제거 | 문제가 자주 발생하는 부분에만 집중, CI 환경 구성 시 재도입 예정 |
+| 2026-03-25 | Inventory 베이스 클래스 미상속 | `Inventory`는 `BaseEntity` 상속 없이 `@UpdateTimestamp` 직접 선언 | `inventories` 테이블에 `created_at` 없음, `ddl-auto: validate` 충돌 방지 (RefreshToken과 동일 사유) |
+| 2026-03-25 | 상품 삭제 soft delete | DELETE API → `status = DISCONTINUED` 전환 | `order_items.product_id` FK 참조 무결성 보존 |
+| 2026-03-25 | Product+Inventory 단일 트랜잭션 | `ProductCommandService.create()`에서 상품과 초기 재고를 하나의 트랜잭션으로 생성 | 상품 등록 후 재고 없는 상태 방지 |
 
 ---
 
@@ -121,9 +152,9 @@
 - [x] `POST /api/v1/auth/refresh` — 토큰 재발급 (Grace Period)
 - [x] `POST /api/v1/auth/logout` — 로그아웃 (Redis 블랙리스트)
 - [x] `GET/PUT /api/v1/users/me` — 내 정보 조회/수정
-- [ ] `GET /api/v1/products` — 상품 목록 (페이징, 카테고리 필터)
-- [ ] `GET /api/v1/products/{id}` — 상품 상세
-- [ ] 관리자 상품 CRUD (`/api/v1/admin/products`)
+- [x] `GET /api/v1/products` — 상품 목록 (페이징, 카테고리 필터)
+- [x] `GET /api/v1/products/{id}` — 상품 상세
+- [x] 관리자 상품 CRUD (`/api/v1/admin/products`)
 - [ ] 장바구니 CRUD (`/api/v1/cart`)
 - [ ] `POST /api/v1/orders` — 주문 생성 (재고 즉시 차감)
 - [ ] `POST /api/v1/orders/{id}/cancel` — 주문 취소

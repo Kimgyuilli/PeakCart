@@ -4,11 +4,10 @@ import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.dto.AddCartItemCommand;
 import com.peekcart.order.application.dto.CartDetailDto;
 import com.peekcart.order.application.dto.UpdateCartItemCommand;
+import com.peekcart.order.application.port.ProductPort;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Cart;
 import com.peekcart.order.domain.repository.CartRepository;
-import com.peekcart.product.domain.exception.ProductException;
-import com.peekcart.product.domain.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,16 +21,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class CartCommandService {
 
     private final CartRepository cartRepository;
-    private final ProductRepository productRepository;
+    private final ProductPort productPort;
 
     /**
      * 장바구니에 상품을 추가한다. 장바구니가 없으면 자동으로 생성한다.
      *
-     * @throws ProductException 상품이 존재하지 않으면 {@code PRD-001}
+     * @throws RuntimeException 상품이 존재하지 않으면 예외
      */
     public CartDetailDto addItem(Long userId, AddCartItemCommand command) {
-        productRepository.findById(command.productId())
-                .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
+        productPort.verifyProductExists(command.productId());
 
         Cart cart = cartRepository.findByUserId(userId)
                 .orElseGet(() -> cartRepository.save(Cart.create(userId)));

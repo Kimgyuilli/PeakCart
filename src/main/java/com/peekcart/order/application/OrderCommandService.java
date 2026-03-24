@@ -3,6 +3,7 @@ package com.peekcart.order.application;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.dto.CreateOrderCommand;
 import com.peekcart.order.application.dto.OrderDetailDto;
+import com.peekcart.order.application.port.ProductPort;
 import com.peekcart.order.domain.event.OrderCancelledEvent;
 import com.peekcart.order.domain.event.OrderCreatedEvent;
 import com.peekcart.order.domain.exception.OrderException;
@@ -11,10 +12,6 @@ import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderItemData;
 import com.peekcart.order.domain.repository.CartRepository;
 import com.peekcart.order.domain.repository.OrderRepository;
-import com.peekcart.product.application.InventoryService;
-import com.peekcart.product.domain.exception.ProductException;
-import com.peekcart.product.domain.model.Product;
-import com.peekcart.product.domain.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -35,8 +32,7 @@ public class OrderCommandService {
 
     private final OrderRepository orderRepository;
     private final CartRepository cartRepository;
-    private final ProductRepository productRepository;
-    private final InventoryService inventoryService;
+    private final ProductPort productPort;
     private final ApplicationEventPublisher eventPublisher;
 
     /**
@@ -54,10 +50,9 @@ public class OrderCommandService {
 
         List<OrderItemData> itemDataList = cart.getItems().stream()
                 .map(cartItem -> {
-                    Product product = productRepository.findById(cartItem.getProductId())
-                            .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
-                    inventoryService.decreaseStock(cartItem.getProductId(), cartItem.getQuantity());
-                    return new OrderItemData(product.getId(), cartItem.getQuantity(), product.getPrice());
+                    long unitPrice = productPort.decreaseStockAndGetUnitPrice(
+                            cartItem.getProductId(), cartItem.getQuantity());
+                    return new OrderItemData(cartItem.getProductId(), cartItem.getQuantity(), unitPrice);
                 })
                 .toList();
 
@@ -92,7 +87,7 @@ public class OrderCommandService {
         order.cancel();
 
         for (var item : order.getOrderItems()) {
-            inventoryService.restoreStock(item.getProductId(), item.getQuantity());
+            productPort.restoreStock(item.getProductId(), item.getQuantity());
         }
 
         eventPublisher.publishEvent(

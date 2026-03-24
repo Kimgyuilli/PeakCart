@@ -2,6 +2,7 @@ package com.peekcart.order.application;
 
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.dto.OrderDetailDto;
+import com.peekcart.order.application.dto.OrderSummaryDto;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,10 +23,11 @@ public class OrderQueryService {
 
     /**
      * 사용자의 주문 목록을 페이징으로 조회한다.
+     * orderItems에 접근하지 않아 N+1 쿼리가 발생하지 않는다.
      */
-    public Page<OrderDetailDto> getOrders(Long userId, Pageable pageable) {
+    public Page<OrderSummaryDto> getOrders(Long userId, Pageable pageable) {
         return orderRepository.findByUserId(userId, pageable)
-                .map(OrderDetailDto::from);
+                .map(OrderSummaryDto::from);
     }
 
     /**

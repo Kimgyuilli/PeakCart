@@ -47,6 +47,7 @@ public class CartItem {
     }
 
     void addQuantity(int delta) {
+        if (delta < 1) throw new OrderException(ErrorCode.ORD_005);
         this.quantity += delta;
     }
 }

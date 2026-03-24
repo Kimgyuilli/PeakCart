@@ -40,6 +40,7 @@ public class Product extends BaseTimeEntity {
     private ProductStatus status;
 
     private Product(Category category, String name, String description, long price, String imageUrl) {
+        if (price < 0) throw new IllegalArgumentException("가격은 0 이상이어야 합니다.");
         this.category = category;
         this.name = name;
         this.description = description;

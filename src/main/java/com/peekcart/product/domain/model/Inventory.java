@@ -60,6 +60,7 @@ public class Inventory {
      * 재고를 복구한다.
      */
     public void restore(int quantity) {
+        if (quantity <= 0) throw new IllegalArgumentException("복구 수량은 1 이상이어야 합니다.");
         this.stock += quantity;
     }
 }

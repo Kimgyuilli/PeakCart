@@ -2,6 +2,8 @@ package com.peekcart.product.presentation;
 
 import com.peekcart.global.response.ApiResponse;
 import com.peekcart.product.application.ProductCommandService;
+import com.peekcart.product.application.dto.CreateProductCommand;
+import com.peekcart.product.application.dto.UpdateProductCommand;
 import com.peekcart.product.presentation.dto.request.CreateProductRequest;
 import com.peekcart.product.presentation.dto.request.UpdateProductRequest;
 import com.peekcart.product.presentation.dto.response.ProductDetailResponse;
@@ -28,8 +30,11 @@ public class AdminProductController {
     public ResponseEntity<ApiResponse<ProductDetailResponse>> createProduct(
             @Valid @RequestBody CreateProductRequest request
     ) {
+        CreateProductCommand command = new CreateProductCommand(
+                request.categoryId(), request.name(), request.description(),
+                request.price(), request.imageUrl(), request.stock());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.of(
-                ProductDetailResponse.from(productCommandService.create(request))));
+                ProductDetailResponse.from(productCommandService.create(command))));
     }
 
     @PutMapping("/{id}")
@@ -37,8 +42,11 @@ public class AdminProductController {
             @PathVariable Long id,
             @Valid @RequestBody UpdateProductRequest request
     ) {
+        UpdateProductCommand command = new UpdateProductCommand(
+                request.categoryId(), request.name(), request.description(),
+                request.price(), request.imageUrl());
         return ResponseEntity.ok(ApiResponse.of(
-                ProductDetailResponse.from(productCommandService.update(id, request))));
+                ProductDetailResponse.from(productCommandService.update(id, command))));
     }
 
     @DeleteMapping("/{id}")

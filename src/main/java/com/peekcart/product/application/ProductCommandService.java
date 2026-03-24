@@ -1,7 +1,9 @@
 package com.peekcart.product.application;
 
 import com.peekcart.global.exception.ErrorCode;
+import com.peekcart.product.application.dto.CreateProductCommand;
 import com.peekcart.product.application.dto.ProductDetailDto;
+import com.peekcart.product.application.dto.UpdateProductCommand;
 import com.peekcart.product.domain.exception.ProductException;
 import com.peekcart.product.domain.model.Category;
 import com.peekcart.product.domain.model.Inventory;
@@ -9,8 +11,6 @@ import com.peekcart.product.domain.model.Product;
 import com.peekcart.product.domain.repository.CategoryRepository;
 import com.peekcart.product.domain.repository.InventoryRepository;
 import com.peekcart.product.domain.repository.ProductRepository;
-import com.peekcart.product.presentation.dto.request.CreateProductRequest;
-import com.peekcart.product.presentation.dto.request.UpdateProductRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,45 +30,45 @@ public class ProductCommandService {
     /**
      * 새 상품을 등록하고 초기 재고를 생성한다.
      *
-     * @param request 상품 등록 요청
+     * @param command 상품 등록 커맨드
      * @return 생성된 상품 상세 정보
      * @throws ProductException 카테고리가 없으면 {@code PRD-003}
      */
-    public ProductDetailDto create(CreateProductRequest request) {
-        Category category = categoryRepository.findById(request.categoryId())
+    public ProductDetailDto create(CreateProductCommand command) {
+        Category category = categoryRepository.findById(command.categoryId())
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_003));
 
         Product product = Product.create(
-                category, request.name(), request.description(), request.price(), request.imageUrl());
+                category, command.name(), command.description(), command.price(), command.imageUrl());
         productRepository.save(product);
 
-        Inventory inventory = Inventory.create(product, request.stock());
+        Inventory inventory = Inventory.create(product, command.stock());
         inventoryRepository.save(inventory);
 
-        return new ProductDetailDto(product, inventory.getStock());
+        return ProductDetailDto.of(product, inventory.getStock());
     }
 
     /**
      * 상품 정보를 수정한다.
      *
      * @param productId 수정할 상품 PK
-     * @param request   수정 요청
+     * @param command   수정 커맨드
      * @return 수정된 상품 상세 정보
      * @throws ProductException 상품이 없으면 {@code PRD-001}, 카테고리가 없으면 {@code PRD-003}
      */
-    public ProductDetailDto update(Long productId, UpdateProductRequest request) {
+    public ProductDetailDto update(Long productId, UpdateProductCommand command) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
-        Category category = categoryRepository.findById(request.categoryId())
+        Category category = categoryRepository.findById(command.categoryId())
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_003));
 
-        product.update(category, request.name(), request.description(), request.price(), request.imageUrl());
+        product.update(category, command.name(), command.description(), command.price(), command.imageUrl());
 
         int stock = inventoryRepository.findByProductId(productId)
                 .map(Inventory::getStock)
                 .orElse(0);
 
-        return new ProductDetailDto(product, stock);
+        return ProductDetailDto.of(product, stock);
     }
 
     /**

@@ -1,7 +1,6 @@
 package com.peekcart.product.presentation.dto.response;
 
 import com.peekcart.product.application.dto.ProductDetailDto;
-import com.peekcart.product.domain.model.Product;
 
 /**
  * 상품 상세 응답 DTO.
@@ -19,16 +18,16 @@ public record ProductDetailResponse(
 ) {
 
     public static ProductDetailResponse from(ProductDetailDto dto) {
-        Product product = dto.product();
         return new ProductDetailResponse(
-                product.getId(),
-                product.getCategory().getId(),
-                product.getCategory().getName(),
-                product.getName(),
-                product.getDescription(),
-                product.getPrice(),
-                product.getImageUrl(),
-                product.getStatus().name(),
-                dto.stock());
+                dto.id(),
+                dto.categoryId(),
+                dto.categoryName(),
+                dto.name(),
+                dto.description(),
+                dto.price(),
+                dto.imageUrl(),
+                dto.status(),
+                dto.stock()
+        );
     }
 }

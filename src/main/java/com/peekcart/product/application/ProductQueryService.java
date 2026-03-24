@@ -5,6 +5,7 @@ import com.peekcart.product.application.dto.ProductDetailDto;
 import com.peekcart.product.domain.exception.ProductException;
 import com.peekcart.product.domain.model.Product;
 import com.peekcart.product.domain.model.ProductStatus;
+import com.peekcart.product.domain.model.Inventory;
 import com.peekcart.product.domain.repository.InventoryRepository;
 import com.peekcart.product.domain.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
@@ -50,9 +51,9 @@ public class ProductQueryService {
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
 
         int stock = inventoryRepository.findByProductId(productId)
-                .map(inventory -> inventory.getStock())
+                .map(Inventory::getStock)
                 .orElse(0);
 
-        return new ProductDetailDto(product, stock);
+        return ProductDetailDto.of(product, stock);
     }
 }

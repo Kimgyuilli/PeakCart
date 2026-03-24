@@ -1,0 +1,49 @@
+package com.peekcart.product.presentation;
+
+import com.peekcart.global.response.ApiResponse;
+import com.peekcart.product.application.ProductCommandService;
+import com.peekcart.product.presentation.dto.request.CreateProductRequest;
+import com.peekcart.product.presentation.dto.request.UpdateProductRequest;
+import com.peekcart.product.presentation.dto.response.ProductDetailResponse;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * 상품 관리 API 엔드포인트.
+ * 관리자(ADMIN) 권한이 필요하다.
+ */
+@RestController
+@RequestMapping("/api/v1/admin/products")
+@PreAuthorize("hasRole('ADMIN')")
+@RequiredArgsConstructor
+public class AdminProductController {
+
+    private final ProductCommandService productCommandService;
+
+    @PostMapping
+    public ResponseEntity<ApiResponse<ProductDetailResponse>> createProduct(
+            @Valid @RequestBody CreateProductRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.of(
+                ProductDetailResponse.from(productCommandService.create(request))));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponse<ProductDetailResponse>> updateProduct(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateProductRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.of(
+                ProductDetailResponse.from(productCommandService.update(id, request))));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable Long id) {
+        productCommandService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+}

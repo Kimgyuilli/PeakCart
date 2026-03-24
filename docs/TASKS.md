@@ -88,21 +88,21 @@
 ---
 
 ### Task 1-4: Order 도메인
-**상태**: 🔲 대기
+**상태**: 🔄 진행 중
 **목표**: 장바구니, 주문 생성 (재고 즉시 차감), 주문 상태 전이, 이벤트 발행
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `Order` Entity (상태 전이 로직 포함) | 🔲 | PENDING → DELIVERED/CANCELLED |
-| `OrderItem` Entity | 🔲 | `unit_price` 스냅샷 |
-| `OrderStatus` Enum (VO) | 🔲 | 8개 상태 |
-| `Cart` / `CartItem` Entity | 🔲 | |
-| Repository 계층 | 🔲 | |
-| `OrderCommandService` — 주문 생성, 취소 | 🔲 | 재고 즉시 차감 + 이벤트 발행 |
-| `OrderQueryService` — 주문 내역 (페이징) | 🔲 | |
-| `CartService` — 장바구니 CRUD | 🔲 | |
-| `OrderEventListener` (`@TransactionalEventListener`) | 🔲 | payment.failed 수신 시 보상 |
-| `OrderController` / `CartController` | 🔲 | |
+| `Order` Entity (상태 전이 로직 포함) | ✅ | cancel(), transitionTo(), OrderItemData로 순환 의존 제거 |
+| `OrderItem` Entity | ✅ | `unit_price` 스냅샷, 패키지 내부 생성자 |
+| `OrderStatus` Enum (VO) | ✅ | 8개 상태 + canTransitionTo() 전이 규칙 캡슐화 |
+| `Cart` / `CartItem` Entity | ✅ | addItem 중복 병합, get-or-create 패턴 |
+| Repository 계층 | ✅ | 인터페이스 2개 + JPA 2개 + Impl 2개 |
+| `OrderCommandService` — 주문 생성, 취소 | ✅ | 재고 즉시 차감 + 이벤트 발행 |
+| `OrderQueryService` — 주문 내역 (페이징) | ✅ | |
+| `CartService` — 장바구니 CRUD | ✅ | CartCommandService + CartQueryService 분리 |
+| `OrderEventListener` (`@TransactionalEventListener`) | 🔲 | payment.failed 수신 시 보상 (Task 1-5에서 구현) |
+| `OrderController` / `CartController` | ✅ | |
 | 단위 테스트 (상태 전이 + 멀티스레드 동시성) | 🔲 | |
 
 **완료 기준**: 장바구니 → 주문 생성 (재고 차감) → 주문 취소 (재고 복구) 정상 동작
@@ -182,3 +182,4 @@
 | 2026-03-22 | Task 1-1 | 프로젝트 초기 설정 완료 (Gradle, Docker Compose, Flyway 스키마, global 공통 클래스) |
 | 2026-03-22 | Task 1-2 | User 도메인 구현 완료 (회원가입/로그인/로그아웃/토큰 재발급, JWT 인증, RBAC, Grace Period) |
 | 2026-03-25 | Task 1-3 | Product 도메인 완료 (엔티티, Repository, 서비스, Controller, 코드리뷰 개선, 단위 테스트 37건) |
+| 2026-03-25 | Task 1-4 (진행 중) | Order 도메인 프로덕션 코드 완료 (엔티티, Repository, 서비스, Controller) — 단위 테스트 미작성 |

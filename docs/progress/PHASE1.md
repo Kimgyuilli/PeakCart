@@ -68,6 +68,36 @@
 
 ### 2026-03-25
 
+#### Task 1-4: Order 도메인 구현 (프로덕션 코드)
+
+**완료 항목**:
+- `order/domain/model/OrderStatus`: 8개 상태 + `canTransitionTo()` 전이 규칙 캡슐화
+- `order/domain/model/OrderItemData`: 순환 의존 제거용 값 객체 (Order.create() 인자)
+- `order/domain/model/OrderItem`: 패키지 내부 생성자, `unit_price` 스냅샷, `getSubtotal()`
+- `order/domain/model/Order`: `ordered_at` 직접 선언(BaseEntity 미상속), `cancel()` / `transitionTo()` 상태 전이 메서드
+- `order/domain/model/CartItem`: 패키지 내부 `addQuantity()`, `changeQuantity()`
+- `order/domain/model/Cart`: BaseTimeEntity 상속, `addItem()` 중복 병합, `clear()`
+- `order/domain/event/OrderCreatedEvent` / `OrderCancelledEvent`: 도메인 이벤트 record
+- `order/domain/exception/OrderException`: BusinessException 상속
+- `order/domain/repository/`: OrderRepository, CartRepository 인터페이스
+- `order/infrastructure/`: JPA Repository 2개 + RepositoryImpl 2개
+- `global/exception/ErrorCode`: ORD_004~006 추가 (장바구니 비어있음 / 수량 오류 / 장바구니 미존재)
+- `order/application/OrderCommandService`: 주문 생성(재고 즉시 차감 + 장바구니 비우기 + 이벤트 발행), 취소(재고 복구 + 이벤트 발행)
+- `order/application/OrderQueryService`: 주문 목록(페이징) / 상세 조회
+- `order/application/CartCommandService`: addItem(get-or-create) / updateItem / removeItem
+- `order/application/CartQueryService`: 장바구니 조회 (없으면 빈 DTO 반환)
+- `order/application/dto/`: CreateOrderCommand, AddCartItemCommand, UpdateCartItemCommand, OrderDetailDto, OrderItemDto, CartDetailDto, CartItemDto
+- `order/presentation/OrderController`: POST/GET /api/v1/orders, GET /api/v1/orders/{id}, POST /api/v1/orders/{id}/cancel
+- `order/presentation/CartController`: GET/POST/PUT/DELETE /api/v1/cart/items
+- `order/presentation/dto/request/`: CreateOrderRequest, AddCartItemRequest, UpdateCartItemRequest
+- `order/presentation/dto/response/`: OrderResponse, OrderDetailResponse, OrderItemResponse, CartResponse, CartItemResponse
+
+**미완료 항목**:
+- `OrderEventListener`: payment.failed 수신 시 보상 (Task 1-5에서 구현)
+- 단위 테스트: 코드 리뷰 후 작성 예정
+
+---
+
 #### Task 1-3: Product 도메인 구현 (프로덕션 코드)
 
 **완료 항목**:
@@ -134,6 +164,10 @@
 | 2026-03-25 | Inventory 베이스 클래스 미상속 | `Inventory`는 `BaseEntity` 상속 없이 `@UpdateTimestamp` 직접 선언 | `inventories` 테이블에 `created_at` 없음, `ddl-auto: validate` 충돌 방지 (RefreshToken과 동일 사유) |
 | 2026-03-25 | 상품 삭제 soft delete | DELETE API → `status = DISCONTINUED` 전환 | `order_items.product_id` FK 참조 무결성 보존 |
 | 2026-03-25 | Product+Inventory 단일 트랜잭션 | `ProductCommandService.create()`에서 상품과 초기 재고를 하나의 트랜잭션으로 생성 | 상품 등록 후 재고 없는 상태 방지 |
+| 2026-03-25 | Order BaseEntity 미상속 | `orders` 테이블 컬럼이 `ordered_at`뿐이므로 BaseEntity 미상속, 필드 직접 선언 | `ddl-auto: validate` 충돌 방지 (Inventory, RefreshToken과 동일 사유) |
+| 2026-03-25 | OrderItemData 값 객체 도입 | `Order.create()`가 `OrderItem`을 직접 생성하여 순환 의존 제거 | Order → OrderItem, OrderItem → Order 상호 참조로 인한 팩토리 메서드 구현 불가 해결 |
+| 2026-03-25 | CartService Command/Query 분리 | `CartCommandService` + `CartQueryService`로 분리 (계획상 단일 CartService) | 기존 Product/Order 패턴 일관성 유지 |
+| 2026-03-25 | OrderEventListener 구현 보류 | payment.failed 소비자 구현을 Task 1-5로 이연 | 소비자 없이 이벤트 발행만으로 Task 1-5 연동 준비 완료 |
 
 ---
 
@@ -155,9 +189,9 @@
 - [x] `GET /api/v1/products` — 상품 목록 (페이징, 카테고리 필터)
 - [x] `GET /api/v1/products/{id}` — 상품 상세
 - [x] 관리자 상품 CRUD (`/api/v1/admin/products`)
-- [ ] 장바구니 CRUD (`/api/v1/cart`)
-- [ ] `POST /api/v1/orders` — 주문 생성 (재고 즉시 차감)
-- [ ] `POST /api/v1/orders/{id}/cancel` — 주문 취소
+- [x] 장바구니 CRUD (`/api/v1/cart`)
+- [x] `POST /api/v1/orders` — 주문 생성 (재고 즉시 차감)
+- [x] `POST /api/v1/orders/{id}/cancel` — 주문 취소
 - [ ] `POST /api/v1/payments/confirm` — 결제 승인
 - [ ] `POST /api/v1/payments/webhook` — 웹훅 수신 (HMAC 검증)
 - [ ] `GET /api/v1/notifications` — 알림 내역

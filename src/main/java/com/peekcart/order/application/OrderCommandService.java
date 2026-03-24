@@ -12,6 +12,7 @@ import com.peekcart.order.domain.model.OrderItemData;
 import com.peekcart.order.domain.repository.CartRepository;
 import com.peekcart.order.domain.repository.OrderRepository;
 import com.peekcart.product.application.InventoryService;
+import com.peekcart.product.domain.exception.ProductException;
 import com.peekcart.product.domain.model.Product;
 import com.peekcart.product.domain.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
@@ -54,7 +55,7 @@ public class OrderCommandService {
         List<OrderItemData> itemDataList = cart.getItems().stream()
                 .map(cartItem -> {
                     Product product = productRepository.findById(cartItem.getProductId())
-                            .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
+                            .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
                     inventoryService.decreaseStock(cartItem.getProductId(), cartItem.getQuantity());
                     return new OrderItemData(product.getId(), cartItem.getQuantity(), product.getPrice());
                 })

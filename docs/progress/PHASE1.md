@@ -168,6 +168,19 @@
 - `global/config/SecurityConfig`: /api/v1/payments/webhook PUBLIC_URLS 추가
 - `application.yml`: toss.payments 설정 추가
 
+#### Task 1-5: Payment 도메인 단위 테스트 추가
+
+**완료 항목**:
+- `support/fixture/PaymentFixture`: 테스트 데이터 팩토리 (pendingPayment, approvedPayment, failedPayment, DTO 생성)
+- `payment/domain/model/PaymentTest`: create/assignPaymentKey/approve/fail/validateAmount 상태 전이 및 검증 (16건)
+- `payment/domain/model/PaymentStatusTest`: PENDING/APPROVED/FAILED 전이 규칙 검증 (5건)
+- `payment/domain/model/WebhookLogTest`: 생성 검증 (1건)
+- `payment/application/PaymentCommandServiceTest`: 승인 성공/Toss 실패/미존재/금액 불일치/소유권 검증 (5건)
+- `payment/application/PaymentQueryServiceTest`: 조회 성공/미존재/소유권 검증 (3건)
+- `payment/application/WebhookServiceTest`: HMAC 서명 검증/멱등성 스킵/null·불일치 서명 (4건)
+- `payment/presentation/PaymentControllerTest`: confirm 성공/실패/validation, 조회 성공/미존재, webhook 성공/서명 실패 (7건)
+- 총 41건 전부 통과
+
 ---
 
 ### 2026-03-23

@@ -126,7 +126,7 @@
 | `PaymentController` — 결제 승인, 조회, 웹훅 | ✅ | HMAC 서명 검증은 WebhookService에서 처리 |
 | `webhook_logs` 저장 (멱등성 처리) | ✅ | `idempotency_key` UK, WebhookService에서 관리 |
 | `OrderPort` + `OrderPortAdapter` | ✅ | Payment → Order 크로스 도메인 DIP |
-| 단위 테스트 | 🔲 | 후순위로 이연 |
+| 단위 테스트 | ✅ | Domain 22건 + Application 12건 + Presentation 7건 = 41건, 전부 통과 |
 
 **완료 기준**: 결제 승인 → PAYMENT_COMPLETED 상태 전이 + 웹훅 수신 정상 처리
 
@@ -186,3 +186,4 @@
 | 2026-03-25 | Task 1-3 | Product 도메인 완료 (엔티티, Repository, 서비스, Controller, 코드리뷰 개선, 단위 테스트 37건) |
 | 2026-03-25 | Task 1-4 | Order 도메인 완료 (엔티티, Repository, 서비스, Controller, 단위 테스트 89건) |
 | 2026-03-25 | Task 1-5 | Payment 도메인 완료 (엔티티, Repository, TossPaymentClient, EventListener, Controller, OrderPort/Adapter) |
+| 2026-03-25 | Task 1-5 테스트 | Payment 도메인 단위 테스트 완료 (Domain 22건 + Application 12건 + Presentation 7건 = 41건) |

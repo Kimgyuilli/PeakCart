@@ -22,3 +22,8 @@ app:
     secret: ${JWT_SECRET:peekcart-secret-key-must-be-at-least-256-bits-long-xxxxxxxxxxxxxxx}
     access-token-expiry: 1800000    # 30분 (ms)
     refresh-token-expiry: 604800000 # 7일 (ms)
+
+toss:
+  payments:
+    secret-key: ${TOSS_SECRET_KEY:test_sk_placeholder}
+    webhook-secret: ${TOSS_WEBHOOK_SECRET:test_webhook_secret_placeholder}

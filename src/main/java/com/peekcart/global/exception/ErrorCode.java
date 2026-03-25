@@ -35,6 +35,10 @@ public enum ErrorCode {
     // Payment
     PAY_001(HttpStatus.BAD_REQUEST, "PAY-001", "결제 금액이 일치하지 않습니다."),
     PAY_002(HttpStatus.BAD_REQUEST, "PAY-002", "결제 타임아웃이 초과되었습니다."),
+    PAY_003(HttpStatus.NOT_FOUND, "PAY-003", "결제 정보를 찾을 수 없습니다."),
+    PAY_004(HttpStatus.BAD_REQUEST, "PAY-004", "유효하지 않은 결제 상태 전이입니다."),
+    PAY_005(HttpStatus.BAD_REQUEST, "PAY-005", "결제 승인에 실패했습니다."),
+    PAY_006(HttpStatus.UNAUTHORIZED, "PAY-006", "유효하지 않은 웹훅 서명입니다."),
 
     // System
     SYS_001(HttpStatus.INTERNAL_SERVER_ERROR, "SYS-001", "내부 서버 오류가 발생했습니다."),

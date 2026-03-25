@@ -4,7 +4,6 @@ import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.payment.domain.exception.PaymentException;
 import com.peekcart.payment.domain.model.WebhookLog;
 import com.peekcart.payment.domain.repository.WebhookLogRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,13 +19,16 @@ import java.util.Base64;
  */
 @Service
 @Transactional
-@RequiredArgsConstructor
 public class WebhookService {
 
     private final WebhookLogRepository webhookLogRepository;
+    private final String webhookSecret;
 
-    @Value("${toss.payments.webhook-secret}")
-    private String webhookSecret;
+    public WebhookService(WebhookLogRepository webhookLogRepository,
+                          @Value("${toss.payments.webhook-secret}") String webhookSecret) {
+        this.webhookLogRepository = webhookLogRepository;
+        this.webhookSecret = webhookSecret;
+    }
 
     /**
      * 서명을 검증하고, 웹훅을 처리하여 로그를 저장한다.

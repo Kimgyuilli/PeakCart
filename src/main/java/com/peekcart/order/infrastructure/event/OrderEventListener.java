@@ -6,7 +6,7 @@ import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderRepository;
-import com.peekcart.payment.domain.event.PaymentApprovedEvent;
+import com.peekcart.payment.domain.event.PaymentCompletedEvent;
 import com.peekcart.payment.domain.event.PaymentFailedEvent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -31,7 +31,7 @@ public class OrderEventListener {
      */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void handlePaymentApproved(PaymentApprovedEvent event) {
+    public void handlePaymentCompleted(PaymentCompletedEvent event) {
         Order order = orderRepository.findById(event.orderId())
                 .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
         order.transitionTo(OrderStatus.PAYMENT_COMPLETED);

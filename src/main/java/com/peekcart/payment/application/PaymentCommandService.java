@@ -4,7 +4,7 @@ import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.payment.application.dto.ConfirmPaymentCommand;
 import com.peekcart.payment.application.dto.PaymentDetailDto;
 import com.peekcart.payment.application.port.OrderPort;
-import com.peekcart.payment.domain.event.PaymentApprovedEvent;
+import com.peekcart.payment.domain.event.PaymentCompletedEvent;
 import com.peekcart.payment.domain.event.PaymentFailedEvent;
 import com.peekcart.payment.domain.exception.PaymentException;
 import com.peekcart.payment.domain.model.Payment;
@@ -52,7 +52,7 @@ public class PaymentCommandService {
                     command.paymentKey(), command.orderId().toString(), command.amount());
             payment.approve(response.method(), OffsetDateTime.parse(response.approvedAt()).toLocalDateTime());
 
-            eventPublisher.publishEvent(new PaymentApprovedEvent(
+            eventPublisher.publishEvent(new PaymentCompletedEvent(
                     payment.getId(), payment.getOrderId(), payment.getPaymentKey(),
                     payment.getAmount(), payment.getMethod()));
         } catch (Exception e) {

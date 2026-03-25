@@ -140,6 +140,36 @@
 
 ---
 
+### 2026-03-25 (Task 1-5)
+
+#### Task 1-5: Payment 도메인 구현
+
+**완료 항목**:
+- `payment/domain/model/PaymentStatus`: PENDING/APPROVED/FAILED 3상태 + `canTransitionTo()` 전이 규칙 캡슐화
+- `payment/domain/model/Payment`: BaseEntity 미상속(`created_at`만 존재), create/assignPaymentKey/approve/fail/validateAmount
+- `payment/domain/model/WebhookLog`: idempotency_key 기반 중복 방지 엔티티
+- `payment/domain/exception/PaymentException`: BusinessException 상속
+- `payment/domain/repository/`: PaymentRepository, WebhookLogRepository 인터페이스
+- `payment/domain/event/`: PaymentApprovedEvent, PaymentFailedEvent 도메인 이벤트 레코드
+- `payment/infrastructure/`: JPA Repository 2개 + RepositoryImpl 2개
+- `payment/infrastructure/toss/TossPaymentClient`: RestClient 기반 Toss API 연동, Basic Auth
+- `payment/infrastructure/toss/TossConfirmResponse`: Toss 응답 DTO
+- `payment/infrastructure/event/PaymentEventListener`: OrderCreatedEvent 수신 → Payment(PENDING) 생성
+- `order/infrastructure/event/OrderEventListener`: PaymentApprovedEvent → PAYMENT_COMPLETED 전이, PaymentFailedEvent → cancel() + 재고 복구 (Task 1-4 보류 항목)
+- `payment/application/port/OrderPort`: verifyOrderOwner/transitionToPaymentRequested 인터페이스
+- `order/infrastructure/adapter/OrderPortAdapter`: OrderPort 구현체 (ProductPortAdapter 패턴)
+- `payment/application/PaymentCommandService`: userId 소유권 검증 + Toss 승인 + 이벤트 발행
+- `payment/application/PaymentQueryService`: userId 소유권 검증 + 결제 조회
+- `payment/application/WebhookService`: HMAC-SHA256 서명 검증 + idempotency_key 멱등성 처리
+- `payment/application/dto/`: ConfirmPaymentCommand, PaymentDetailDto
+- `payment/presentation/PaymentController`: POST /confirm, GET /{orderId}, POST /webhook
+- `payment/presentation/dto/`: ConfirmPaymentRequest, PaymentResponse
+- `global/exception/ErrorCode`: PAY_003~006 추가
+- `global/config/SecurityConfig`: /api/v1/payments/webhook PUBLIC_URLS 추가
+- `application.yml`: toss.payments 설정 추가
+
+---
+
 ### 2026-03-23
 
 #### Task 1-2: 테스트 코드 완성 및 아키텍처 정제
@@ -184,6 +214,11 @@
 | 2026-03-25 | OrderItemData 값 객체 도입 | `Order.create()`가 `OrderItem`을 직접 생성하여 순환 의존 제거 | Order → OrderItem, OrderItem → Order 상호 참조로 인한 팩토리 메서드 구현 불가 해결 |
 | 2026-03-25 | CartService Command/Query 분리 | `CartCommandService` + `CartQueryService`로 분리 (계획상 단일 CartService) | 기존 Product/Order 패턴 일관성 유지 |
 | 2026-03-25 | OrderEventListener 구현 보류 | payment.failed 소비자 구현을 Task 1-5로 이연 | 소비자 없이 이벤트 발행만으로 Task 1-5 연동 준비 완료 |
+| 2026-03-25 | Payment BaseEntity 미상속 | `payments` 테이블에 `created_at`만 존재하므로 BaseEntity 미상속, `created_at` 직접 선언 | `ddl-auto: validate` 충돌 방지 (Inventory, RefreshToken과 동일 사유) |
+| 2026-03-25 | Payment 생성 시 UUID paymentKey | OrderCreatedEvent 수신 시 Toss paymentKey 미확정이므로 UUID 임시값 부여, confirm 시 실제 키로 교체 | payments.payment_key NOT NULL 제약 + UNIQUE 보장 필요 |
+| 2026-03-25 | HMAC 검증을 WebhookService로 | Controller에서 HMAC 검증 로직 제거, WebhookService가 서명 검증 + 멱등성 처리를 일괄 담당 | Controller는 파싱만, 비즈니스 로직은 Service 책임 |
+| 2026-03-25 | OrderPort 도입 (Payment → Order DIP) | Payment application 레이어가 Order 도메인 내부에 직접 의존하지 않도록 OrderPort 인터페이스 도입 | ProductPort 패턴과 동일, 의존 방향 준수 |
+| 2026-03-25 | TossPaymentClient에 RestClient 사용 | spring-boot-starter-web에 내장된 RestClient(Spring 6.1+) 선택, 추가 의존성 없음 | WebClient(webflux 의존)나 RestTemplate(deprecated 경로) 대신 선택 |
 
 ---
 
@@ -208,14 +243,14 @@
 - [x] 장바구니 CRUD (`/api/v1/cart`)
 - [x] `POST /api/v1/orders` — 주문 생성 (재고 즉시 차감)
 - [x] `POST /api/v1/orders/{id}/cancel` — 주문 취소
-- [ ] `POST /api/v1/payments/confirm` — 결제 승인
-- [ ] `POST /api/v1/payments/webhook` — 웹훅 수신 (HMAC 검증)
+- [x] `POST /api/v1/payments/confirm` — 결제 승인
+- [x] `POST /api/v1/payments/webhook` — 웹훅 수신 (HMAC 검증)
 - [ ] `GET /api/v1/notifications` — 알림 내역
 
 ### 플로우 검증
-- [ ] 주문 생성 → `@TransactionalEventListener` → 결제 요청 이벤트 전달
-- [ ] 결제 성공 → 주문 상태 PAYMENT_COMPLETED 전이
-- [ ] 결제 실패 → 주문 취소 + 재고 복구 (보상 트랜잭션)
+- [x] 주문 생성 → `@TransactionalEventListener` → 결제 요청 이벤트 전달
+- [x] 결제 성공 → 주문 상태 PAYMENT_COMPLETED 전이
+- [x] 결제 실패 → 주문 취소 + 재고 복구 (보상 트랜잭션)
 - [ ] 주문 생성 → Slack 알림 수신
 - [ ] 15분 타임아웃 → 주문 자동 취소 + 재고 복구
 

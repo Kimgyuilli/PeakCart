@@ -110,21 +110,23 @@
 ---
 
 ### Task 1-5: Payment 도메인
-**상태**: 🔲 대기
+**상태**: ✅ 완료
 **목표**: Toss Payments 연동, 결제 승인/실패, 웹훅 수신
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `Payment` Entity | 🔲 | |
-| `PaymentStatus` Enum (VO) | 🔲 | |
-| Repository 계층 | 🔲 | |
-| `PaymentCommandService` — 결제 승인/실패 | 🔲 | |
-| `PaymentQueryService` | 🔲 | |
-| `TossPaymentClient` — Toss API 연동 | 🔲 | WebClient 또는 RestClient |
-| `PaymentEventListener` (`@TransactionalEventListener`) | 🔲 | order.created 수신 |
-| `PaymentController` — 결제 승인, 조회, 웹훅 | 🔲 | 웹훅 HMAC 서명 검증 |
-| `webhook_logs` 저장 (멱등성 처리) | 🔲 | `idempotency_key` UK |
-| 단위 테스트 | 🔲 | |
+| `Payment` Entity | ✅ | PENDING/APPROVED/FAILED 상태 전이, validateAmount, assignPaymentKey |
+| `PaymentStatus` Enum (VO) | ✅ | canTransitionTo() 전이 규칙 캡슐화 |
+| Repository 계층 | ✅ | 인터페이스 2개 + JPA 2개 + Impl 2개 (Payment, WebhookLog) |
+| `PaymentCommandService` — 결제 승인/실패 | ✅ | userId 소유권 검증 + Toss API 연동 + 이벤트 발행 |
+| `PaymentQueryService` | ✅ | userId 소유권 검증 포함 |
+| `TossPaymentClient` — Toss API 연동 | ✅ | RestClient, Basic Auth |
+| `PaymentEventListener` (`@TransactionalEventListener`) | ✅ | order.created 수신 → Payment(PENDING) 생성 |
+| `OrderEventListener` (`@TransactionalEventListener`) | ✅ | payment.approved/failed 수신 → 주문 상태 전이 + 재고 복구 |
+| `PaymentController` — 결제 승인, 조회, 웹훅 | ✅ | HMAC 서명 검증은 WebhookService에서 처리 |
+| `webhook_logs` 저장 (멱등성 처리) | ✅ | `idempotency_key` UK, WebhookService에서 관리 |
+| `OrderPort` + `OrderPortAdapter` | ✅ | Payment → Order 크로스 도메인 DIP |
+| 단위 테스트 | 🔲 | 후순위로 이연 |
 
 **완료 기준**: 결제 승인 → PAYMENT_COMPLETED 상태 전이 + 웹훅 수신 정상 처리
 
@@ -183,3 +185,4 @@
 | 2026-03-22 | Task 1-2 | User 도메인 구현 완료 (회원가입/로그인/로그아웃/토큰 재발급, JWT 인증, RBAC, Grace Period) |
 | 2026-03-25 | Task 1-3 | Product 도메인 완료 (엔티티, Repository, 서비스, Controller, 코드리뷰 개선, 단위 테스트 37건) |
 | 2026-03-25 | Task 1-4 | Order 도메인 완료 (엔티티, Repository, 서비스, Controller, 단위 테스트 89건) |
+| 2026-03-25 | Task 1-5 | Payment 도메인 완료 (엔티티, Repository, TossPaymentClient, EventListener, Controller, OrderPort/Adapter) |

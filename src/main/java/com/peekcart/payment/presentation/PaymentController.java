@@ -2,11 +2,14 @@ package com.peekcart.payment.presentation;
 
 import com.peekcart.global.auth.CurrentUser;
 import com.peekcart.global.auth.LoginUser;
+import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.global.response.ApiResponse;
 import com.peekcart.payment.application.PaymentCommandService;
 import com.peekcart.payment.application.PaymentQueryService;
 import com.peekcart.payment.application.WebhookService;
 import com.peekcart.payment.application.dto.ConfirmPaymentCommand;
+import com.peekcart.payment.application.dto.PaymentDetailDto;
+import com.peekcart.payment.domain.exception.PaymentException;
 import com.peekcart.payment.presentation.dto.request.ConfirmPaymentRequest;
 import com.peekcart.payment.presentation.dto.response.PaymentResponse;
 import jakarta.validation.Valid;
@@ -30,6 +33,7 @@ public class PaymentController {
 
     /**
      * 결제를 승인한다.
+     * 트랜잭션 커밋 후 FAILED 상태면 에러 응답을 반환한다.
      */
     @PostMapping("/confirm")
     public ResponseEntity<ApiResponse<PaymentResponse>> confirmPayment(
@@ -38,8 +42,11 @@ public class PaymentController {
     ) {
         ConfirmPaymentCommand command = new ConfirmPaymentCommand(
                 request.paymentKey(), request.orderId(), request.amount());
-        return ResponseEntity.ok(ApiResponse.of(
-                PaymentResponse.from(paymentCommandService.confirmPayment(loginUser.userId(), command))));
+        PaymentDetailDto result = paymentCommandService.confirmPayment(loginUser.userId(), command);
+        if ("FAILED".equals(result.status())) {
+            throw new PaymentException(ErrorCode.PAY_005);
+        }
+        return ResponseEntity.ok(ApiResponse.of(PaymentResponse.from(result)));
     }
 
     /**

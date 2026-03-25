@@ -12,16 +12,17 @@ import com.peekcart.payment.domain.repository.PaymentRepository;
 import com.peekcart.payment.infrastructure.toss.TossConfirmResponse;
 import com.peekcart.payment.infrastructure.toss.TossPaymentClient;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 
 /**
  * 결제 승인을 처리하는 애플리케이션 서비스.
  */
+@Slf4j
 @Service
 @Transactional
 @RequiredArgsConstructor
@@ -35,7 +36,7 @@ public class PaymentCommandService {
     /**
      * 결제를 승인한다.
      *
-     * @throws PaymentException 결제 정보 미존재 시 {@code PAY-003}, 금액 불일치 시 {@code PAY-001}, 승인 실패 시 {@code PAY-005}
+     * @throws PaymentException 결제 정보 미존재 시 {@code PAY-003}, 금액 불일치 시 {@code PAY-001}
      */
     public PaymentDetailDto confirmPayment(Long userId, ConfirmPaymentCommand command) {
         orderPort.verifyOrderOwner(userId, command.orderId());
@@ -56,10 +57,11 @@ public class PaymentCommandService {
                     payment.getId(), payment.getOrderId(), payment.getPaymentKey(),
                     payment.getAmount(), payment.getMethod()));
         } catch (Exception e) {
+            log.error("Toss 결제 승인 실패 — orderId={}, paymentKey={}: {}",
+                    command.orderId(), command.paymentKey(), e.getMessage());
             payment.fail();
             eventPublisher.publishEvent(new PaymentFailedEvent(
                     payment.getId(), payment.getOrderId(), payment.getPaymentKey(), payment.getAmount()));
-            throw new PaymentException(ErrorCode.PAY_005);
         }
 
         return PaymentDetailDto.from(payment);

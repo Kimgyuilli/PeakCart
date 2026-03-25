@@ -60,8 +60,14 @@ public class Payment {
 
     /**
      * Toss가 발급한 실제 paymentKey로 교체한다.
+     * PENDING 상태에서만 호출 가능하다.
+     *
+     * @throws PaymentException PENDING 상태가 아니면 {@code PAY-004}
      */
     public void assignPaymentKey(String paymentKey) {
+        if (this.status != PaymentStatus.PENDING) {
+            throw new PaymentException(ErrorCode.PAY_004);
+        }
         this.paymentKey = paymentKey;
     }
 

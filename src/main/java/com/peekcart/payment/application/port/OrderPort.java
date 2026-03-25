@@ -12,4 +12,11 @@ public interface OrderPort {
      * @throws RuntimeException 주문이 존재하지 않거나 전이 불가 상태면 예외
      */
     void transitionToPaymentRequested(Long orderId);
+
+    /**
+     * 주문이 해당 사용자 소유인지 검증한다.
+     *
+     * @throws RuntimeException 주문이 존재하지 않거나 본인 주문이 아니면 예외
+     */
+    void verifyOrderOwner(Long userId, Long orderId);
 }

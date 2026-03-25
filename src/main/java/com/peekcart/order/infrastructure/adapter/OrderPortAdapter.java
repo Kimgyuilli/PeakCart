@@ -25,4 +25,10 @@ public class OrderPortAdapter implements OrderPort {
                 .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
         order.transitionTo(OrderStatus.PAYMENT_REQUESTED);
     }
+
+    @Override
+    public void verifyOrderOwner(Long userId, Long orderId) {
+        orderRepository.findByIdAndUserId(orderId, userId)
+                .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
+    }
 }

@@ -37,7 +37,9 @@ public class PaymentCommandService {
      *
      * @throws PaymentException 결제 정보 미존재 시 {@code PAY-003}, 금액 불일치 시 {@code PAY-001}, 승인 실패 시 {@code PAY-005}
      */
-    public PaymentDetailDto confirmPayment(ConfirmPaymentCommand command) {
+    public PaymentDetailDto confirmPayment(Long userId, ConfirmPaymentCommand command) {
+        orderPort.verifyOrderOwner(userId, command.orderId());
+
         Payment payment = paymentRepository.findByOrderId(command.orderId())
                 .orElseThrow(() -> new PaymentException(ErrorCode.PAY_003));
 

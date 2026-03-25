@@ -15,9 +15,9 @@ import com.peekcart.payment.presentation.dto.response.PaymentResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 /**
  * 결제 API 컨트롤러.
@@ -30,6 +30,7 @@ public class PaymentController {
     private final PaymentCommandService paymentCommandService;
     private final PaymentQueryService paymentQueryService;
     private final WebhookService webhookService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 결제를 승인한다.
@@ -63,16 +64,17 @@ public class PaymentController {
 
     /**
      * Toss 웹훅을 수신한다.
+     * HMAC 서명 검증을 위해 원본 JSON 문자열을 그대로 수신한다.
      */
     @PostMapping("/webhook")
     public ResponseEntity<Void> handleWebhook(
             @RequestHeader(value = "Toss-Signature", required = false) String signature,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody Map<String, Object> payload
-    ) {
-        String rawPayload = payload.toString();
-        String paymentKey = String.valueOf(payload.getOrDefault("paymentKey", ""));
-        String eventType = String.valueOf(payload.getOrDefault("eventType", ""));
+            @RequestBody String rawPayload
+    ) throws Exception {
+        JsonNode node = objectMapper.readTree(rawPayload);
+        String paymentKey = node.path("paymentKey").asText("");
+        String eventType = node.path("eventType").asText("");
         String idempKey = idempotencyKey != null ? idempotencyKey : paymentKey + "-" + eventType;
 
         webhookService.processWebhook(signature, paymentKey, eventType, idempKey, rawPayload);

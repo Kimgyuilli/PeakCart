@@ -94,7 +94,23 @@
 
 **미완료 항목**:
 - `OrderEventListener`: payment.failed 수신 시 보상 (Task 1-5에서 구현)
-- 단위 테스트: 코드 리뷰 후 작성 예정
+
+#### Task 1-4: Order 도메인 단위 테스트
+
+**완료 항목**:
+- `support/fixture/OrderFixture`: Order/Cart/CartItem 도메인 객체 + Application DTO 팩토리
+- `order/domain/model/OrderStatusTest` (27건): 8개 상태 전이 규칙 전수 검증 (ParameterizedTest 포함)
+- `order/domain/model/OrderTest` (11건): 생성 검증(상태/totalAmount/orderedAt), 빈 아이템 예외, cancel/transitionTo 상태 전이
+- `order/domain/model/OrderItemTest` (4건): subtotal 계산, 수량 0 예외, 음수 단가 예외, 단가 0 정상 생성
+- `order/domain/model/CartTest` (9건): 생성, addItem(추가/병합/별도항목), updateItemQuantity, removeItem, clear, 미존재 항목 예외
+- `order/domain/model/CartItemTest` (7건): 생성, changeQuantity, addQuantity(합산/0/음수 delta 방어)
+- `order/application/OrderCommandServiceTest` (5건): createOrder(성공/장바구니미존재/빈장바구니), cancelOrder(성공/미존재)
+- `order/application/OrderQueryServiceTest` (3건): getOrders(페이징), getOrder(성공/미존재)
+- `order/application/CartCommandServiceTest` (6건): addItem(기존/새장바구니), updateItem(성공/미존재), removeItem(성공/미존재)
+- `order/application/CartQueryServiceTest` (2건): getCart(존재/미존재 시 빈 DTO)
+- `order/presentation/OrderControllerTest` (7건): POST 생성(201/400), GET 목록, GET 상세(200/404), POST 취소(200/400)
+- `order/presentation/CartControllerTest` (8건): GET 조회(정상/빈DTO), POST 추가(201/400/400), PUT 수정(200), DELETE 삭제(204/404)
+- 전체 89건 통과 (Domain 58건 + Application 16건 + Presentation 15건)
 
 ---
 

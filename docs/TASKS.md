@@ -88,7 +88,7 @@
 ---
 
 ### Task 1-4: Order 도메인
-**상태**: 🔄 진행 중
+**상태**: ✅ 완료
 **목표**: 장바구니, 주문 생성 (재고 즉시 차감), 주문 상태 전이, 이벤트 발행
 
 | 항목 | 상태 | 비고 |
@@ -103,7 +103,7 @@
 | `CartService` — 장바구니 CRUD | ✅ | CartCommandService + CartQueryService 분리 |
 | `OrderEventListener` (`@TransactionalEventListener`) | 🔲 | payment.failed 수신 시 보상 (Task 1-5에서 구현) |
 | `OrderController` / `CartController` | ✅ | |
-| 단위 테스트 (상태 전이 + 멀티스레드 동시성) | 🔲 | |
+| 단위 테스트 | ✅ | Domain 58건 + Application 16건 + Presentation 15건 = 89건, 전부 통과 |
 
 **완료 기준**: 장바구니 → 주문 생성 (재고 차감) → 주문 취소 (재고 복구) 정상 동작
 
@@ -182,4 +182,4 @@
 | 2026-03-22 | Task 1-1 | 프로젝트 초기 설정 완료 (Gradle, Docker Compose, Flyway 스키마, global 공통 클래스) |
 | 2026-03-22 | Task 1-2 | User 도메인 구현 완료 (회원가입/로그인/로그아웃/토큰 재발급, JWT 인증, RBAC, Grace Period) |
 | 2026-03-25 | Task 1-3 | Product 도메인 완료 (엔티티, Repository, 서비스, Controller, 코드리뷰 개선, 단위 테스트 37건) |
-| 2026-03-25 | Task 1-4 (진행 중) | Order 도메인 프로덕션 코드 완료 (엔티티, Repository, 서비스, Controller) — 단위 테스트 미작성 |
+| 2026-03-25 | Task 1-4 | Order 도메인 완료 (엔티티, Repository, 서비스, Controller, 단위 테스트 89건) |

@@ -111,4 +111,30 @@ class OrderCommandServiceTest {
 
         then(productPort).should(never()).restoreStock(anyLong(), anyInt());
     }
+
+    @Test
+    @DisplayName("cancelExpiredOrder: 타임아웃 주문이 취소되고 재고가 복구되고 이벤트가 발행된다")
+    void cancelExpiredOrder_success() {
+        Order order = OrderFixture.paymentRequestedOrderWithId();
+        given(orderRepository.findById(OrderFixture.DEFAULT_ORDER_ID)).willReturn(Optional.of(order));
+
+        orderCommandService.cancelExpiredOrder(OrderFixture.DEFAULT_ORDER_ID);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        then(productPort).should().restoreStock(OrderFixture.DEFAULT_PRODUCT_ID, OrderFixture.DEFAULT_QUANTITY);
+        then(eventPublisher).should().publishEvent(any(OrderCancelledEvent.class));
+    }
+
+    @Test
+    @DisplayName("cancelExpiredOrder: 주문이 없으면 ORD-001 예외가 발생한다")
+    void cancelExpiredOrder_notFound_throwsORD001() {
+        given(orderRepository.findById(99L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderCommandService.cancelExpiredOrder(99L))
+                .isInstanceOf(OrderException.class)
+                .extracting(e -> ((OrderException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ORD_001);
+
+        then(productPort).should(never()).restoreStock(anyLong(), anyInt());
+    }
 }

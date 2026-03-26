@@ -47,6 +47,12 @@ public class OrderFixture {
         return order;
     }
 
+    public static Order paymentRequestedOrderWithId() {
+        Order order = orderWithId();
+        order.transitionTo(OrderStatus.PAYMENT_REQUESTED);
+        return order;
+    }
+
     public static Cart cart() {
         return Cart.create(DEFAULT_USER_ID);
     }

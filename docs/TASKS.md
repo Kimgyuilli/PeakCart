@@ -133,19 +133,19 @@
 ---
 
 ### Task 1-6: Notification 도메인
-**상태**: 🔄 진행 중
+**상태**: ✅ 완료
 **목표**: 이벤트 수신 → Slack Webhook 알림 발송, 알림 내역 저장
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `Notification` Entity | ✅ | NotificationType VO 포함, create/markAsRead |
+| `Notification` Entity | ✅ | NotificationType VO 포함, create |
 | Repository 계층 | ✅ | 인터페이스 + JPA + Impl |
-| `NotificationCommandService` | ✅ | 알림 생성 + Slack 발송 |
+| `NotificationCommandService` | ✅ | 알림 생성 + Slack 발송 (SlackPort DIP) |
 | `NotificationQueryService` | ✅ | 페이징 조회 |
 | `NotificationEventListener` (`@TransactionalEventListener`) | ✅ | order.created, payment.completed/failed, order.cancelled 수신 |
-| `SlackNotificationClient` — Slack Webhook 발송 | ✅ | RestClient, 실패 시 로그만 |
+| `SlackNotificationClient` — Slack Webhook 발송 | ✅ | SlackPort 구현체, RestClient, 실패 시 로그만 |
 | `NotificationController` — 알림 내역 조회 | ✅ | GET /api/v1/notifications |
-| 단위 테스트 | 🔲 | |
+| 단위 테스트 | ✅ | Domain 4건 + Application 4건 + Presentation 2건 = 10건, 전부 통과 |
 
 **완료 기준**: 주문 생성 → Slack 알림 수신 확인
 
@@ -187,3 +187,4 @@
 | 2026-03-25 | Task 1-4 | Order 도메인 완료 (엔티티, Repository, 서비스, Controller, 단위 테스트 89건) |
 | 2026-03-25 | Task 1-5 | Payment 도메인 완료 (엔티티, Repository, TossPaymentClient, EventListener, Controller, OrderPort/Adapter) |
 | 2026-03-25 | Task 1-5 테스트 | Payment 도메인 단위 테스트 완료 (Domain 22건 + Application 12건 + Presentation 7건 = 41건) |
+| 2026-03-26 | Task 1-6 | Notification 도메인 완료 (엔티티, Repository, SlackPort DIP, EventListener, Controller, 코드리뷰 개선, 단위 테스트 10건) |

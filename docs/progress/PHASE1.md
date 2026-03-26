@@ -205,8 +205,28 @@
 - `global/exception/ErrorCode`: NTF_001 추가
 - `application.yml`: slack.webhook.url 설정 추가
 
-**미완료 항목**:
-- 단위 테스트: Domain + Application + Presentation 작성 예정
+**미완료 항목**: 없음
+
+#### Task 1-6: 코드 리뷰 개선
+
+**완료 항목**:
+- `notification/application/port/SlackPort` 인터페이스 도입: Application → Infrastructure 의존 역전
+- `SlackNotificationClient`: SlackPort 구현체로 변경
+- `NotificationCommandService`: SlackNotificationClient 직접 의존 → SlackPort 포트 의존으로 교체
+- `Notification.markAsRead()`: 미사용 메서드 제거 (호출처 없음, 명세에도 없음)
+- `NotificationException` + `NTF_001` 에러 코드: 미사용 dead code 제거
+- `docs/02-architecture.md`: notification 패키지 구조 보완 (presentation, port 추가)
+- `docs/04-design-deep-dive.md`: payment.failed Consumer에 Notification Service 추가
+
+#### Task 1-6: Notification 도메인 단위 테스트
+
+**완료 항목**:
+- `support/fixture/NotificationFixture`: 테스트 데이터 팩토리 (notification, notificationWithId, DTO 생성)
+- `notification/domain/model/NotificationTest`: create 필드 검증, isRead 초기값, createdAt 설정, NotificationType 4종 (4건)
+- `notification/application/NotificationCommandServiceTest`: 알림 저장 검증, Slack 발송 검증 (2건)
+- `notification/application/NotificationQueryServiceTest`: 페이징 조회, 빈 페이지 반환 (2건)
+- `notification/presentation/NotificationControllerTest`: 목록 조회 성공, 빈 목록 반환 (2건)
+- 총 10건 전부 통과
 
 ---
 
@@ -262,6 +282,8 @@
 | 2026-03-26 | PaymentEvent에 userId 추가 | PaymentCompletedEvent/PaymentFailedEvent 레코드에 userId 필드 추가 | Notification 생성 시 userId 필요, Port 조회 대신 이벤트에 포함하여 단순화 |
 | 2026-03-26 | SlackNotificationClient 실패 무시 | Slack 발송 실패 시 try-catch로 로그만 남기고 예외 전파 안 함 | 알림 실패가 알림 DB 저장이나 원본 트랜잭션에 영향 주지 않도록 |
 | 2026-03-26 | Notification BaseEntity 미상속 | `notifications` 테이블에 `created_at`만 존재하므로 BaseEntity 미상속 | `ddl-auto: validate` 충돌 방지 (Payment, Inventory와 동일 사유) |
+| 2026-03-26 | SlackPort 인터페이스 도입 | NotificationCommandService가 SlackNotificationClient(infrastructure)에 직접 의존하던 구조를 SlackPort 포트로 역전 | TokenBlacklistPort, OrderPort 패턴과 동일, 의존 방향 준수 |
+| 2026-03-26 | markAsRead/NotificationException 제거 | 호출처 없는 markAsRead(), 미사용 NotificationException + NTF_001 에러 코드 제거 | 명세에 없는 스펙 제거, dead code 정리 |
 
 ---
 
@@ -294,7 +316,7 @@
 - [x] 주문 생성 → `@TransactionalEventListener` → 결제 요청 이벤트 전달
 - [x] 결제 성공 → 주문 상태 PAYMENT_COMPLETED 전이
 - [x] 결제 실패 → 주문 취소 + 재고 복구 (보상 트랜잭션)
-- [ ] 주문 생성 → Slack 알림 수신
+- [x] 주문 생성 → Slack 알림 수신
 - [ ] 15분 타임아웃 → 주문 자동 취소 + 재고 복구
 
 ### 기술 검증

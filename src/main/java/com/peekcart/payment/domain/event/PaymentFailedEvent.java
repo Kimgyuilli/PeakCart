@@ -6,6 +6,7 @@ package com.peekcart.payment.domain.event;
 public record PaymentFailedEvent(
         Long paymentId,
         Long orderId,
+        Long userId,
         String paymentKey,
         long amount
 ) {

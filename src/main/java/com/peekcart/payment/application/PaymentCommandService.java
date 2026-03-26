@@ -54,14 +54,14 @@ public class PaymentCommandService {
             payment.approve(response.method(), OffsetDateTime.parse(response.approvedAt()).toLocalDateTime());
 
             eventPublisher.publishEvent(new PaymentCompletedEvent(
-                    payment.getId(), payment.getOrderId(), payment.getPaymentKey(),
+                    payment.getId(), payment.getOrderId(), userId, payment.getPaymentKey(),
                     payment.getAmount(), payment.getMethod()));
         } catch (Exception e) {
             log.error("Toss 결제 승인 실패 — orderId={}, paymentKey={}: {}",
                     command.orderId(), command.paymentKey(), e.getMessage());
             payment.fail();
             eventPublisher.publishEvent(new PaymentFailedEvent(
-                    payment.getId(), payment.getOrderId(), payment.getPaymentKey(), payment.getAmount()));
+                    payment.getId(), payment.getOrderId(), userId, payment.getPaymentKey(), payment.getAmount()));
         }
 
         return PaymentDetailDto.from(payment);

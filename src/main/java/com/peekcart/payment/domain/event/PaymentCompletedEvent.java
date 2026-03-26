@@ -6,6 +6,7 @@ package com.peekcart.payment.domain.event;
 public record PaymentCompletedEvent(
         Long paymentId,
         Long orderId,
+        Long userId,
         String paymentKey,
         long amount,
         String method

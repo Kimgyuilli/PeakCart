@@ -1,12 +1,15 @@
 package com.peekcart.order.infrastructure;
 
 import com.peekcart.order.domain.model.Order;
+import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -36,5 +39,10 @@ public class OrderRepositoryImpl implements OrderRepository {
     @Override
     public Page<Order> findByUserId(Long userId, Pageable pageable) {
         return orderJpaRepository.findByUserId(userId, pageable);
+    }
+
+    @Override
+    public List<Order> findByStatusAndOrderedAtBefore(OrderStatus status, LocalDateTime cutoff) {
+        return orderJpaRepository.findByStatusAndOrderedAtBefore(status, cutoff);
     }
 }

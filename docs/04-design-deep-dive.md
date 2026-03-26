@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `order.created` | Order Service | Payment Service, Notification Service | 주문 생성 이벤트 |
 | `payment.completed` | Payment Service | Order Service, Notification Service | 결제 성공 이벤트 |
-| `payment.failed` | Payment Service | Order Service | 결제 실패 → Saga 보상 트랜잭션 |
+| `payment.failed` | Payment Service | Order Service, Notification Service | 결제 실패 → Saga 보상 트랜잭션 + 알림 |
 | `order.cancelled` | Order Service | Product Service, Notification Service | 주문 취소 → 재고 복구 |
 
 > 모든 이벤트는 **Outbox 패턴**을 통해 발행됩니다.

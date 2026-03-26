@@ -248,13 +248,21 @@ peekcart/
     │           └── PaymentEventListener.java  # @TransactionalEventListener
     │
     ├── notification/
+    │   ├── presentation/
+    │   │   └── NotificationController.java
     │   ├── application/
+    │   │   ├── NotificationCommandService.java
+    │   │   ├── NotificationQueryService.java
+    │   │   └── port/
+    │   │       └── SlackPort.java              # Slack 발송 포트 인터페이스
     │   ├── domain/
+    │   │   ├── Notification.java
+    │   │   └── NotificationType.java           # VO (Enum)
     │   └── infrastructure/
     │       ├── event/
     │       │   └── NotificationEventListener.java  # @TransactionalEventListener
     │       └── slack/
-    │           └── SlackNotificationClient.java  # Slack Webhook 발송
+    │           └── SlackNotificationClient.java  # SlackPort 구현체
     │
     └── global/
         ├── config/

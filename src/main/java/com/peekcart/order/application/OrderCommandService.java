@@ -15,6 +15,7 @@ import com.peekcart.order.domain.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -92,6 +93,26 @@ public class OrderCommandService {
 
         eventPublisher.publishEvent(
                 new OrderCancelledEvent(order.getId(), userId, order.getOrderNumber()));
+    }
+
+    /**
+     * 타임아웃된 주문을 취소하고 재고를 복구한다. 건별 독립 트랜잭션으로 처리한다.
+     *
+     * @throws OrderException 주문이 없으면 {@code ORD-001}
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void cancelExpiredOrder(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
+
+        order.cancel();
+
+        for (var item : order.getOrderItems()) {
+            productPort.restoreStock(item.getProductId(), item.getQuantity());
+        }
+
+        eventPublisher.publishEvent(
+                new OrderCancelledEvent(order.getId(), order.getUserId(), order.getOrderNumber()));
     }
 
     private String generateOrderNumber() {

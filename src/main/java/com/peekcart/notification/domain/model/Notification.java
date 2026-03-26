@@ -47,8 +47,4 @@ public class Notification {
     public static Notification create(Long userId, NotificationType type, String message) {
         return new Notification(userId, type, message);
     }
-
-    public void markAsRead() {
-        this.isRead = true;
-    }
 }

@@ -183,6 +183,33 @@
 
 ---
 
+### 2026-03-26 (Task 1-6)
+
+#### Task 1-6: Notification 도메인 구현 (테스트 제외)
+
+**완료 항목**:
+- `payment/domain/event/PaymentCompletedEvent`, `PaymentFailedEvent`: userId 필드 추가 (Notification에서 사용)
+- `payment/application/PaymentCommandService`: 이벤트 발행 시 userId 전달
+- `notification/domain/model/Notification`: Entity, create/markAsRead, BaseEntity 미상속 (created_at만)
+- `notification/domain/model/NotificationType`: ORDER_CREATED, PAYMENT_COMPLETED, PAYMENT_FAILED, ORDER_CANCELLED
+- `notification/domain/repository/NotificationRepository`: save, findByUserId 인터페이스
+- `notification/domain/exception/NotificationException`: BusinessException 상속
+- `notification/infrastructure/`: NotificationJpaRepository, NotificationRepositoryImpl
+- `notification/infrastructure/slack/SlackNotificationClient`: RestClient 기반 Slack Webhook 발송, 실패 시 로그만
+- `notification/infrastructure/event/NotificationEventListener`: 4개 이벤트 수신 (AFTER_COMMIT + REQUIRES_NEW)
+- `notification/application/NotificationCommandService`: 알림 생성 + Slack 발송
+- `notification/application/NotificationQueryService`: 페이징 조회
+- `notification/application/dto/NotificationDetailDto`: Application DTO
+- `notification/presentation/NotificationController`: GET /api/v1/notifications
+- `notification/presentation/dto/response/NotificationResponse`: Presentation DTO
+- `global/exception/ErrorCode`: NTF_001 추가
+- `application.yml`: slack.webhook.url 설정 추가
+
+**미완료 항목**:
+- 단위 테스트: Domain + Application + Presentation 작성 예정
+
+---
+
 ### 2026-03-23
 
 #### Task 1-2: 테스트 코드 완성 및 아키텍처 정제
@@ -231,7 +258,10 @@
 | 2026-03-25 | Payment 생성 시 UUID paymentKey | OrderCreatedEvent 수신 시 Toss paymentKey 미확정이므로 UUID 임시값 부여, confirm 시 실제 키로 교체 | payments.payment_key NOT NULL 제약 + UNIQUE 보장 필요 |
 | 2026-03-25 | HMAC 검증을 WebhookService로 | Controller에서 HMAC 검증 로직 제거, WebhookService가 서명 검증 + 멱등성 처리를 일괄 담당 | Controller는 파싱만, 비즈니스 로직은 Service 책임 |
 | 2026-03-25 | OrderPort 도입 (Payment → Order DIP) | Payment application 레이어가 Order 도메인 내부에 직접 의존하지 않도록 OrderPort 인터페이스 도입 | ProductPort 패턴과 동일, 의존 방향 준수 |
-| 2026-03-25 | TossPaymentClient에 RestClient 사용 | spring-boot-starter-web에 내장된 RestClient(Spring 6.1+) 선택, 추가 의존성 없음 | WebClient(webflux 의존)나 RestTemplate(deprecated 경로) 대신 선택 |
+| 2026-03-25 | TossPaymentClient에 RestClient 사용 |  spring-boot-starter-web에 내장된 RestClient(Spring 6.1+) 선택, 추가 의존성 없음 | WebClient(webflux 의존)나 RestTemplate(deprecated 경로) 대신 선택 |
+| 2026-03-26 | PaymentEvent에 userId 추가 | PaymentCompletedEvent/PaymentFailedEvent 레코드에 userId 필드 추가 | Notification 생성 시 userId 필요, Port 조회 대신 이벤트에 포함하여 단순화 |
+| 2026-03-26 | SlackNotificationClient 실패 무시 | Slack 발송 실패 시 try-catch로 로그만 남기고 예외 전파 안 함 | 알림 실패가 알림 DB 저장이나 원본 트랜잭션에 영향 주지 않도록 |
+| 2026-03-26 | Notification BaseEntity 미상속 | `notifications` 테이블에 `created_at`만 존재하므로 BaseEntity 미상속 | `ddl-auto: validate` 충돌 방지 (Payment, Inventory와 동일 사유) |
 
 ---
 
@@ -258,7 +288,7 @@
 - [x] `POST /api/v1/orders/{id}/cancel` — 주문 취소
 - [x] `POST /api/v1/payments/confirm` — 결제 승인
 - [x] `POST /api/v1/payments/webhook` — 웹훅 수신 (HMAC 검증)
-- [ ] `GET /api/v1/notifications` — 알림 내역
+- [x] `GET /api/v1/notifications` — 알림 내역
 
 ### 플로우 검증
 - [x] 주문 생성 → `@TransactionalEventListener` → 결제 요청 이벤트 전달

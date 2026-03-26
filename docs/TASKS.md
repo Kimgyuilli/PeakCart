@@ -133,18 +133,18 @@
 ---
 
 ### Task 1-6: Notification 도메인
-**상태**: 🔲 대기
+**상태**: 🔄 진행 중
 **목표**: 이벤트 수신 → Slack Webhook 알림 발송, 알림 내역 저장
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `Notification` Entity | 🔲 | |
-| Repository 계층 | 🔲 | |
-| `NotificationCommandService` | 🔲 | |
-| `NotificationQueryService` | 🔲 | |
-| `NotificationEventListener` (`@TransactionalEventListener`) | 🔲 | order.created, payment.* 수신 |
-| `SlackNotificationClient` — Slack Webhook 발송 | 🔲 | |
-| `NotificationController` — 알림 내역 조회 | 🔲 | |
+| `Notification` Entity | ✅ | NotificationType VO 포함, create/markAsRead |
+| Repository 계층 | ✅ | 인터페이스 + JPA + Impl |
+| `NotificationCommandService` | ✅ | 알림 생성 + Slack 발송 |
+| `NotificationQueryService` | ✅ | 페이징 조회 |
+| `NotificationEventListener` (`@TransactionalEventListener`) | ✅ | order.created, payment.completed/failed, order.cancelled 수신 |
+| `SlackNotificationClient` — Slack Webhook 발송 | ✅ | RestClient, 실패 시 로그만 |
+| `NotificationController` — 알림 내역 조회 | ✅ | GET /api/v1/notifications |
 | 단위 테스트 | 🔲 | |
 
 **완료 기준**: 주문 생성 → Slack 알림 수신 확인

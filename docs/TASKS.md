@@ -101,7 +101,7 @@
 | `OrderCommandService` — 주문 생성, 취소 | ✅ | 재고 즉시 차감 + 이벤트 발행 |
 | `OrderQueryService` — 주문 내역 (페이징) | ✅ | |
 | `CartService` — 장바구니 CRUD | ✅ | CartCommandService + CartQueryService 분리 |
-| `OrderEventListener` (`@TransactionalEventListener`) | 🔲 | payment.failed 수신 시 보상 (Task 1-5에서 구현) |
+| `OrderEventListener` (`@TransactionalEventListener`) | ✅ | payment.approved/failed 수신 → 주문 상태 전이 + 재고 복구 (Task 1-5에서 구현) |
 | `OrderController` / `CartController` | ✅ | |
 | 단위 테스트 | ✅ | Domain 58건 + Application 16건 + Presentation 15건 = 89건, 전부 통과 |
 
@@ -152,15 +152,15 @@
 ---
 
 ### Task 1-7: 결제 타임아웃 처리
-**상태**: 🔲 대기
+**상태**: ✅ 완료
 **목표**: 15분 초과 주문 자동 취소 + 재고 복구 스케줄러
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `OrderTimeoutScheduler` (`@Scheduled`) | 🔲 | 단일 인스턴스, ShedLock 없음 |
-| `PAYMENT_REQUESTED` 상태 15분 초과 조회 | 🔲 | 인덱스: `idx_orders_status_ordered_at` |
-| 자동 취소 + 재고 복구 트랜잭션 | 🔲 | |
-| 단위/통합 테스트 | 🔲 | |
+| `OrderTimeoutScheduler` (`@Scheduled`) | ✅ | 60초 주기, 단일 인스턴스, ShedLock 없음 |
+| `PAYMENT_REQUESTED` 상태 15분 초과 조회 | ✅ | JOIN FETCH JPQL, 인덱스: `idx_orders_status_ordered_at` |
+| 자동 취소 + 재고 복구 트랜잭션 | ✅ | REQUIRES_NEW 건별 독립 트랜잭션, 실패 격리 |
+| 단위 테스트 | ✅ | Service 2건 + Scheduler 3건 = 5건, 전부 통과 |
 
 **완료 기준**: 15분 초과 주문이 CANCELLED로 자동 전이 + 재고 복구 확인
 
@@ -188,3 +188,4 @@
 | 2026-03-25 | Task 1-5 | Payment 도메인 완료 (엔티티, Repository, TossPaymentClient, EventListener, Controller, OrderPort/Adapter) |
 | 2026-03-25 | Task 1-5 테스트 | Payment 도메인 단위 테스트 완료 (Domain 22건 + Application 12건 + Presentation 7건 = 41건) |
 | 2026-03-26 | Task 1-6 | Notification 도메인 완료 (엔티티, Repository, SlackPort DIP, EventListener, Controller, 코드리뷰 개선, 단위 테스트 10건) |
+| 2026-03-26 | Task 1-7 | 결제 타임아웃 스케줄러 완료 (OrderTimeoutScheduler, cancelExpiredOrder, REQUIRES_NEW 건별 트랜잭션, 단위 테스트 5건) |

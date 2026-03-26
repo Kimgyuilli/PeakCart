@@ -230,6 +230,26 @@
 
 ---
 
+### 2026-03-26 (Task 1-7)
+
+#### Task 1-7: 결제 타임아웃 스케줄러 구현
+
+**완료 항목**:
+- `PeekcartApplication`: `@EnableScheduling` 추가
+- `order/domain/repository/OrderRepository`: `findByStatusAndOrderedAtBefore` 메서드 추가
+- `order/infrastructure/OrderJpaRepository`: JOIN FETCH JPQL 쿼리 (N+1 방지)
+- `order/infrastructure/OrderRepositoryImpl`: 위임 메서드 추가
+- `order/application/OrderCommandService`: `cancelExpiredOrder(orderId)` — REQUIRES_NEW 건별 독립 트랜잭션, 재고 복구 + OrderCancelledEvent 발행
+- `order/infrastructure/scheduler/OrderTimeoutScheduler`: 60초 fixedDelay, 15분 초과 주문 조회 → 건별 취소, try-catch 실패 격리
+
+**테스트**:
+- `OrderCommandServiceTest`: cancelExpiredOrder 성공/미존재 (2건 추가, 기존 5건 포함 총 7건)
+- `OrderTimeoutSchedulerTest`: 만료 주문 처리/빈 목록/실패 격리 (3건)
+- `OrderFixture`: paymentRequestedOrderWithId 팩토리 추가
+- 전체 테스트 통과
+
+---
+
 ### 2026-03-23
 
 #### Task 1-2: 테스트 코드 완성 및 아키텍처 정제
@@ -284,6 +304,8 @@
 | 2026-03-26 | Notification BaseEntity 미상속 | `notifications` 테이블에 `created_at`만 존재하므로 BaseEntity 미상속 | `ddl-auto: validate` 충돌 방지 (Payment, Inventory와 동일 사유) |
 | 2026-03-26 | SlackPort 인터페이스 도입 | NotificationCommandService가 SlackNotificationClient(infrastructure)에 직접 의존하던 구조를 SlackPort 포트로 역전 | TokenBlacklistPort, OrderPort 패턴과 동일, 의존 방향 준수 |
 | 2026-03-26 | markAsRead/NotificationException 제거 | 호출처 없는 markAsRead(), 미사용 NotificationException + NTF_001 에러 코드 제거 | 명세에 없는 스펙 제거, dead code 정리 |
+| 2026-03-26 | cancelExpiredOrder 별도 메서드 | 기존 cancelOrder(userId, orderId) 재사용 안 함, 스케줄러 전용 cancelExpiredOrder(orderId) 신설 | cancelOrder는 userId 소유권 검증 포함 — 스케줄러는 시스템 작업이므로 불필요 |
+| 2026-03-26 | REQUIRES_NEW 건별 트랜잭션 | cancelExpiredOrder에 Propagation.REQUIRES_NEW 적용, 스케줄러에서 try-catch 감싸기 | 한 건 실패가 나머지 주문 취소에 영향 주지 않도록 실패 격리 |
 
 ---
 
@@ -317,7 +339,7 @@
 - [x] 결제 성공 → 주문 상태 PAYMENT_COMPLETED 전이
 - [x] 결제 실패 → 주문 취소 + 재고 복구 (보상 트랜잭션)
 - [x] 주문 생성 → Slack 알림 수신
-- [ ] 15분 타임아웃 → 주문 자동 취소 + 재고 복구
+- [x] 15분 타임아웃 → 주문 자동 취소 + 재고 복구
 
 ### 기술 검증
 - [x] Docker Compose (`MySQL + Redis`) 정상 구동

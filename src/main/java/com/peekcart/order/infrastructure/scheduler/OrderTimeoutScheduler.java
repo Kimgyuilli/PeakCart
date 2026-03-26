@@ -1,6 +1,7 @@
 package com.peekcart.order.infrastructure.scheduler;
 
 import com.peekcart.order.application.OrderCommandService;
+import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderRepository;
@@ -38,6 +39,8 @@ public class OrderTimeoutScheduler {
         try {
             orderCommandService.cancelExpiredOrder(orderId);
             log.info("타임아웃 주문 취소: orderId={}, orderNumber={}", orderId, orderNumber);
+        } catch (OrderException e) {
+            log.warn("타임아웃 주문 취소 스킵 (상태 경합): orderId={}, reason={}", orderId, e.getMessage());
         } catch (Exception e) {
             log.error("타임아웃 주문 취소 실패: orderId={}", orderId, e);
         }

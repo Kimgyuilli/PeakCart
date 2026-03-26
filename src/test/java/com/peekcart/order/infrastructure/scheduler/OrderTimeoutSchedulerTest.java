@@ -1,6 +1,8 @@
 package com.peekcart.order.infrastructure.scheduler;
 
+import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.OrderCommandService;
+import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderRepository;
@@ -66,6 +68,22 @@ class OrderTimeoutSchedulerTest {
         given(orderRepository.findByStatusAndOrderedAtBefore(eq(OrderStatus.PAYMENT_REQUESTED), any(LocalDateTime.class)))
                 .willReturn(List.of(order1, order2));
         willThrow(new RuntimeException("DB error")).given(orderCommandService).cancelExpiredOrder(order1.getId());
+
+        orderTimeoutScheduler.cancelExpiredOrders();
+
+        then(orderCommandService).should(times(1)).cancelExpiredOrder(order1.getId());
+        then(orderCommandService).should(times(1)).cancelExpiredOrder(order2.getId());
+    }
+
+    @Test
+    @DisplayName("상태 경합(OrderException)이 발생해도 나머지는 처리된다")
+    void cancelExpiredOrders_orderExceptionSkipsAndContinues() {
+        Order order1 = OrderFixture.paymentRequestedOrderWithId();
+        Order order2 = OrderFixture.paymentRequestedOrderWithId();
+        ReflectionTestUtils.setField(order2, "id", 2L);
+        given(orderRepository.findByStatusAndOrderedAtBefore(eq(OrderStatus.PAYMENT_REQUESTED), any(LocalDateTime.class)))
+                .willReturn(List.of(order1, order2));
+        willThrow(new OrderException(ErrorCode.ORD_003)).given(orderCommandService).cancelExpiredOrder(order1.getId());
 
         orderTimeoutScheduler.cancelExpiredOrders();
 

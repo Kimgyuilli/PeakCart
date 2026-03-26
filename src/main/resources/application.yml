@@ -23,6 +23,10 @@ app:
     access-token-expiry: 1800000    # 30분 (ms)
     refresh-token-expiry: 604800000 # 7일 (ms)
 
+slack:
+  webhook:
+    url: ${SLACK_WEBHOOK_URL:https://hooks.slack.com/services/placeholder}
+
 toss:
   payments:
     secret-key: ${TOSS_SECRET_KEY:test_sk_placeholder}

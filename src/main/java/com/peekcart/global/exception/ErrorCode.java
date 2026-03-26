@@ -40,6 +40,9 @@ public enum ErrorCode {
     PAY_005(HttpStatus.BAD_REQUEST, "PAY-005", "결제 승인에 실패했습니다."),
     PAY_006(HttpStatus.UNAUTHORIZED, "PAY-006", "유효하지 않은 웹훅 서명입니다."),
 
+    // Notification
+    NTF_001(HttpStatus.NOT_FOUND, "NTF-001", "알림을 찾을 수 없습니다."),
+
     // System
     SYS_001(HttpStatus.INTERNAL_SERVER_ERROR, "SYS-001", "내부 서버 오류가 발생했습니다."),
     SYS_002(HttpStatus.SERVICE_UNAVAILABLE, "SYS-002", "외부 API 호출에 실패했습니다."),

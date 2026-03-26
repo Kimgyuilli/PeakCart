@@ -1,5 +1,6 @@
 package com.peekcart.notification.infrastructure.slack;
 
+import com.peekcart.notification.application.port.SlackPort;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -14,7 +15,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class SlackNotificationClient {
+public class SlackNotificationClient implements SlackPort {
 
     private final RestClient restClient;
     private final String webhookUrl;
@@ -24,6 +25,7 @@ public class SlackNotificationClient {
         this.restClient = RestClient.create();
     }
 
+    @Override
     public void send(String message) {
         try {
             restClient.post()

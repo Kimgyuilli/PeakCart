@@ -314,6 +314,15 @@
 > 구현 과정에서 발생한 의사결정, 트레이드오프, 주의사항을 기록합니다.
 > `docs/04-design-deep-dive.md`의 설계 결정 사항도 함께 참고하세요.
 
+### 2026-03-26 (커버리지 측정)
+
+#### JaCoCo 커버리지 설정 및 측정
+
+**완료 항목**:
+- `build.gradle`: JaCoCo 플러그인 추가, `jacocoTestReport` 태스크 설정 (DTO/config/Application 클래스 제외)
+- 전체 213건 테스트 통과 확인
+- 커버리지 측정 결과: Domain 216/216 (100%), Application 203/205 (99%)
+
 ---
 
 ## Phase 1 완료 시 체크리스트
@@ -345,5 +354,5 @@
 - [x] Docker Compose (`MySQL + Redis`) 정상 구동
 - [x] Flyway V1 마이그레이션 정상 적용
 - [ ] Swagger UI 모든 API 명세 확인
-- [ ] 단위 테스트: Domain 90%+, Application 80%+
+- [x] 단위 테스트: Domain 100%, Application 99% (JaCoCo 측정 완료)
 - [ ] 낙관적 락 (`inventories.version`) 동시성 보호 확인

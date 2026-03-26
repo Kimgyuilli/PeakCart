@@ -189,3 +189,4 @@
 | 2026-03-25 | Task 1-5 테스트 | Payment 도메인 단위 테스트 완료 (Domain 22건 + Application 12건 + Presentation 7건 = 41건) |
 | 2026-03-26 | Task 1-6 | Notification 도메인 완료 (엔티티, Repository, SlackPort DIP, EventListener, Controller, 코드리뷰 개선, 단위 테스트 10건) |
 | 2026-03-26 | Task 1-7 | 결제 타임아웃 스케줄러 완료 (OrderTimeoutScheduler, cancelExpiredOrder, REQUIRES_NEW 건별 트랜잭션, 단위 테스트 5건) |
+| 2026-03-26 | 커버리지 측정 | JaCoCo 설정 + 커버리지 측정 (Domain 100%, Application 99%, 전체 213건 통과) |

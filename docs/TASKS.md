@@ -166,9 +166,125 @@
 
 ---
 
+## 현재 Phase: Phase 2 — 성능 개선
+
+**Phase 2 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
+- [ ] Redis 캐싱 적용 후 상품 조회 응답시간 개선 확인
+- [ ] 동시 주문 테스트 시 오버셀링 0건
+- [ ] Outbox → Kafka 이벤트 발행 정상 동작
+- [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
+- [ ] JMeter 로컬 실행으로 기본 TPS 비교 측정
+
+---
+
+## Phase 2 Tasks
+
+### Task 2-1: Redis 캐싱
+**상태**: 🔲 대기
+**목표**: 상품 목록/상세 조회에 Cache Aside 패턴 적용, 응답시간 개선
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `build.gradle` Redis 캐싱 의존성 추가 (spring-boot-starter-cache) | 🔲 | |
+| `CacheConfig` 설정 (RedisCacheManager, TTL, 직렬화) | 🔲 | |
+| `ProductQueryService` 상품 상세 조회 캐싱 (`@Cacheable`) | 🔲 | Cache Aside: 캐시 미스 시 DB 조회 → 캐시 저장 |
+| `ProductQueryService` 상품 목록 조회 캐싱 | 🔲 | 페이징+카테고리 조건별 캐시 키 |
+| `ProductCommandService` 상품 수정/삭제 시 캐시 무효화 (`@CacheEvict`) | 🔲 | |
+| 통합 테스트 (캐시 적중/무효화 검증) | 🔲 | Testcontainers Redis |
+
+**완료 기준**: 캐시 적중 시 DB 조회 없이 응답, 상품 변경 시 캐시 즉시 무효화
+
+---
+
+### Task 2-2: Redis 분산 락 (재고 동시성 제어)
+**상태**: 🔲 대기
+**목표**: Redisson 분산 락 + DB 낙관적 락 이중 방어로 오버셀링 방지
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `build.gradle` Redisson 의존성 추가 | 🔲 | |
+| `RedissonConfig` 설정 | 🔲 | |
+| `DistributedLockManager` 구현 (Redisson RLock) | 🔲 | 키: `inventory-lock:{productId}`, waitTime/leaseTime 설정 |
+| `InventoryService` 분산 락 적용 (재고 차감) | 🔲 | 락 획득 실패 → 즉시 409 응답 |
+| 동시성 통합 테스트 (멀티스레드 오버셀링 검증) | 🔲 | Testcontainers Redis, 50스레드 동시 차감 |
+
+**완료 기준**: 동시 주문 테스트 시 오버셀링 0건, Redis 장애 시 DB 낙관적 락 fallback 동작
+
+---
+
+### Task 2-3: Kafka + Outbox 도입
+**상태**: 🔲 대기
+**목표**: `@TransactionalEventListener` → Outbox 패턴 + Kafka 전환, 이벤트 유실 방지
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `docker-compose.yml` Kafka (KRaft) + Zookeeper 추가 | 🔲 | |
+| `build.gradle` spring-kafka 의존성 추가 | 🔲 | |
+| Flyway `V2__outbox_processed_events.sql` 스키마 추가 | 🔲 | outbox_events + processed_events + 인덱스 |
+| `OutboxEvent` Entity | 🔲 | PENDING/PUBLISHED/FAILED 상태, retry_count |
+| `OutboxEventRepository` 계층 | 🔲 | |
+| `OutboxEventPublisher` — 비즈니스 트랜잭션 내 Outbox 저장 | 🔲 | 기존 `ApplicationEventPublisher` 대체 |
+| `OutboxPollingScheduler` — Outbox Polling → Kafka 발행 | 🔲 | 5초 주기, PENDING 조회 → KafkaTemplate 발행 → PUBLISHED 상태 변경 |
+| `KafkaProducerConfig` 설정 | 🔲 | 파티션 키: orderId |
+| `KafkaConsumerConfig` 설정 | 🔲 | Consumer Group 네이밍 규칙 적용 |
+| 기존 `@TransactionalEventListener` → Kafka Consumer 전환 | 🔲 | PaymentEventListener, OrderEventListener, NotificationEventListener |
+| Kafka 토픽 생성 설정 (`KafkaTopicConfig`) | 🔲 | 4개 토픽, 파티션 3, Replication 1 |
+| 통합 테스트 (Outbox → Kafka 발행 → Consumer 수신 검증) | 🔲 | Testcontainers Kafka |
+
+**완료 기준**: 주문 생성 → Outbox 저장 → Kafka 발행 → Consumer 수신 전체 플로우 정상 동작
+
+---
+
+### Task 2-4: Consumer 멱등성
+**상태**: 🔲 대기
+**목표**: `processed_events` 테이블 기반 중복 소비 방지
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `ProcessedEvent` Entity | 🔲 | event_id UK, consumer_group |
+| `ProcessedEventRepository` 계층 | 🔲 | |
+| Consumer 멱등성 처리 로직 (event_id 중복 체크) | 🔲 | 비즈니스 로직 + processed_events 기록 단일 트랜잭션 |
+| 멱등성 통합 테스트 (동일 이벤트 2회 소비 시 1회만 처리) | 🔲 | |
+
+**완료 기준**: 동일 event_id 중복 소비 시 비즈니스 로직 1회만 실행
+
+---
+
+### Task 2-5: DLQ 구성
+**상태**: 🔲 대기
+**목표**: Consumer 재시도 실패 시 DLQ 토픽 라우팅 + Slack 알림
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| Consumer 재시도 정책 설정 (3회, exponential backoff) | 🔲 | 1s, 5s, 30s |
+| DLQ 토픽 설정 (`{원본토픽}.dlq`) | 🔲 | 4개 DLQ 토픽 |
+| `DeadLetterPublishingRecoverer` 설정 | 🔲 | 재시도 초과 → DLQ 라우팅 |
+| DLQ 메시지 수신 시 Slack 알림 발송 | 🔲 | 기존 SlackPort 재사용 |
+| DLQ 통합 테스트 (처리 실패 → DLQ 토픽 라우팅 검증) | 🔲 | |
+
+**완료 기준**: Consumer 3회 재시도 실패 → DLQ 토픽 이동 + Slack 알림 발송
+
+---
+
+### Task 2-6: ShedLock
+**상태**: 🔲 대기
+**목표**: 타임아웃/Outbox 스케줄러에 ShedLock 적용, 분산 환경 중복 실행 방지
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `build.gradle` ShedLock 의존성 추가 | 🔲 | shedlock-spring + shedlock-provider-jdbc-template |
+| Flyway `V3__shedlock.sql` 스키마 추가 | 🔲 | shedlock 테이블 |
+| `ShedLockConfig` 설정 (`@EnableSchedulerLock`) | 🔲 | |
+| `OrderTimeoutScheduler` ShedLock 적용 | 🔲 | `@SchedulerLock(name = "orderTimeoutCancelJob", lockAtMostFor = "PT10M")` |
+| `OutboxPollingScheduler` ShedLock 적용 | 🔲 | `@SchedulerLock(name = "outboxPollingJob", lockAtMostFor = "PT5M")` |
+| 통합 테스트 (ShedLock 동작 검증) | 🔲 | |
+
+**완료 기준**: 스케줄러 중복 실행 방지 동작 확인
+
+---
+
 ## 다음 Phase 예정
 
-- **Phase 2**: Redis 캐싱, Redisson 분산 락, Kafka + Outbox, DLQ, ShedLock
 - **Phase 3**: GitHub Actions CI, minikube K8s, Prometheus + Grafana, 부하 테스트
 - **Phase 4**: Gradle 멀티모듈, Spring Cloud Gateway, Choreography Saga, CQRS
 

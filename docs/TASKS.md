@@ -192,3 +192,4 @@
 | 2026-03-26 | 커버리지 측정 | JaCoCo 설정 + 커버리지 측정 (Domain 100%, Application 99%, 전체 213건 통과) |
 | 2026-03-27 | Swagger 문서화 | OpenApiConfig(JWT SecurityScheme), 8개 Controller @Tag/@Operation, @ParameterObject Pageable |
 | 2026-03-27 | Swagger 개선 | 에러 핸들링 4건 보강, 204 No Content 통일, LoginUser 전역 숨김, Pageable 기본값 설정 |
+| 2026-03-27 | 낙관적 락 동시성 테스트 | Inventory @Version 낙관적 락 통합 테스트 (Testcontainers, 10스레드 동시 차감, lost update 방지 검증), ErrorCode PRD_004 + GlobalExceptionHandler OptimisticLockingFailureException 409 처리 |

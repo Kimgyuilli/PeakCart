@@ -308,6 +308,8 @@
 | 2026-03-26 | REQUIRES_NEW 건별 트랜잭션 | cancelExpiredOrder에 Propagation.REQUIRES_NEW 적용, 스케줄러에서 try-catch 감싸기 | 한 건 실패가 나머지 주문 취소에 영향 주지 않도록 실패 격리 |
 | 2026-03-27 | LoginUser 전역 숨김 | Controller별 `@Parameter(hidden=true)` 대신 `OpenApiConfig`에서 `SpringDocUtils.addRequestWrapperToIgnore` | 한 곳에서 관리, Controller 코드에 Swagger 관심사 미침투 |
 | 2026-03-27 | logout/cancelOrder 204 통일 | `ApiResponse.ok()` → `ResponseEntity.noContent().build()` | body 없는 작업은 204가 REST 관례, DELETE(noContent) 패턴과 일관 |
+| 2026-03-27 | 낙관적 락 동시성 테스트 assertion | `successCount == 1` 대신 `successCount + conflictCount == threadCount` + `conflictCount >= 1` + 최종 재고 검증 | DB 타이밍에 따라 성공 수가 비결정적이므로, lost update 없음을 최종 재고로 검증하는 게 안정적 |
+| 2026-03-27 | OptimisticLockingFailureException → 409 | `GlobalExceptionHandler`에서 `OptimisticLockingFailureException` → ErrorCode PRD_004 (409 Conflict) | 클라이언트에 재시도 가능한 충돌임을 명확히 전달 |
 
 ---
 
@@ -315,6 +317,23 @@
 
 > 구현 과정에서 발생한 의사결정, 트레이드오프, 주의사항을 기록합니다.
 > `docs/04-design-deep-dive.md`의 설계 결정 사항도 함께 참고하세요.
+
+### 2026-03-27 (낙관적 락 동시성 테스트)
+
+#### Inventory @Version 낙관적 락 통합 테스트
+
+**완료 항목**:
+- `product/infrastructure/InventoryConcurrencyTest`: @SpringBootTest + Testcontainers 통합 테스트
+  - 10스레드 동시 재고 차감 → 낙관적 락 충돌 발생 검증
+  - 최종 재고 = 초기 재고 - (성공 수 × 차감량) — lost update 없음 검증
+- `ErrorCode.PRD_004`: 재고 변경 충돌 에러 코드 (409 Conflict)
+- `GlobalExceptionHandler`: `OptimisticLockingFailureException` → 409 응답 핸들러 추가
+
+**리뷰 후 수정 사항**:
+- `@DataJpaTest` → `@SpringBootTest` 변경 (멀티스레드 EntityManager 직접 관리에 적합)
+- `successCount == 1` → 비결정적 assertion 제거, `successCount + conflictCount == threadCount` + 최종 재고 검증으로 안정화
+
+---
 
 ### 2026-03-27 (Swagger 문서화 + API 개선)
 
@@ -375,4 +394,4 @@
 - [x] Flyway V1 마이그레이션 정상 적용
 - [x] Swagger UI 모든 API 명세 확인 + 동작 테스트 완료
 - [x] 단위 테스트: Domain 100%, Application 99% (JaCoCo 측정 완료)
-- [ ] 낙관적 락 (`inventories.version`) 동시성 보호 확인
+- [x] 낙관적 락 (`inventories.version`) 동시성 보호 확인

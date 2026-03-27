@@ -306,6 +306,8 @@
 | 2026-03-26 | markAsRead/NotificationException 제거 | 호출처 없는 markAsRead(), 미사용 NotificationException + NTF_001 에러 코드 제거 | 명세에 없는 스펙 제거, dead code 정리 |
 | 2026-03-26 | cancelExpiredOrder 별도 메서드 | 기존 cancelOrder(userId, orderId) 재사용 안 함, 스케줄러 전용 cancelExpiredOrder(orderId) 신설 | cancelOrder는 userId 소유권 검증 포함 — 스케줄러는 시스템 작업이므로 불필요 |
 | 2026-03-26 | REQUIRES_NEW 건별 트랜잭션 | cancelExpiredOrder에 Propagation.REQUIRES_NEW 적용, 스케줄러에서 try-catch 감싸기 | 한 건 실패가 나머지 주문 취소에 영향 주지 않도록 실패 격리 |
+| 2026-03-27 | LoginUser 전역 숨김 | Controller별 `@Parameter(hidden=true)` 대신 `OpenApiConfig`에서 `SpringDocUtils.addRequestWrapperToIgnore` | 한 곳에서 관리, Controller 코드에 Swagger 관심사 미침투 |
+| 2026-03-27 | logout/cancelOrder 204 통일 | `ApiResponse.ok()` → `ResponseEntity.noContent().build()` | body 없는 작업은 204가 REST 관례, DELETE(noContent) 패턴과 일관 |
 
 ---
 
@@ -313,6 +315,24 @@
 
 > 구현 과정에서 발생한 의사결정, 트레이드오프, 주의사항을 기록합니다.
 > `docs/04-design-deep-dive.md`의 설계 결정 사항도 함께 참고하세요.
+
+### 2026-03-27 (Swagger 문서화 + API 개선)
+
+#### Swagger 문서화
+**완료 항목**:
+- `OpenApiConfig`: 프로젝트 메타정보 + JWT Bearer SecurityScheme + `LoginUser` 전역 숨김 (`SpringDocUtils.addRequestWrapperToIgnore`)
+- 8개 Controller에 `@Tag` + `@Operation` 추가 (20개 엔드포인트)
+- `@ParameterObject` + `@PageableDefault(size=20)` 적용 (Product, Order, Notification)
+- `application.yml`: `spring.data.web.pageable` 기본값/최대값 설정
+
+#### API 개선
+**완료 항목**:
+- `GlobalExceptionHandler`: `HttpMessageNotReadableException`(400), `HttpRequestMethodNotSupportedException`(405), `MissingServletRequestParameterException`(400), `InvalidDataAccessApiUsageException`(400) 추가
+- `logout()`, `cancelOrder()`: 200 + `ApiResponse.ok()` → 204 No Content로 통일 (DELETE 패턴 일관성)
+- 슬라이스 테스트 2건 수정 (200 → 204)
+- Swagger UI에서 전체 API 동작 확인 완료
+
+---
 
 ### 2026-03-26 (커버리지 측정)
 
@@ -353,6 +373,6 @@
 ### 기술 검증
 - [x] Docker Compose (`MySQL + Redis`) 정상 구동
 - [x] Flyway V1 마이그레이션 정상 적용
-- [ ] Swagger UI 모든 API 명세 확인
+- [x] Swagger UI 모든 API 명세 확인 + 동작 테스트 완료
 - [x] 단위 테스트: Domain 100%, Application 99% (JaCoCo 측정 완료)
 - [ ] 낙관적 락 (`inventories.version`) 동시성 보호 확인

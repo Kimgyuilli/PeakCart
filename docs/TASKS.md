@@ -8,10 +8,10 @@
 ## 현재 Phase: Phase 1 — 모놀리식 구현
 
 **Phase 1 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
-- [ ] 모든 도메인 CRUD API 정상 동작 (Swagger UI 기준)
-- [ ] 주문 → 결제 → 알림 전체 플로우 정상 처리
-- [ ] 주문 상태 전이 검증 완료 (결제 성공/실패/타임아웃)
-- [ ] 결제 타임아웃 스케줄러 동작 확인
+- [x] 모든 도메인 CRUD API 정상 동작 (Swagger UI 기준)
+- [x] 주문 → 결제 → 알림 전체 플로우 정상 처리
+- [x] 주문 상태 전이 검증 완료 (결제 성공/실패/타임아웃)
+- [x] 결제 타임아웃 스케줄러 동작 확인
 
 ---
 
@@ -190,3 +190,5 @@
 | 2026-03-26 | Task 1-6 | Notification 도메인 완료 (엔티티, Repository, SlackPort DIP, EventListener, Controller, 코드리뷰 개선, 단위 테스트 10건) |
 | 2026-03-26 | Task 1-7 | 결제 타임아웃 스케줄러 완료 (OrderTimeoutScheduler, cancelExpiredOrder, REQUIRES_NEW 건별 트랜잭션, 단위 테스트 5건) |
 | 2026-03-26 | 커버리지 측정 | JaCoCo 설정 + 커버리지 측정 (Domain 100%, Application 99%, 전체 213건 통과) |
+| 2026-03-27 | Swagger 문서화 | OpenApiConfig(JWT SecurityScheme), 8개 Controller @Tag/@Operation, @ParameterObject Pageable |
+| 2026-03-27 | Swagger 개선 | 에러 핸들링 4건 보강, 204 No Content 통일, LoginUser 전역 숨김, Pageable 기본값 설정 |

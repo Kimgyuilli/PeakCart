@@ -3,6 +3,7 @@ package com.peekcart.global.exception;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -65,6 +66,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .badRequest()
                 .body(new ErrorResponse(400, "SYS-003", "필수 파라미터가 누락되었습니다: " + e.getParameterName(), Instant.now()));
+    }
+
+    /**
+     * 낙관적 락 충돌 시 409 Conflict를 반환한다.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLockingFailure(OptimisticLockingFailureException e) {
+        ErrorCode errorCode = ErrorCode.PRD_004;
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(new ErrorResponse(errorCode.getHttpStatus().value(), errorCode.getCode(), errorCode.getMessage(), Instant.now()));
     }
 
     @ExceptionHandler(InvalidDataAccessApiUsageException.class)

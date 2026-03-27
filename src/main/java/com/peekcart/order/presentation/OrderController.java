@@ -9,6 +9,8 @@ import com.peekcart.order.application.dto.CreateOrderCommand;
 import com.peekcart.order.presentation.dto.request.CreateOrderRequest;
 import com.peekcart.order.presentation.dto.response.OrderDetailResponse;
 import com.peekcart.order.presentation.dto.response.OrderResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 주문 API 엔드포인트. 인증 필수.
  */
+@Tag(name = "주문", description = "주문 생성 / 조회 / 취소")
 @RestController
 @RequestMapping("/api/v1/orders")
 @RequiredArgsConstructor
@@ -28,6 +31,7 @@ public class OrderController {
     private final OrderCommandService orderCommandService;
     private final OrderQueryService orderQueryService;
 
+    @Operation(summary = "주문 생성", description = "장바구니 상품으로 주문을 생성한다. 재고가 즉시 차감된다.")
     @PostMapping
     public ResponseEntity<ApiResponse<OrderDetailResponse>> createOrder(
             @CurrentUser LoginUser loginUser,
@@ -39,6 +43,7 @@ public class OrderController {
                 .body(ApiResponse.of(OrderDetailResponse.from(orderCommandService.createOrder(loginUser.userId(), command))));
     }
 
+    @Operation(summary = "주문 목록 조회")
     @GetMapping
     public ResponseEntity<ApiResponse<Page<OrderResponse>>> getOrders(
             @CurrentUser LoginUser loginUser,
@@ -49,6 +54,7 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.of(page));
     }
 
+    @Operation(summary = "주문 상세 조회")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<OrderDetailResponse>> getOrder(
             @CurrentUser LoginUser loginUser,
@@ -58,6 +64,7 @@ public class OrderController {
                 OrderDetailResponse.from(orderQueryService.getOrder(loginUser.userId(), id))));
     }
 
+    @Operation(summary = "주문 취소", description = "주문을 취소하고 차감된 재고를 복구한다.")
     @PostMapping("/{id}/cancel")
     public ResponseEntity<ApiResponse<Void>> cancelOrder(
             @CurrentUser LoginUser loginUser,

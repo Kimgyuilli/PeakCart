@@ -169,11 +169,10 @@
 ## 현재 Phase: Phase 2 — 성능 개선
 
 **Phase 2 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
-- [ ] Redis 캐싱 적용 후 상품 조회 응답시간 개선 확인
+- [ ] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
 - [ ] 동시 주문 테스트 시 오버셀링 0건
 - [ ] Outbox → Kafka 이벤트 발행 정상 동작
 - [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
-- [ ] JMeter 로컬 실행으로 기본 TPS 비교 측정
 
 ---
 
@@ -218,18 +217,21 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `docker-compose.yml` Kafka (KRaft) + Zookeeper 추가 | 🔲 | |
+| `docker-compose.yml` Kafka (KRaft) 추가 | 🔲 | Zookeeper 없이 KRaft 모드 |
 | `build.gradle` spring-kafka 의존성 추가 | 🔲 | |
-| Flyway `V2__outbox_processed_events.sql` 스키마 추가 | 🔲 | outbox_events + processed_events + 인덱스 |
+| Flyway `V2__outbox_processed_events.sql` 스키마 추가 | 🔲 | outbox_events + processed_events(복합 UK) + 인덱스 |
 | `OutboxEvent` Entity | 🔲 | PENDING/PUBLISHED/FAILED 상태, retry_count |
 | `OutboxEventRepository` 계층 | 🔲 | |
 | `OutboxEventPublisher` — 비즈니스 트랜잭션 내 Outbox 저장 | 🔲 | 기존 `ApplicationEventPublisher` 대체 |
-| `OutboxPollingScheduler` — Outbox Polling → Kafka 발행 | 🔲 | 5초 주기, PENDING 조회 → KafkaTemplate 발행 → PUBLISHED 상태 변경 |
-| `KafkaProducerConfig` 설정 | 🔲 | 파티션 키: orderId |
-| `KafkaConsumerConfig` 설정 | 🔲 | Consumer Group 네이밍 규칙 적용 |
-| 기존 `@TransactionalEventListener` → Kafka Consumer 전환 | 🔲 | PaymentEventListener, OrderEventListener, NotificationEventListener |
-| Kafka 토픽 생성 설정 (`KafkaTopicConfig`) | 🔲 | 4개 토픽, 파티션 3, Replication 1 |
+| `OutboxPollingScheduler` — Outbox Polling → Kafka 발행 (`global/scheduler/`) | 🔲 | 5초 주기, PENDING 조회 → Kafka 발행 → PUBLISHED, 실패 시 retry_count 증가 |
+| Outbox FAILED 시 Slack 알림 발송 | 🔲 | retry 초과 → FAILED 상태 + SlackPort로 알림 (DLQ와 별개) |
+| 이벤트 페이로드 DTO 정의 | 🔲 | `OrderCreatedEvent`, `PaymentCompletedEvent` 등 (설계 8-2 스키마 기준) |
+| `KafkaConfig` 설정 (Producer/Consumer/Topic) | 🔲 | 파티션 키: orderId, Consumer Group 네이밍 규칙 적용 |
+| 기존 `@TransactionalEventListener` → Kafka Consumer 전환 | 🔲 | PaymentEventConsumer, OrderEventConsumer, NotificationConsumer |
+| Kafka 토픽 생성 설정 | 🔲 | 4개 토픽, 파티션 3, Replication 1 |
 | 통합 테스트 (Outbox → Kafka 발행 → Consumer 수신 검증) | 🔲 | Testcontainers Kafka |
+
+> **Phase 2 재고 복구 경로**: 모놀리스이므로 `cancelOrder()` 내에서 `inventoryService.restoreStock()` 직접 호출을 유지합니다. `order.cancelled` Kafka 이벤트는 Notification Consumer만 소비합니다. Product 도메인의 Kafka Consumer 분리는 Phase 4(MSA)에서 수행합니다.
 
 **완료 기준**: 주문 생성 → Outbox 저장 → Kafka 발행 → Consumer 수신 전체 플로우 정상 동작
 
@@ -241,12 +243,12 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `ProcessedEvent` Entity | 🔲 | event_id UK, consumer_group |
-| `ProcessedEventRepository` 계층 | 🔲 | |
-| Consumer 멱등성 처리 로직 (event_id 중복 체크) | 🔲 | 비즈니스 로직 + processed_events 기록 단일 트랜잭션 |
-| 멱등성 통합 테스트 (동일 이벤트 2회 소비 시 1회만 처리) | 🔲 | |
+| `ProcessedEvent` Entity (`global/idempotency/`) | 🔲 | `(event_id, consumer_group)` 복합 UK |
+| `ProcessedEventRepository` 계층 (`global/idempotency/`) | 🔲 | |
+| Consumer 멱등성 처리 로직 (event_id + consumer_group 중복 체크) | 🔲 | 비즈니스 로직 + processed_events 기록 단일 트랜잭션 |
+| 멱등성 통합 테스트 (동일 이벤트 2회 소비 시 1회만 처리) | 🔲 | 같은 event_id, 다른 consumer_group은 각각 처리 확인 |
 
-**완료 기준**: 동일 event_id 중복 소비 시 비즈니스 로직 1회만 실행
+**완료 기준**: 동일 (event_id, consumer_group) 중복 소비 시 1회만 실행, 다른 consumer_group은 독립 처리
 
 ---
 

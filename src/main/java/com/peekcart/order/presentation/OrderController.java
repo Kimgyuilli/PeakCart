@@ -10,7 +10,6 @@ import com.peekcart.order.presentation.dto.request.CreateOrderRequest;
 import com.peekcart.order.presentation.dto.response.OrderDetailResponse;
 import com.peekcart.order.presentation.dto.response.OrderResponse;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -37,7 +36,7 @@ public class OrderController {
     @Operation(summary = "주문 생성", description = "장바구니 상품으로 주문을 생성한다. 재고가 즉시 차감된다.")
     @PostMapping
     public ResponseEntity<ApiResponse<OrderDetailResponse>> createOrder(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @Valid @RequestBody CreateOrderRequest request
     ) {
         CreateOrderCommand command = new CreateOrderCommand(
@@ -49,7 +48,7 @@ public class OrderController {
     @Operation(summary = "주문 목록 조회")
     @GetMapping
     public ResponseEntity<ApiResponse<Page<OrderResponse>>> getOrders(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @ParameterObject @PageableDefault(size = 20) Pageable pageable
     ) {
         Page<OrderResponse> page = orderQueryService.getOrders(loginUser.userId(), pageable)
@@ -60,7 +59,7 @@ public class OrderController {
     @Operation(summary = "주문 상세 조회")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<OrderDetailResponse>> getOrder(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @PathVariable Long id
     ) {
         return ResponseEntity.ok(ApiResponse.of(
@@ -70,7 +69,7 @@ public class OrderController {
     @Operation(summary = "주문 취소", description = "주문을 취소하고 차감된 재고를 복구한다.")
     @PostMapping("/{id}/cancel")
     public ResponseEntity<Void> cancelOrder(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @PathVariable Long id
     ) {
         orderCommandService.cancelOrder(loginUser.userId(), id);

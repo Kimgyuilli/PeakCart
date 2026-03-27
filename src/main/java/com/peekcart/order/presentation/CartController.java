@@ -11,7 +11,6 @@ import com.peekcart.order.presentation.dto.request.AddCartItemRequest;
 import com.peekcart.order.presentation.dto.request.UpdateCartItemRequest;
 import com.peekcart.order.presentation.dto.response.CartResponse;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -33,14 +32,14 @@ public class CartController {
 
     @Operation(summary = "장바구니 조회")
     @GetMapping
-    public ResponseEntity<ApiResponse<CartResponse>> getCart(@Parameter(hidden = true) @CurrentUser LoginUser loginUser) {
+    public ResponseEntity<ApiResponse<CartResponse>> getCart(@CurrentUser LoginUser loginUser) {
         return ResponseEntity.ok(ApiResponse.of(CartResponse.from(cartQueryService.getCart(loginUser.userId()))));
     }
 
     @Operation(summary = "장바구니 상품 추가", description = "동일 상품이 이미 있으면 수량을 병합한다.")
     @PostMapping("/items")
     public ResponseEntity<ApiResponse<CartResponse>> addItem(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @Valid @RequestBody AddCartItemRequest request
     ) {
         AddCartItemCommand command = new AddCartItemCommand(request.productId(), request.quantity());
@@ -51,7 +50,7 @@ public class CartController {
     @Operation(summary = "장바구니 수량 변경")
     @PutMapping("/items/{itemId}")
     public ResponseEntity<ApiResponse<CartResponse>> updateItem(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @PathVariable Long itemId,
             @Valid @RequestBody UpdateCartItemRequest request
     ) {
@@ -63,7 +62,7 @@ public class CartController {
     @Operation(summary = "장바구니 상품 삭제")
     @DeleteMapping("/items/{itemId}")
     public ResponseEntity<Void> removeItem(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @PathVariable Long itemId
     ) {
         cartCommandService.removeItem(loginUser.userId(), itemId);

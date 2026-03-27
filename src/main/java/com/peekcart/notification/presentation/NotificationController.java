@@ -6,7 +6,6 @@ import com.peekcart.global.response.ApiResponse;
 import com.peekcart.notification.application.NotificationQueryService;
 import com.peekcart.notification.presentation.dto.response.NotificationResponse;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
@@ -32,7 +31,7 @@ public class NotificationController {
     @Operation(summary = "알림 목록 조회", description = "내 알림 내역을 페이징 조회한다.")
     @GetMapping
     public ResponseEntity<ApiResponse<Page<NotificationResponse>>> getNotifications(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @ParameterObject @PageableDefault(size = 20) Pageable pageable
     ) {
         Page<NotificationResponse> page = notificationQueryService.getNotifications(loginUser.userId(), pageable)

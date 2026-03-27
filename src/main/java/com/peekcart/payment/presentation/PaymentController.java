@@ -13,7 +13,6 @@ import com.peekcart.payment.domain.exception.PaymentException;
 import com.peekcart.payment.presentation.dto.request.ConfirmPaymentRequest;
 import com.peekcart.payment.presentation.dto.response.PaymentResponse;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +42,7 @@ public class PaymentController {
     @Operation(summary = "결제 승인", description = "Toss Payments에 결제 승인을 요청한다.")
     @PostMapping("/confirm")
     public ResponseEntity<ApiResponse<PaymentResponse>> confirmPayment(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @Valid @RequestBody ConfirmPaymentRequest request
     ) {
         ConfirmPaymentCommand command = new ConfirmPaymentCommand(
@@ -61,7 +60,7 @@ public class PaymentController {
     @Operation(summary = "결제 조회", description = "주문 ID로 결제 정보를 조회한다.")
     @GetMapping("/{orderId}")
     public ResponseEntity<ApiResponse<PaymentResponse>> getPayment(
-            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
+            @CurrentUser LoginUser loginUser,
             @PathVariable Long orderId
     ) {
         return ResponseEntity.ok(ApiResponse.of(

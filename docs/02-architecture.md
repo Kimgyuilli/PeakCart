@@ -291,21 +291,19 @@ Phase 2에서 Kafka + Outbox 패턴 도입에 따라 아래 패키지/클래스�
 │       ├── outbox/
 │       │   ├── OutboxEvent.java
 │       │   ├── OutboxEventRepository.java
-│       │   └── OutboxEventPublisher.java    # Polling 스케줄러 (NEW)
-│       ├── idempotency/
-│       │   ├── ProcessedEvent.java
-│       │   └── ProcessedEventRepository.java # 중복 소비 방지 (NEW)
+│       │   └── OutboxEventPublisher.java    # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
 │       ├── kafka/
-│       │   └── OrderEventProducer.java       # Kafka 발행 (NEW)
+│       │   ├── OrderEventProducer.java      # Kafka 발행 (NEW)
+│       │   └── OrderEventConsumer.java      # payment.completed/failed 소비 (NEW)
 │       └── event/
-│           └── OrderEventListener.java       # Phase 1 유지 (Kafka 대체 대상)
+│           └── OrderEventListener.java      # Phase 1 유지 (Kafka 대체 대상)
 │
 ├── payment/
 │   └── infrastructure/
 │       ├── outbox/
-│       │   └── OutboxEventPublisher.java    # (NEW)
+│       │   └── OutboxEventPublisher.java    # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
 │       └── kafka/
-│           ├── PaymentEventProducer.java    # (NEW)
+│           ├── PaymentEventProducer.java    # Kafka 발행 (NEW)
 │           └── PaymentEventConsumer.java    # order.created 소비 (NEW)
 │
 ├── notification/
@@ -313,14 +311,16 @@ Phase 2에서 Kafka + Outbox 패턴 도입에 따라 아래 패키지/클래스�
 │       └── kafka/
 │           └── NotificationConsumer.java    # Kafka Consumer로 전환 (NEW)
 │
-├── product/
-│   └── infrastructure/
-│       └── redis/
-│           └── ProductCacheRepository.java  # Redis 캐싱 (NEW)
-│
 └── global/
-    └── config/
-        └── KafkaConfig.java                 # (NEW)
+    ├── config/
+    │   ├── CacheConfig.java                 # RedisCacheManager, TTL, 직렬화 (NEW)
+    │   ├── KafkaConfig.java                 # Producer/Consumer/Topic 설정 (NEW)
+    │   └── RedissonConfig.java              # Redisson 분산 락 설정 (NEW)
+    ├── idempotency/
+    │   ├── ProcessedEvent.java              # 중복 소비 방지 엔티티 (NEW)
+    │   └── ProcessedEventRepository.java    # (NEW)
+    └── scheduler/
+        └── OutboxPollingScheduler.java      # Outbox Polling → Kafka 발행 (NEW)
 ```
 
 ### 레이어 책임 원칙

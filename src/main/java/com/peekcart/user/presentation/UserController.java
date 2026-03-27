@@ -8,6 +8,7 @@ import com.peekcart.user.application.UserQueryService;
 import com.peekcart.user.presentation.dto.request.UpdateProfileRequest;
 import com.peekcart.user.presentation.dto.response.UserResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +32,7 @@ public class UserController {
     @Operation(summary = "내 정보 조회")
     @GetMapping("/me")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<ApiResponse<UserResponse>> getMe(@CurrentUser LoginUser loginUser) {
+    public ResponseEntity<ApiResponse<UserResponse>> getMe(@Parameter(hidden = true) @CurrentUser LoginUser loginUser) {
         return ResponseEntity.ok(ApiResponse.of(UserResponse.from(userQueryService.getMe(loginUser.userId()))));
     }
 
@@ -39,7 +40,7 @@ public class UserController {
     @PutMapping("/me")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<UserResponse>> updateMe(
-            @CurrentUser LoginUser loginUser,
+            @Parameter(hidden = true) @CurrentUser LoginUser loginUser,
             @Valid @RequestBody UpdateProfileRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.of(UserResponse.from(userCommandService.updateMe(loginUser.userId(), request))));

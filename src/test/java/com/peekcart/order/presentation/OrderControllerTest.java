@@ -118,12 +118,12 @@ class OrderControllerTest {
 
     @Test
     @WithMockLoginUser
-    @DisplayName("POST /api/v1/orders/{id}/cancel: 주문 취소에 성공하면 200을 반환한다")
-    void cancelOrder_success_returns200() throws Exception {
+    @DisplayName("POST /api/v1/orders/{id}/cancel: 주문 취소에 성공하면 204를 반환한다")
+    void cancelOrder_success_returns204() throws Exception {
         willDoNothing().given(orderCommandService).cancelOrder(1L, OrderFixture.DEFAULT_ORDER_ID);
 
         mockMvc.perform(post("/api/v1/orders/{id}/cancel", OrderFixture.DEFAULT_ORDER_ID))
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
     }
 
     @Test

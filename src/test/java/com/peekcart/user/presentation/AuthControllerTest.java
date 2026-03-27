@@ -118,11 +118,11 @@ class AuthControllerTest {
 
     @Test
     @WithMockLoginUser(userId = 1L, accessToken = "valid-access-token")
-    @DisplayName("POST /logout: 인증된 사용자면 200을 반환한다")
-    void logout_authenticated_returns200() throws Exception {
+    @DisplayName("POST /logout: 인증된 사용자면 204를 반환한다")
+    void logout_authenticated_returns204() throws Exception {
         willDoNothing().given(authService).logout("valid-access-token");
 
         mockMvc.perform(post("/api/v1/auth/logout"))
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
     }
 }

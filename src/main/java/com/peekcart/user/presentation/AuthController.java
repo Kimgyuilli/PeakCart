@@ -9,6 +9,7 @@ import com.peekcart.user.presentation.dto.request.RefreshRequest;
 import com.peekcart.user.presentation.dto.request.SignupRequest;
 import com.peekcart.user.presentation.dto.response.TokenResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -52,8 +53,8 @@ public class AuthController {
 
     @Operation(summary = "로그아웃", description = "현재 Access Token을 블랙리스트에 등록하여 무효화한다.")
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(@CurrentUser LoginUser loginUser) {
+    public ResponseEntity<Void> logout(@Parameter(hidden = true) @CurrentUser LoginUser loginUser) {
         authService.logout(loginUser.accessToken());
-        return ResponseEntity.ok(ApiResponse.ok());
+        return ResponseEntity.noContent().build();
     }
 }

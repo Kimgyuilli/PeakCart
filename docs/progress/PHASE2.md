@@ -51,4 +51,41 @@
 - Phase 2 `order.cancelled` 재고 복구: 모놀리스이므로 `cancelOrder()` 내 직접 호출 유지, Kafka는 Notification만 소비. Product 도메인 Kafka Consumer 분리는 Phase 4에서 수행
 - 멱등성 패키지 위치: `global/idempotency/` (횡단 관심사, Phase 4에서 `common/idempotency/`로 이동)
 
+#### 멀티에이전트 설계 리뷰 + Devil's Advocate 토론
+
+4개 전문 에이전트(Architecture, Kafka, Data Design, Redis) 리뷰 → 비판(Critic) 2개 → 방어(Defender) 2개, 총 3라운드 토론 수행.
+
+**토론 결과**: 원래 12건(P0 4건 + P1 8건) → 6건 반영, 6건 삭제 (과잉 설계 / 프레임워크 기본 동작 / 튜닝 파라미터)
+
+**반영 6건**:
+
+1. **Outbox 패키지 구조 정리** (`02-architecture.md` 수정):
+   - `OutboxEvent` + `OutboxEventRepository` + `OutboxPollingScheduler` → `global/outbox/`로 통합 (횡단 관심사, 단일 테이블)
+   - `OutboxEventPublisher`는 도메인별 유지 (`OrderOutboxEventPublisher`, `PaymentOutboxEventPublisher`)
+   - 근거: Entity+Repository가 특정 도메인에 귀속되면 다른 도메인이 참조 시 크로스 도메인 결합 발생. Publisher는 호출 주체가 도메인이므로 도메인별 배치가 가독성에 유리
+
+2. **상품 캐시에서 재고 제외** (Task 2-1 비고):
+   - 재고는 차감/복구마다 변경되어 캐시 무효화 빈번, PK 단건 조회(~1ms)로 충분
+   - 대안(재고 포함 + TTL 30초)의 트레이드오프도 인지 — 면접 대비
+
+3. **Redis 장애 fallback 방향성** (Task 2-2 비고):
+   - try-catch fallback → 락 없이 진행, `@Version`이 최후 방어선. 낙관적 락 충돌률 증가 감수
+
+4. **데드락 방지** (Task 2-2 비고):
+   - 다중 상품 주문 시 productId 오름차순 정렬 후 순차 락 획득
+
+5. **Kafka DTO 전환 전략** (Task 2-3 비고):
+   - Phase 1 domain/event/ record는 Spring Event용 유지, Kafka DTO는 8-2 래핑 구조로 별도 정의
+
+6. **이벤트 소비 경로 완전성** (Task 2-3 주석 확장):
+   - 4개 토픽별 Consumer 매핑을 명시적으로 나열 (payment.failed → OrderEventConsumer 경로 포함)
+
+**삭제 6건 + 근거**:
+- P0-2 auto-commit 비활성화: Spring Kafka가 `@KafkaListener` 사용 시 자동 처리
+- P1-1 Publisher 위치: Outbox 패키지 정리에 흡수
+- P1-3 retry_count 최대값: 튜닝 파라미터, 코드 상수로 충분
+- P1-5 DLQ Consumer 방식: `DeadLetterPublishingRecoverer` recoverer 콜백으로 충분
+- P1-6 waitTime/leaseTime 구체값: 설계서에 확정하면 문서-코드 불일치 유발, application.yml 프로퍼티로 관리
+- P1-8 lockAtLeastFor: Phase 2 단일 인스턴스에서 검증 불가, Phase 3으로 이관
+
 ---

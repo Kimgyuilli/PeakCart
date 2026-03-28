@@ -289,27 +289,25 @@ Phase 2에서 Kafka + Outbox 패턴 도입에 따라 아래 패키지/클래스�
 ├── order/
 │   └── infrastructure/
 │       ├── outbox/
-│       │   ├── OutboxEvent.java
-│       │   ├── OutboxEventRepository.java
-│       │   └── OutboxEventPublisher.java    # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
+│       │   └── OrderOutboxEventPublisher.java  # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
 │       ├── kafka/
-│       │   ├── OrderEventProducer.java      # Kafka 발행 (NEW)
-│       │   └── OrderEventConsumer.java      # payment.completed/failed 소비 (NEW)
+│       │   ├── OrderEventProducer.java         # Kafka 발행 (NEW)
+│       │   └── OrderEventConsumer.java         # payment.completed/failed 소비 (NEW)
 │       └── event/
-│           └── OrderEventListener.java      # Phase 1 유지 (Kafka 대체 대상)
+│           └── OrderEventListener.java         # Phase 1 유지 (Kafka 대체 대상)
 │
 ├── payment/
 │   └── infrastructure/
 │       ├── outbox/
-│       │   └── OutboxEventPublisher.java    # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
+│       │   └── PaymentOutboxEventPublisher.java  # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
 │       └── kafka/
-│           ├── PaymentEventProducer.java    # Kafka 발행 (NEW)
-│           └── PaymentEventConsumer.java    # order.created 소비 (NEW)
+│           ├── PaymentEventProducer.java       # Kafka 발행 (NEW)
+│           └── PaymentEventConsumer.java       # order.created 소비 (NEW)
 │
 ├── notification/
 │   └── infrastructure/
 │       └── kafka/
-│           └── NotificationConsumer.java    # Kafka Consumer로 전환 (NEW)
+│           └── NotificationConsumer.java       # Kafka Consumer로 전환 (NEW)
 │
 └── global/
     ├── config/
@@ -319,7 +317,9 @@ Phase 2에서 Kafka + Outbox 패턴 도입에 따라 아래 패키지/클래스�
     ├── idempotency/
     │   ├── ProcessedEvent.java              # 중복 소비 방지 엔티티 (NEW)
     │   └── ProcessedEventRepository.java    # (NEW)
-    └── scheduler/
+    └── outbox/
+        ├── OutboxEvent.java                 # 횡단 관심사 — 단일 엔티티 (NEW)
+        ├── OutboxEventRepository.java       # 단일 Repository (NEW)
         └── OutboxPollingScheduler.java      # Outbox Polling → Kafka 발행 (NEW)
 ```
 

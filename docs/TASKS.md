@@ -191,6 +191,8 @@
 | `ProductCommandService` 상품 수정/삭제 시 캐시 무효화 (`@CacheEvict`) | 🔲 | |
 | 통합 테스트 (캐시 적중/무효화 검증) | 🔲 | Testcontainers Redis |
 
+> **캐시와 재고 분리**: 캐시에 재고를 포함하지 않습니다. 재고는 차감/복구마다 변경되어 캐시 무효화가 빈번하고, PK 단건 조회(~1ms)로 충분합니다. `@CacheEvict`는 상품 수정/삭제 시에만 동작하며, 재고 변경과 캐시가 결합되지 않아 구현이 단순합니다. 대안(재고 포함 + TTL 30초)의 트레이드오프도 인지합니다.
+
 **완료 기준**: 캐시 적중 시 DB 조회 없이 응답, 상품 변경 시 캐시 즉시 무효화
 
 ---
@@ -207,6 +209,9 @@
 | `InventoryService` 분산 락 적용 (재고 차감) | 🔲 | 락 획득 실패 → 즉시 409 응답 |
 | 동시성 통합 테스트 (멀티스레드 오버셀링 검증) | 🔲 | Testcontainers Redis, 50스레드 동시 차감 |
 
+> **데드락 방지**: 다중 상품 주문 시 productId 오름차순 정렬 후 순차 락 획득 (global ordering).
+> **Redis 장애 fallback**: `DistributedLockManager`에서 Redis 연결 예외 catch → 락 없이 진행, `@Version` 낙관적 락이 최후 방어선 (설계 9-1). 동시 요청 시 낙관적 락 충돌률 증가를 감수하는 트레이드오프.
+
 **완료 기준**: 동시 주문 테스트 시 오버셀링 0건, Redis 장애 시 DB 낙관적 락 fallback 동작
 
 ---
@@ -220,18 +225,24 @@
 | `docker-compose.yml` Kafka (KRaft) 추가 | 🔲 | Zookeeper 없이 KRaft 모드 |
 | `build.gradle` spring-kafka 의존성 추가 | 🔲 | |
 | Flyway `V2__outbox_processed_events.sql` 스키마 추가 | 🔲 | outbox_events + processed_events(복합 UK) + 인덱스 |
-| `OutboxEvent` Entity | 🔲 | PENDING/PUBLISHED/FAILED 상태, retry_count |
-| `OutboxEventRepository` 계층 | 🔲 | |
-| `OutboxEventPublisher` — 비즈니스 트랜잭션 내 Outbox 저장 | 🔲 | 기존 `ApplicationEventPublisher` 대체 |
-| `OutboxPollingScheduler` — Outbox Polling → Kafka 발행 (`global/scheduler/`) | 🔲 | 5초 주기, PENDING 조회 → Kafka 발행 → PUBLISHED, 실패 시 retry_count 증가 |
+| `OutboxEvent` Entity (`global/outbox/`) | 🔲 | PENDING/PUBLISHED/FAILED 상태, retry_count, 횡단 관심사 |
+| `OutboxEventRepository` 계층 (`global/outbox/`) | 🔲 | 단일 Repository — 도메인 구분은 aggregate_type 컬럼 |
+| `OrderOutboxEventPublisher` / `PaymentOutboxEventPublisher` | 🔲 | 도메인별 Publisher (infrastructure/outbox/), 기존 `ApplicationEventPublisher` 대체 |
+| `OutboxPollingScheduler` (`global/outbox/`) | 🔲 | 5초 주기, PENDING 조회 → Kafka 발행 → PUBLISHED, 실패 시 retry_count 증가 |
 | Outbox FAILED 시 Slack 알림 발송 | 🔲 | retry 초과 → FAILED 상태 + SlackPort로 알림 (DLQ와 별개) |
-| 이벤트 페이로드 DTO 정의 | 🔲 | `OrderCreatedEvent`, `PaymentCompletedEvent` 등 (설계 8-2 스키마 기준) |
+| 이벤트 페이로드 DTO 정의 | 🔲 | Phase 1 domain/event/ record는 Spring Event용 유지, Kafka DTO는 8-2 래핑 구조로 별도 정의 |
 | `KafkaConfig` 설정 (Producer/Consumer/Topic) | 🔲 | 파티션 키: orderId, Consumer Group 네이밍 규칙 적용 |
 | 기존 `@TransactionalEventListener` → Kafka Consumer 전환 | 🔲 | PaymentEventConsumer, OrderEventConsumer, NotificationConsumer |
 | Kafka 토픽 생성 설정 | 🔲 | 4개 토픽, 파티션 3, Replication 1 |
 | 통합 테스트 (Outbox → Kafka 발행 → Consumer 수신 검증) | 🔲 | Testcontainers Kafka |
 
-> **Phase 2 재고 복구 경로**: 모놀리스이므로 `cancelOrder()` 내에서 `inventoryService.restoreStock()` 직접 호출을 유지합니다. `order.cancelled` Kafka 이벤트는 Notification Consumer만 소비합니다. Product 도메인의 Kafka Consumer 분리는 Phase 4(MSA)에서 수행합니다.
+> **Phase 2 이벤트 소비 경로**:
+> - `order.created` → PaymentEventConsumer(결제 생성) + NotificationConsumer(알림)
+> - `payment.completed` → OrderEventConsumer(주문 상태 전이) + NotificationConsumer(알림)
+> - `payment.failed` → OrderEventConsumer(주문 취소 + 재고 복구 직접 호출) + NotificationConsumer(알림)
+> - `order.cancelled` → NotificationConsumer만 소비 (Product Consumer 분리는 Phase 4)
+>
+> **Phase 2 재고 복구 경로**: 모놀리스이므로 `cancelOrder()` 내에서 `inventoryService.restoreStock()` 직접 호출을 유지합니다. Product 도메인의 Kafka Consumer 분리는 Phase 4(MSA)에서 수행합니다.
 
 **완료 기준**: 주문 생성 → Outbox 저장 → Kafka 발행 → Consumer 수신 전체 플로우 정상 동작
 

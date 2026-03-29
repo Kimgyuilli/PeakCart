@@ -1,6 +1,7 @@
 package com.peekcart.product.application;
 
 import com.peekcart.global.exception.ErrorCode;
+import com.peekcart.global.lock.DistributedLockManager;
 import com.peekcart.product.domain.exception.ProductException;
 import com.peekcart.product.domain.model.Category;
 import com.peekcart.product.domain.model.Inventory;
@@ -14,9 +15,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 
 @ServiceTest
@@ -26,14 +29,21 @@ class InventoryServiceTest {
     @InjectMocks InventoryService inventoryService;
 
     @Mock InventoryRepository inventoryRepository;
+    @Mock DistributedLockManager lockManager;
 
     private final Category category = ProductFixture.categoryWithId();
+
+    private void givenLockAcquired() {
+        given(lockManager.tryLock(anyString(), anyLong(), anyLong(), any(TimeUnit.class)))
+                .willReturn(true);
+    }
 
     // ── decreaseStock ─────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("decreaseStock: 재고가 정상 차감된다")
     void decreaseStock_success_reducesInventory() {
+        givenLockAcquired();
         Product product = ProductFixture.productWithId(category);
         Inventory inventory = Inventory.create(product, 50);
         given(inventoryRepository.findByProductId(ProductFixture.DEFAULT_PRODUCT_ID))
@@ -47,12 +57,25 @@ class InventoryServiceTest {
     @Test
     @DisplayName("decreaseStock: 재고가 없으면 PRD-001 예외가 발생한다")
     void decreaseStock_inventoryNotFound_throwsPRD001() {
+        givenLockAcquired();
         given(inventoryRepository.findByProductId(99L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> inventoryService.decreaseStock(99L, 1))
                 .isInstanceOf(ProductException.class)
                 .extracting(e -> ((ProductException) e).getErrorCode())
                 .isEqualTo(ErrorCode.PRD_001);
+    }
+
+    @Test
+    @DisplayName("decreaseStock: 분산 락 획득 실패 시 PRD-004 예외가 발생한다")
+    void decreaseStock_lockAcquisitionFailed_throwsPRD004() {
+        given(lockManager.tryLock(anyString(), anyLong(), anyLong(), any(TimeUnit.class)))
+                .willReturn(false);
+
+        assertThatThrownBy(() -> inventoryService.decreaseStock(1L, 1))
+                .isInstanceOf(ProductException.class)
+                .extracting(e -> ((ProductException) e).getErrorCode())
+                .isEqualTo(ErrorCode.PRD_004);
     }
 
     // ── restoreStock ──────────────────────────────────────────────────────────

@@ -36,9 +36,10 @@ public class CacheConfig {
                 .activateDefaultTyping(
                         BasicPolymorphicTypeValidator.builder()
                                 .allowIfBaseType("com.peekcart.")
+                                .allowIfBaseType("java.lang.")
                                 .allowIfBaseType("java.util.")
                                 .build(),
-                        ObjectMapper.DefaultTyping.NON_FINAL,
+                        ObjectMapper.DefaultTyping.EVERYTHING,
                         JsonTypeInfo.As.PROPERTY)
                 .build();
 

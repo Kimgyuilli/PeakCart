@@ -4,9 +4,8 @@ import com.peekcart.global.config.SecurityConfig;
 import com.peekcart.global.config.TestSecurityConfig;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.product.application.ProductQueryService;
+import com.peekcart.product.application.dto.ProductListDto;
 import com.peekcart.product.domain.exception.ProductException;
-import com.peekcart.product.domain.model.Category;
-import com.peekcart.product.domain.model.Product;
 import com.peekcart.support.fixture.ProductFixture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,16 +37,14 @@ class ProductControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean ProductQueryService productQueryService;
 
-    private final Category category = ProductFixture.categoryWithId();
-
     // ── GET /products ─────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("GET /products: 200과 상품 페이지를 반환한다")
     void getProducts_returns200WithPage() throws Exception {
-        Product product = ProductFixture.productWithId(category);
+        ProductListDto listDto = ProductFixture.productListDto();
         given(productQueryService.getProducts(isNull(), any()))
-                .willReturn(new PageImpl<>(List.of(product)));
+                .willReturn(new PageImpl<>(List.of(listDto)));
 
         mockMvc.perform(get("/api/v1/products"))
                 .andExpect(status().isOk())
@@ -58,9 +55,9 @@ class ProductControllerTest {
     @Test
     @DisplayName("GET /products?categoryId=1: categoryId 필터로 조회한다")
     void getProducts_withCategoryId_returns200() throws Exception {
-        Product product = ProductFixture.productWithId(category);
+        ProductListDto listDto = ProductFixture.productListDto();
         given(productQueryService.getProducts(eq(1L), any()))
-                .willReturn(new PageImpl<>(List.of(product)));
+                .willReturn(new PageImpl<>(List.of(listDto)));
 
         mockMvc.perform(get("/api/v1/products").param("categoryId", "1"))
                 .andExpect(status().isOk())

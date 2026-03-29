@@ -1,6 +1,8 @@
 package com.peekcart.support.fixture;
 
 import com.peekcart.product.application.dto.ProductDetailDto;
+import com.peekcart.product.application.dto.ProductInfoDto;
+import com.peekcart.product.application.dto.ProductListDto;
 import com.peekcart.product.domain.model.Category;
 import com.peekcart.product.domain.model.Inventory;
 import com.peekcart.product.domain.model.Product;
@@ -63,6 +65,29 @@ public class ProductFixture {
                 DEFAULT_IMAGE_URL,
                 "ON_SALE",
                 DEFAULT_STOCK
+        );
+    }
+
+    public static ProductInfoDto productInfoDto() {
+        return new ProductInfoDto(
+                DEFAULT_PRODUCT_ID,
+                DEFAULT_CATEGORY_ID,
+                DEFAULT_CATEGORY_NAME,
+                DEFAULT_PRODUCT_NAME,
+                DEFAULT_DESCRIPTION,
+                DEFAULT_PRICE,
+                DEFAULT_IMAGE_URL,
+                "ON_SALE"
+        );
+    }
+
+    public static ProductListDto productListDto() {
+        return new ProductListDto(
+                DEFAULT_PRODUCT_ID,
+                DEFAULT_PRODUCT_NAME,
+                DEFAULT_PRICE,
+                DEFAULT_IMAGE_URL,
+                "ON_SALE"
         );
     }
 }

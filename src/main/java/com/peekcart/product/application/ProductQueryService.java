@@ -1,13 +1,10 @@
 package com.peekcart.product.application;
 
-import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.product.application.dto.ProductDetailDto;
-import com.peekcart.product.domain.exception.ProductException;
-import com.peekcart.product.domain.model.Product;
-import com.peekcart.product.domain.model.ProductStatus;
+import com.peekcart.product.application.dto.ProductInfoDto;
+import com.peekcart.product.application.dto.ProductListDto;
 import com.peekcart.product.domain.model.Inventory;
 import com.peekcart.product.domain.repository.InventoryRepository;
-import com.peekcart.product.domain.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -22,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ProductQueryService {
 
-    private final ProductRepository productRepository;
+    private final ProductCacheService productCacheService;
     private final InventoryRepository inventoryRepository;
 
     /**
@@ -32,11 +29,8 @@ public class ProductQueryService {
      * @param pageable   페이징 정보
      * @return 상품 페이지
      */
-    public Page<Product> getProducts(Long categoryId, Pageable pageable) {
-        if (categoryId != null) {
-            return productRepository.findByCategoryIdAndStatus(categoryId, ProductStatus.ON_SALE, pageable);
-        }
-        return productRepository.findByStatus(ProductStatus.ON_SALE, pageable);
+    public Page<ProductListDto> getProducts(Long categoryId, Pageable pageable) {
+        return productCacheService.getProductList(categoryId, pageable).toPage();
     }
 
     /**
@@ -44,16 +38,17 @@ public class ProductQueryService {
      *
      * @param productId 조회할 상품 PK
      * @return 상품 상세 DTO (상품 + 재고)
-     * @throws ProductException 상품이 없으면 {@code PRD-001}
      */
     public ProductDetailDto getProduct(Long productId) {
-        Product product = productRepository.findById(productId)
-                .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
+        ProductInfoDto info = productCacheService.getProductInfo(productId);
 
         int stock = inventoryRepository.findByProductId(productId)
                 .map(Inventory::getStock)
                 .orElse(0);
 
-        return ProductDetailDto.of(product, stock);
+        return new ProductDetailDto(
+                info.id(), info.categoryId(), info.categoryName(),
+                info.name(), info.description(), info.price(),
+                info.imageUrl(), info.status(), stock);
     }
 }

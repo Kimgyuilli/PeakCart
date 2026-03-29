@@ -2,6 +2,7 @@ package com.peekcart.global.config;
 
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.cache.annotation.EnableCaching;
@@ -33,7 +34,10 @@ public class CacheConfig {
         ObjectMapper objectMapper = JsonMapper.builder()
                 .addModule(new JavaTimeModule())
                 .activateDefaultTyping(
-                        JsonMapper.builder().build().getPolymorphicTypeValidator(),
+                        BasicPolymorphicTypeValidator.builder()
+                                .allowIfBaseType("com.peekcart.")
+                                .allowIfBaseType("java.util.")
+                                .build(),
                         ObjectMapper.DefaultTyping.NON_FINAL,
                         JsonTypeInfo.As.PROPERTY)
                 .build();
@@ -47,18 +51,16 @@ public class CacheConfig {
                 .serializeValuesWith(RedisSerializationContext.SerializationPair
                         .fromSerializer(serializer))
                 .prefixCacheNameWith("cache:")
+                .entryTtl(Duration.ofMinutes(10))
                 .disableCachingNullValues();
 
         RedisCacheConfiguration productDetailConfig = defaultConfig
                 .entryTtl(Duration.ofMinutes(30));
 
-        RedisCacheConfiguration productListConfig = defaultConfig
-                .entryTtl(Duration.ofMinutes(10));
-
         return RedisCacheManager.builder(connectionFactory)
-                .cacheDefaults(defaultConfig.entryTtl(Duration.ofMinutes(10)))
+                .cacheDefaults(defaultConfig)
                 .withCacheConfiguration(PRODUCT_DETAIL_CACHE, productDetailConfig)
-                .withCacheConfiguration(PRODUCT_LIST_CACHE, productListConfig)
+                .withCacheConfiguration(PRODUCT_LIST_CACHE, defaultConfig)
                 .build();
     }
 }

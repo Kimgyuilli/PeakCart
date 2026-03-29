@@ -1,0 +1,152 @@
+package com.peekcart.product.infrastructure;
+
+import com.peekcart.product.application.ProductCommandService;
+import com.peekcart.product.application.ProductQueryService;
+import com.peekcart.product.application.dto.CreateProductCommand;
+import com.peekcart.product.application.dto.ProductDetailDto;
+import com.peekcart.product.application.dto.ProductListDto;
+import com.peekcart.product.application.dto.UpdateProductCommand;
+import com.peekcart.product.domain.model.Category;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.cache.CacheManager;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@SpringBootTest
+@Testcontainers
+@DisplayName("상품 캐싱 통합 테스트 (Testcontainers Redis)")
+class ProductCacheIntegrationTest {
+
+    @Container
+    @ServiceConnection
+    static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("peekcart_test");
+
+    @Container
+    @ServiceConnection(name = "redis")
+    static GenericContainer<?> redis = new GenericContainer<>("redis:7")
+            .withExposedPorts(6379);
+
+    @Autowired ProductQueryService queryService;
+    @Autowired ProductCommandService commandService;
+    @Autowired CacheManager cacheManager;
+    @Autowired EntityManagerFactory emf;
+
+    private Long categoryId;
+    private Long productId;
+
+    @BeforeEach
+    void setUp() {
+        cacheManager.getCache("product").clear();
+        cacheManager.getCache("products").clear();
+
+        EntityManager em = emf.createEntityManager();
+        em.getTransaction().begin();
+        em.createQuery("DELETE FROM Inventory").executeUpdate();
+        em.createQuery("DELETE FROM Product").executeUpdate();
+        em.createQuery("DELETE FROM Category").executeUpdate();
+
+        Category category = Category.create("전자기기", null);
+        em.persist(category);
+        em.flush();
+        categoryId = category.getId();
+
+        em.getTransaction().commit();
+        em.close();
+
+        ProductDetailDto created = commandService.create(
+                new CreateProductCommand(categoryId, "스마트폰", "설명", 1_000_000L, null, 100));
+        productId = created.id();
+
+        // create가 목록 캐시를 evict하므로, 테스트 시작 전 캐시 상태를 초기화
+        cacheManager.getCache("product").clear();
+        cacheManager.getCache("products").clear();
+    }
+
+    @Test
+    @DisplayName("상세 조회: 첫 호출 시 캐시 미스 → 두 번째 호출 시 캐시 적중")
+    void getProduct_cacheHit() {
+        assertThat(cacheManager.getCache("product").get(productId)).isNull();
+
+        ProductDetailDto first = queryService.getProduct(productId);
+        assertThat(cacheManager.getCache("product").get(productId)).isNotNull();
+
+        ProductDetailDto second = queryService.getProduct(productId);
+        assertThat(second.id()).isEqualTo(first.id());
+        assertThat(second.name()).isEqualTo(first.name());
+    }
+
+    @Test
+    @DisplayName("목록 조회: 첫 호출 시 캐시 미스 → 두 번째 호출 시 캐시 적중")
+    void getProducts_cacheHit() {
+        String listKey = "list:null:0:10";
+        assertThat(cacheManager.getCache("products").get(listKey)).isNull();
+
+        Page<ProductListDto> first = queryService.getProducts(null, PageRequest.of(0, 10));
+        assertThat(cacheManager.getCache("products").get(listKey)).isNotNull();
+
+        Page<ProductListDto> second = queryService.getProducts(null, PageRequest.of(0, 10));
+        assertThat(second.getTotalElements()).isEqualTo(first.getTotalElements());
+    }
+
+    @Test
+    @DisplayName("상품 수정 시 상세 캐시와 목록 캐시가 모두 무효화된다")
+    void update_evictsBothCaches() {
+        queryService.getProduct(productId);
+        queryService.getProducts(null, PageRequest.of(0, 10));
+        assertThat(cacheManager.getCache("product").get(productId)).isNotNull();
+        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNotNull();
+
+        commandService.update(productId,
+                new UpdateProductCommand(categoryId, "갤럭시", "수정됨", 900_000L, null));
+
+        assertThat(cacheManager.getCache("product").get(productId)).isNull();
+        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNull();
+
+        ProductDetailDto refreshed = queryService.getProduct(productId);
+        assertThat(refreshed.name()).isEqualTo("갤럭시");
+        assertThat(refreshed.price()).isEqualTo(900_000L);
+    }
+
+    @Test
+    @DisplayName("상품 삭제 시 상세 캐시와 목록 캐시가 모두 무효화된다")
+    void delete_evictsBothCaches() {
+        queryService.getProduct(productId);
+        queryService.getProducts(null, PageRequest.of(0, 10));
+        assertThat(cacheManager.getCache("product").get(productId)).isNotNull();
+        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNotNull();
+
+        commandService.delete(productId);
+
+        assertThat(cacheManager.getCache("product").get(productId)).isNull();
+        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNull();
+    }
+
+    @Test
+    @DisplayName("상품 등록 시 목록 캐시가 무효화된다")
+    void create_evictsListCache() {
+        queryService.getProducts(null, PageRequest.of(0, 10));
+        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNotNull();
+
+        commandService.create(
+                new CreateProductCommand(categoryId, "태블릿", "설명", 500_000L, null, 50));
+
+        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNull();
+
+        Page<ProductListDto> refreshed = queryService.getProducts(null, PageRequest.of(0, 10));
+        assertThat(refreshed.getTotalElements()).isEqualTo(2);
+    }
+}

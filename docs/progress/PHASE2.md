@@ -144,4 +144,26 @@
 
 **검증 방식**: `CacheManager.getCache().get(key)` — null 여부로 캐시 상태 직접 확인
 
+### 2026-03-30
+
+#### Task 2-2: Redis 분산 락 구현 (통합 테스트 제외)
+
+**완료 항목**:
+- `build.gradle`에 `org.redisson:redisson:3.27.0` 의존성 추가
+- `RedissonConfig` 생성 (`RedisConnectionDetails` 주입, Testcontainers `@ServiceConnection` 호환)
+- `DistributedLockManager` 생성 (`global/lock/`) — `tryLock`/`unlock`, Redis 장애 시 fallback(`true` 반환)
+- `InventoryService.decreaseStock()` 수정 — 분산 락 적용 (키: `inventory-lock:{productId}`, waitTime 3s, leaseTime 5s)
+- `ProductPortAdapter` 수정 — `InventoryRepository` 직접 접근 → `InventoryService` 위임으로 변경
+- `InventoryServiceTest` 수정 — `DistributedLockManager` mock 추가, 락 획득 실패 테스트 추가
+- `InventoryConcurrencyTest` 수정 — Redis Testcontainer 추가 (RedissonConfig 빈 생성 호환)
+- 기존 전체 테스트 219건 통과 확인
+
+**미완료**: 동시성 통합 테스트 (50스레드 오버셀링 검증, Redis 장애 fallback)
+
+**주요 결정**:
+- **RedissonConfig에 `RedisConnectionDetails` 사용**: `@Value("${spring.data.redis.host}")` 대신 Spring Boot의 `RedisConnectionDetails` 빈 주입. `@ServiceConnection`은 프로퍼티가 아닌 `ConnectionDetails` 빈으로 연결 정보를 제공하므로, `@Value`로는 Testcontainer 포트를 받을 수 없음
+- **ProductPortAdapter → InventoryService 위임**: 기존에는 `ProductPortAdapter`가 `InventoryRepository`에 직접 접근하여 `inventory.decrease()` 호출. 분산 락이 `InventoryService`에 적용되므로, 모든 재고 변경이 락을 통과하도록 `InventoryService` 위임으로 변경
+- **데드락 방지 불필요**: 각 `decreaseStock()` 호출이 개별 lock/unlock (동시에 2개 이상 락 미보유) → 순환 대기 불가. TASKS.md의 "global ordering" 설계는 모든 락을 동시 보유하는 경우를 전제하나, 현재 구현은 개별 lock/unlock이므로 불필요
+- **restoreStock()은 락 미적용**: 재고 복구는 증가 연산이므로 오버셀링 위험 없음
+
 ---

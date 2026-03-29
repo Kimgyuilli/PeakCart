@@ -198,15 +198,15 @@
 ---
 
 ### Task 2-2: Redis 분산 락 (재고 동시성 제어)
-**상태**: 🔲 대기
+**상태**: 🔄 진행 중
 **목표**: Redisson 분산 락 + DB 낙관적 락 이중 방어로 오버셀링 방지
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `build.gradle` Redisson 의존성 추가 | 🔲 | |
-| `RedissonConfig` 설정 | 🔲 | |
-| `DistributedLockManager` 구현 (Redisson RLock) | 🔲 | 키: `inventory-lock:{productId}`, waitTime/leaseTime 설정 |
-| `InventoryService` 분산 락 적용 (재고 차감) | 🔲 | 락 획득 실패 → 즉시 409 응답 |
+| `build.gradle` Redisson 의존성 추가 | ✅ | `org.redisson:redisson:3.27.0` |
+| `RedissonConfig` 설정 | ✅ | `RedisConnectionDetails` 주입, Testcontainers `@ServiceConnection` 호환 |
+| `DistributedLockManager` 구현 (Redisson RLock) | ✅ | 키: `inventory-lock:{productId}`, waitTime 3s / leaseTime 5s, Redis 장애 시 fallback |
+| `InventoryService` 분산 락 적용 (재고 차감) | ✅ | 락 획득 실패 → PRD-004(409), `ProductPortAdapter` → `InventoryService` 위임으로 통합 |
 | 동시성 통합 테스트 (멀티스레드 오버셀링 검증) | 🔲 | Testcontainers Redis, 50스레드 동시 차감 |
 
 > **데드락 방지**: 다중 상품 주문 시 productId 오름차순 정렬 후 순차 락 획득 (global ordering).

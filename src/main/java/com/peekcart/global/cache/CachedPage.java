@@ -24,7 +24,7 @@ public record CachedPage<T>(
                 page.getContent(),
                 page.getTotalElements(),
                 page.getNumber(),
-                page.getPageable().getPageSize());
+                page.getSize());
     }
 
     public Page<T> toPage() {

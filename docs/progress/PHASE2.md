@@ -110,4 +110,24 @@
 - **CachedPage 래퍼 도입**: Spring `PageImpl`은 Jackson 기본 역직렬화 불가. `CachedPage` record로 래핑하여 Redis 직렬화 안정성 확보
 - **목록 캐시 무효화 전략**: 페이징 파라미터별 개별 evict 불가 → `allEntries = true` 채택. 상품 변경은 관리자 저빈도 작업이므로 전체 flush 수용
 
+#### Task 2-1: 코드 리뷰 개선 (4건)
+
+설계서 대조 + 코드 리뷰 수행 후 아래 항목 개선 완료:
+
+**P0 — CacheConfig PolymorphicTypeValidator 보안 강화**:
+- `LaissezFaireSubTypeValidator`(모든 타입 허용) → `BasicPolymorphicTypeValidator`로 교체
+- `com.peekcart.` + `java.util.` 패키지만 역직렬화 허용, Deserialization Gadget 공격 벡터 차단
+- 불필요한 ObjectMapper 이중 생성 제거
+
+**P1 — CacheConfig defaultConfig TTL 중복 제거**:
+- `defaultConfig`에 기본 TTL 10분 직접 설정, `cacheDefaults()`에서 `.entryTtl()` 재호출 제거
+- `productListConfig` 변수 제거 — `defaultConfig`와 동일하므로 직접 참조
+
+**P1 — 목록 캐시 키 Sort 미포함 의도 명시**:
+- `ProductCacheService.getProductList()` 캐시 키에 Sort 조건 미포함 사유 주석 추가
+- Controller에서 `@PageableDefault` 고정 정렬만 사용하므로 현재 문제없으나, 향후 정렬 옵션 추가 시 키 수정 필요
+
+**P2 — CachedPage 간결화**:
+- `page.getPageable().getPageSize()` → `page.getSize()` (동일 동작, 더 간결)
+
 ---

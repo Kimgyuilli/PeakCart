@@ -179,16 +179,16 @@
 ## Phase 2 Tasks
 
 ### Task 2-1: Redis 캐싱
-**상태**: 🔲 대기
+**상태**: 🔄 진행 중
 **목표**: 상품 목록/상세 조회에 Cache Aside 패턴 적용, 응답시간 개선
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `build.gradle` Redis 캐싱 의존성 추가 (spring-boot-starter-cache) | 🔲 | |
-| `CacheConfig` 설정 (RedisCacheManager, TTL, 직렬화) | 🔲 | |
-| `ProductQueryService` 상품 상세 조회 캐싱 (`@Cacheable`) | 🔲 | Cache Aside: 캐시 미스 시 DB 조회 → 캐시 저장 |
-| `ProductQueryService` 상품 목록 조회 캐싱 | 🔲 | 페이징+카테고리 조건별 캐시 키 |
-| `ProductCommandService` 상품 수정/삭제 시 캐시 무효화 (`@CacheEvict`) | 🔲 | |
+| `build.gradle` Redis 캐싱 의존성 추가 (spring-boot-starter-cache) | ✅ | |
+| `CacheConfig` 설정 (RedisCacheManager, TTL, 직렬화) | ✅ | JSON 직렬화, product 30분 / products 10분 TTL |
+| `ProductQueryService` 상품 상세 조회 캐싱 (`@Cacheable`) | ✅ | ProductCacheService 분리 (AOP 프록시), ProductInfoDto(재고 제외) 캐싱 |
+| `ProductQueryService` 상품 목록 조회 캐싱 | ✅ | CachedPage 래퍼, ProductListDto, 페이징+카테고리 조건별 캐시 키 |
+| `ProductCommandService` 상품 수정/삭제 시 캐시 무효화 (`@CacheEvict`) | ✅ | create→목록 evict, update/delete→상세+목록 evict |
 | 통합 테스트 (캐시 적중/무효화 검증) | 🔲 | Testcontainers Redis |
 
 > **캐시와 재고 분리**: 캐시에 재고를 포함하지 않습니다. 재고는 차감/복구마다 변경되어 캐시 무효화가 빈번하고, PK 단건 조회(~1ms)로 충분합니다. `@CacheEvict`는 상품 수정/삭제 시에만 동작하며, 재고 변경과 캐시가 결합되지 않아 구현이 단순합니다. 대안(재고 포함 + TTL 30초)의 트레이드오프도 인지합니다.

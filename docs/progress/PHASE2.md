@@ -88,4 +88,26 @@
 - P1-6 waitTime/leaseTime 구체값: 설계서에 확정하면 문서-코드 불일치 유발, application.yml 프로퍼티로 관리
 - P1-8 lockAtLeastFor: Phase 2 단일 인스턴스에서 검증 불가, Phase 3으로 이관
 
+### 2026-03-29
+
+#### Task 2-1: Redis 캐싱 구현 (통합 테스트 제외)
+
+**완료 항목**:
+- `build.gradle`에 `spring-boot-starter-cache` 의존성 추가
+- `CacheConfig` 생성 (`@EnableCaching`, `RedisCacheManager`, JSON 직렬화, 캐시별 TTL)
+- `CachedPage` 래퍼 record 생성 (`global/cache/`) — `PageImpl` Redis 직렬화 문제 해결
+- `ProductInfoDto` (재고 제외 캐싱용), `ProductListDto` (목록 캐싱용) DTO 추가
+- `ProductCacheService` 생성 — `@Cacheable` 메서드 분리 (AOP 프록시 우회 방지)
+- `ProductQueryService` 수정 — `ProductCacheService` 위임, 재고는 DB 실시간 조회
+- `ProductCommandService` 수정 — `@CacheEvict`/`@Caching` 적용 (create/update/delete)
+- `ProductResponse` 수정 — `from(Product)` → `from(ProductListDto)`
+- 기존 단위 테스트 수정 (ProductQueryServiceTest, ProductControllerTest, ProductFixture)
+
+**미완료**: 통합 테스트 (Testcontainers Redis 캐시 적중/무효화 검증)
+
+**주요 결정**:
+- **ProductCacheService 별도 빈 분리**: 동일 빈 내 `@Cacheable` 내부 호출은 AOP 프록시를 타지 않아 캐시 미동작. self-injection 대신 별도 서비스로 분리하여 해결
+- **CachedPage 래퍼 도입**: Spring `PageImpl`은 Jackson 기본 역직렬화 불가. `CachedPage` record로 래핑하여 Redis 직렬화 안정성 확보
+- **목록 캐시 무효화 전략**: 페이징 파라미터별 개별 evict 불가 → `allEntries = true` 채택. 상품 변경은 관리자 저빈도 작업이므로 전체 flush 수용
+
 ---

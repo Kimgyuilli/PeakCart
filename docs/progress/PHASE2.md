@@ -8,7 +8,7 @@
 ## Phase 2 목표
 
 **Exit Criteria**:
-- [ ] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
+- [x] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
 - [ ] 동시 주문 테스트 시 오버셀링 0건
 - [ ] Outbox → Kafka 이벤트 발행 정상 동작
 - [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
@@ -116,7 +116,8 @@
 
 **P0 — CacheConfig PolymorphicTypeValidator 보안 강화**:
 - `LaissezFaireSubTypeValidator`(모든 타입 허용) → `BasicPolymorphicTypeValidator`로 교체
-- `com.peekcart.` + `java.util.` 패키지만 역직렬화 허용, Deserialization Gadget 공격 벡터 차단
+- `com.peekcart.` + `java.lang.` + `java.util.` 패키지만 역직렬화 허용, Deserialization Gadget 공격 벡터 차단
+- `NON_FINAL` → `EVERYTHING` 변경: Java record는 암묵적 final이므로 NON_FINAL에서 `@class` 타입 정보 누락 → 역직렬화 실패. 통합 테스트에서 발견하여 수정
 - 불필요한 ObjectMapper 이중 생성 제거
 
 **P1 — CacheConfig defaultConfig TTL 중복 제거**:
@@ -129,5 +130,18 @@
 
 **P2 — CachedPage 간결화**:
 - `page.getPageable().getPageSize()` → `page.getSize()` (동일 동작, 더 간결)
+
+#### Task 2-1: 통합 테스트 완료 (5건)
+
+`ProductCacheIntegrationTest` 작성 — Testcontainers Redis + MySQL 기반 캐시 적중/무효화 검증:
+
+**테스트 항목**:
+1. 상세 조회 캐시 적중: 첫 호출 캐시 미스 → 두 번째 호출 캐시 적중 확인
+2. 목록 조회 캐시 적중: 동일 패턴 검증
+3. 상품 수정 시 캐시 무효화: 상세 + 목록 캐시 모두 evict 확인, 수정된 데이터 반환 검증
+4. 상품 삭제 시 캐시 무효화: 상세 + 목록 캐시 모두 evict 확인
+5. 상품 등록 시 목록 캐시 무효화: 목록 캐시 evict + 새 상품 포함 확인
+
+**검증 방식**: `CacheManager.getCache().get(key)` — null 여부로 캐시 상태 직접 확인
 
 ---

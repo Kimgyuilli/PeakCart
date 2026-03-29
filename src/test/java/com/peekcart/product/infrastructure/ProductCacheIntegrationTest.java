@@ -30,6 +30,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("상품 캐싱 통합 테스트 (Testcontainers Redis)")
 class ProductCacheIntegrationTest {
 
+    private static final PageRequest DEFAULT_PAGE = PageRequest.of(0, 10);
+    private static final String LIST_CACHE_KEY = "list:null:0:10";
+
     @Container
     @ServiceConnection
     static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")
@@ -92,13 +95,13 @@ class ProductCacheIntegrationTest {
     @Test
     @DisplayName("목록 조회: 첫 호출 시 캐시 미스 → 두 번째 호출 시 캐시 적중")
     void getProducts_cacheHit() {
-        String listKey = "list:null:0:10";
+        String listKey = LIST_CACHE_KEY;
         assertThat(cacheManager.getCache("products").get(listKey)).isNull();
 
-        Page<ProductListDto> first = queryService.getProducts(null, PageRequest.of(0, 10));
+        Page<ProductListDto> first = queryService.getProducts(null, DEFAULT_PAGE);
         assertThat(cacheManager.getCache("products").get(listKey)).isNotNull();
 
-        Page<ProductListDto> second = queryService.getProducts(null, PageRequest.of(0, 10));
+        Page<ProductListDto> second = queryService.getProducts(null, DEFAULT_PAGE);
         assertThat(second.getTotalElements()).isEqualTo(first.getTotalElements());
     }
 
@@ -106,15 +109,15 @@ class ProductCacheIntegrationTest {
     @DisplayName("상품 수정 시 상세 캐시와 목록 캐시가 모두 무효화된다")
     void update_evictsBothCaches() {
         queryService.getProduct(productId);
-        queryService.getProducts(null, PageRequest.of(0, 10));
+        queryService.getProducts(null, DEFAULT_PAGE);
         assertThat(cacheManager.getCache("product").get(productId)).isNotNull();
-        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNotNull();
+        assertThat(cacheManager.getCache("products").get(LIST_CACHE_KEY)).isNotNull();
 
         commandService.update(productId,
                 new UpdateProductCommand(categoryId, "갤럭시", "수정됨", 900_000L, null));
 
         assertThat(cacheManager.getCache("product").get(productId)).isNull();
-        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNull();
+        assertThat(cacheManager.getCache("products").get(LIST_CACHE_KEY)).isNull();
 
         ProductDetailDto refreshed = queryService.getProduct(productId);
         assertThat(refreshed.name()).isEqualTo("갤럭시");
@@ -125,28 +128,28 @@ class ProductCacheIntegrationTest {
     @DisplayName("상품 삭제 시 상세 캐시와 목록 캐시가 모두 무효화된다")
     void delete_evictsBothCaches() {
         queryService.getProduct(productId);
-        queryService.getProducts(null, PageRequest.of(0, 10));
+        queryService.getProducts(null, DEFAULT_PAGE);
         assertThat(cacheManager.getCache("product").get(productId)).isNotNull();
-        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNotNull();
+        assertThat(cacheManager.getCache("products").get(LIST_CACHE_KEY)).isNotNull();
 
         commandService.delete(productId);
 
         assertThat(cacheManager.getCache("product").get(productId)).isNull();
-        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNull();
+        assertThat(cacheManager.getCache("products").get(LIST_CACHE_KEY)).isNull();
     }
 
     @Test
     @DisplayName("상품 등록 시 목록 캐시가 무효화된다")
     void create_evictsListCache() {
-        queryService.getProducts(null, PageRequest.of(0, 10));
-        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNotNull();
+        queryService.getProducts(null, DEFAULT_PAGE);
+        assertThat(cacheManager.getCache("products").get(LIST_CACHE_KEY)).isNotNull();
 
         commandService.create(
                 new CreateProductCommand(categoryId, "태블릿", "설명", 500_000L, null, 50));
 
-        assertThat(cacheManager.getCache("products").get("list:null:0:10")).isNull();
+        assertThat(cacheManager.getCache("products").get(LIST_CACHE_KEY)).isNull();
 
-        Page<ProductListDto> refreshed = queryService.getProducts(null, PageRequest.of(0, 10));
+        Page<ProductListDto> refreshed = queryService.getProducts(null, DEFAULT_PAGE);
         assertThat(refreshed.getTotalElements()).isEqualTo(2);
     }
 }

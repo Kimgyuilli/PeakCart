@@ -9,7 +9,7 @@
 
 **Exit Criteria**:
 - [x] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
-- [ ] 동시 주문 테스트 시 오버셀링 0건
+- [x] 동시 주문 테스트 시 오버셀링 0건
 - [ ] Outbox → Kafka 이벤트 발행 정상 동작
 - [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
 
@@ -165,5 +165,16 @@
 - **ProductPortAdapter → InventoryService 위임**: 기존에는 `ProductPortAdapter`가 `InventoryRepository`에 직접 접근하여 `inventory.decrease()` 호출. 분산 락이 `InventoryService`에 적용되므로, 모든 재고 변경이 락을 통과하도록 `InventoryService` 위임으로 변경
 - **데드락 방지 불필요**: 각 `decreaseStock()` 호출이 개별 lock/unlock (동시에 2개 이상 락 미보유) → 순환 대기 불가. TASKS.md의 "global ordering" 설계는 모든 락을 동시 보유하는 경우를 전제하나, 현재 구현은 개별 lock/unlock이므로 불필요
 - **restoreStock()은 락 미적용**: 재고 복구는 증가 연산이므로 오버셀링 위험 없음
+
+#### Task 2-2: 동시성 통합 테스트 완료
+
+`InventoryConcurrencyTest`에 분산 락 동시성 테스트 추가:
+
+- 50스레드 동시 `InventoryLockFacade.decreaseStock()` 호출
+- 분산 락이 순차 실행을 보장하여 50건 전부 성공
+- 최종 재고 = 초기(100) - 50 = 50, 오버셀링 0건 확인
+- 기존 낙관적 락 테스트(10스레드)와 함께 2건의 동시성 테스트 보유
+
+**Phase 2 Exit Criteria 달성**: 동시 주문 테스트 시 오버셀링 0건 ✅
 
 ---

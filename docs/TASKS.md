@@ -170,7 +170,7 @@
 
 **Phase 2 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
 - [ ] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
-- [ ] 동시 주문 테스트 시 오버셀링 0건
+- [x] 동시 주문 테스트 시 오버셀링 0건
 - [ ] Outbox → Kafka 이벤트 발행 정상 동작
 - [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
 
@@ -198,7 +198,7 @@
 ---
 
 ### Task 2-2: Redis 분산 락 (재고 동시성 제어)
-**상태**: 🔄 진행 중
+**상태**: ✅ 완료
 **목표**: Redisson 분산 락 + DB 낙관적 락 이중 방어로 오버셀링 방지
 
 | 항목 | 상태 | 비고 |
@@ -207,7 +207,7 @@
 | `RedissonConfig` 설정 | ✅ | `RedisConnectionDetails` 주입, Testcontainers `@ServiceConnection` 호환 |
 | `DistributedLockManager` 구현 (Redisson RLock) | ✅ | 키: `inventory-lock:{productId}`, waitTime 3s / leaseTime 5s, Redis 장애 시 fallback |
 | `InventoryService` 분산 락 적용 (재고 차감) | ✅ | 락 획득 실패 → PRD-004(409), `ProductPortAdapter` → `InventoryService` 위임으로 통합 |
-| 동시성 통합 테스트 (멀티스레드 오버셀링 검증) | 🔲 | Testcontainers Redis, 50스레드 동시 차감 |
+| 동시성 통합 테스트 (멀티스레드 오버셀링 검증) | ✅ | Testcontainers Redis, 50스레드 동시 차감, 오버셀링 0건 |
 
 > **데드락 방지**: 다중 상품 주문 시 productId 오름차순 정렬 후 순차 락 획득 (global ordering).
 > **Redis 장애 fallback**: `DistributedLockManager`에서 Redis 연결 예외 catch → 락 없이 진행, `@Version` 낙관적 락이 최후 방어선 (설계 9-1). 동시 요청 시 낙관적 락 충돌률 증가를 감수하는 트레이드오프.
@@ -323,3 +323,4 @@
 | 2026-03-27 | Swagger 개선 | 에러 핸들링 4건 보강, 204 No Content 통일, LoginUser 전역 숨김, Pageable 기본값 설정 |
 | 2026-03-27 | 낙관적 락 동시성 테스트 | Inventory @Version 낙관적 락 통합 테스트 (Testcontainers, 10스레드 동시 차감, lost update 방지 검증), ErrorCode PRD_004 + GlobalExceptionHandler OptimisticLockingFailureException 409 처리 |
 | 2026-03-29 | Task 2-1 | Redis 캐싱 완료 (Cache Aside 패턴, CacheConfig, ProductCacheService, CachedPage, 코드리뷰 개선 4건, 통합 테스트 5건) |
+| 2026-03-30 | Task 2-2 | Redis 분산 락 완료 (Redisson, DistributedLockManager, InventoryLockFacade, 50스레드 동시성 통합 테스트, 오버셀링 0건) |

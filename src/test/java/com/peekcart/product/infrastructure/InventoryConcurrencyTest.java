@@ -1,5 +1,6 @@
 package com.peekcart.product.infrastructure;
 
+import com.peekcart.product.application.InventoryLockFacade;
 import com.peekcart.product.domain.model.Category;
 import com.peekcart.product.domain.model.Inventory;
 import com.peekcart.product.domain.model.Product;
@@ -26,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Testcontainers
-@DisplayName("Inventory 낙관적 락 동시성 테스트")
+@DisplayName("Inventory 동시성 테스트")
 class InventoryConcurrencyTest {
 
     @Container
@@ -42,6 +43,10 @@ class InventoryConcurrencyTest {
     @Autowired
     EntityManagerFactory emf;
 
+    @Autowired
+    InventoryLockFacade inventoryLockFacade;
+
+    private Long productId;
     private Long inventoryId;
 
     @BeforeEach
@@ -59,6 +64,7 @@ class InventoryConcurrencyTest {
         em.persist(inventory);
 
         em.getTransaction().commit();
+        productId = product.getId();
         inventoryId = inventory.getId();
         em.close();
     }
@@ -113,6 +119,46 @@ class InventoryConcurrencyTest {
         EntityManager em = emf.createEntityManager();
         Inventory result = em.find(Inventory.class, inventoryId);
         assertThat(result.getStock()).isEqualTo(100 - (successCount.get() * decreasePerThread));
+        em.close();
+    }
+
+    @Test
+    @DisplayName("50스레드 동시 차감 시 분산 락으로 오버셀링 없이 전부 성공한다")
+    void concurrentDecrease_distributedLock_preventsOverselling() throws InterruptedException {
+        int threadCount = 50;
+        CountDownLatch readyLatch = new CountDownLatch(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger failCount = new AtomicInteger(0);
+
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+        for (int i = 0; i < threadCount; i++) {
+            executor.submit(() -> {
+                readyLatch.countDown();
+                try {
+                    startLatch.await();
+                    inventoryLockFacade.decreaseStock(productId, 1);
+                    successCount.incrementAndGet();
+                } catch (Exception e) {
+                    failCount.incrementAndGet();
+                }
+            });
+        }
+
+        readyLatch.await();
+        startLatch.countDown();
+        executor.shutdown();
+        executor.awaitTermination(30, TimeUnit.SECONDS);
+
+        // 50스레드 전부 성공 (분산 락이 순차 실행을 보장)
+        assertThat(successCount.get()).isEqualTo(threadCount);
+        assertThat(failCount.get()).isZero();
+
+        // 최종 재고 = 초기(100) - 50 = 50 — 오버셀링 0건
+        EntityManager em = emf.createEntityManager();
+        Inventory result = em.find(Inventory.class, inventoryId);
+        assertThat(result.getStock()).isEqualTo(100 - threadCount);
         em.close();
     }
 

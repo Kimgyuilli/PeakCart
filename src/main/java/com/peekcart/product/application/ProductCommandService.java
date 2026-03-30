@@ -12,6 +12,8 @@ import com.peekcart.product.domain.repository.CategoryRepository;
 import com.peekcart.product.domain.repository.InventoryRepository;
 import com.peekcart.product.domain.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,7 @@ public class ProductCommandService {
      * @return 생성된 상품 상세 정보
      * @throws ProductException 카테고리가 없으면 {@code PRD-003}
      */
+    @CacheEvict(cacheNames = "products", allEntries = true)
     public ProductDetailDto create(CreateProductCommand command) {
         Category category = categoryRepository.findById(command.categoryId())
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_003));
@@ -56,6 +59,10 @@ public class ProductCommandService {
      * @return 수정된 상품 상세 정보
      * @throws ProductException 상품이 없으면 {@code PRD-001}, 카테고리가 없으면 {@code PRD-003}
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "product", key = "#productId"),
+            @CacheEvict(cacheNames = "products", allEntries = true)
+    })
     public ProductDetailDto update(Long productId, UpdateProductCommand command) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
@@ -77,6 +84,10 @@ public class ProductCommandService {
      * @param productId 삭제할 상품 PK
      * @throws ProductException 상품이 없으면 {@code PRD-001}
      */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = "product", key = "#productId"),
+            @CacheEvict(cacheNames = "products", allEntries = true)
+    })
     public void delete(Long productId) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));

@@ -31,6 +31,10 @@ dependencies {
 
 	// Redis
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.redisson:redisson:3.27.0'
+
+	// Cache
+	implementation 'org.springframework.boot:spring-boot-starter-cache'
 
 	// MySQL
 	runtimeOnly 'com.mysql:mysql-connector-j'

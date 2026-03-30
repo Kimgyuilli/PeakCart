@@ -2,10 +2,10 @@ package com.peekcart.product.infrastructure.adapter;
 
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.port.ProductPort;
+import com.peekcart.product.application.InventoryLockFacade;
+import com.peekcart.product.application.InventoryService;
 import com.peekcart.product.domain.exception.ProductException;
-import com.peekcart.product.domain.model.Inventory;
 import com.peekcart.product.domain.model.Product;
-import com.peekcart.product.domain.repository.InventoryRepository;
 import com.peekcart.product.domain.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -19,7 +19,8 @@ import org.springframework.stereotype.Component;
 public class ProductPortAdapter implements ProductPort {
 
     private final ProductRepository productRepository;
-    private final InventoryRepository inventoryRepository;
+    private final InventoryLockFacade inventoryLockFacade;
+    private final InventoryService inventoryService;
 
     @Override
     public void verifyProductExists(Long productId) {
@@ -31,18 +32,12 @@ public class ProductPortAdapter implements ProductPort {
     public long decreaseStockAndGetUnitPrice(Long productId, int quantity) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
-
-        Inventory inventory = inventoryRepository.findByProductId(productId)
-                .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
-        inventory.decrease(quantity);
-
+        inventoryLockFacade.decreaseStock(productId, quantity);
         return product.getPrice();
     }
 
     @Override
     public void restoreStock(Long productId, int quantity) {
-        Inventory inventory = inventoryRepository.findByProductId(productId)
-                .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
-        inventory.restore(quantity);
+        inventoryService.restoreStock(productId, quantity);
     }
 }

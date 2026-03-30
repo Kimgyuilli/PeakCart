@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 재고 차감/복구를 담당하는 애플리케이션 서비스.
- * Order 도메인에서 호출하여 재고를 관리한다.
+ * 트랜잭션 내부에서 DB 연산만 수행하며, 분산 락은 {@link InventoryLockFacade}가 담당한다.
  */
 @Service
 @Transactional
@@ -20,7 +20,8 @@ public class InventoryService {
     private final InventoryRepository inventoryRepository;
 
     /**
-     * 재고를 차감한다. 낙관적 락({@code @Version})이 동시성을 제어한다.
+     * 재고를 차감한다.
+     * 반드시 {@link InventoryLockFacade}를 통해 호출하여 분산 락 범위 안에서 실행되어야 한다.
      *
      * @param productId 상품 PK
      * @param quantity  차감 수량

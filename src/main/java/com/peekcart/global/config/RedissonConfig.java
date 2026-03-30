@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RedissonConfig {
 
-    @Bean
+    @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient(RedisConnectionDetails connectionDetails) {
         RedisConnectionDetails.Standalone standalone = connectionDetails.getStandalone();
         Config config = new Config();

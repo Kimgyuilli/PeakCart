@@ -314,6 +314,8 @@ Phase 2에서 Kafka + Outbox 패턴 도입에 따라 아래 패키지/클래스�
     │   ├── CacheConfig.java                 # RedisCacheManager, TTL, 직렬화 (NEW)
     │   ├── KafkaConfig.java                 # Producer/Consumer/Topic 설정 (NEW)
     │   └── RedissonConfig.java              # Redisson 분산 락 설정 (NEW)
+    ├── lock/                               # 분산 락 (NEW)
+    │   └── DistributedLockManager.java     # Redisson 기반 락 관리자 (NEW)
     ├── idempotency/
     │   ├── ProcessedEvent.java              # 중복 소비 방지 엔티티 (NEW)
     │   └── ProcessedEventRepository.java    # (NEW)

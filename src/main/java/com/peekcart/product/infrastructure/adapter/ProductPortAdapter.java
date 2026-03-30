@@ -2,6 +2,7 @@ package com.peekcart.product.infrastructure.adapter;
 
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.port.ProductPort;
+import com.peekcart.product.application.InventoryLockFacade;
 import com.peekcart.product.application.InventoryService;
 import com.peekcart.product.domain.exception.ProductException;
 import com.peekcart.product.domain.model.Product;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 public class ProductPortAdapter implements ProductPort {
 
     private final ProductRepository productRepository;
+    private final InventoryLockFacade inventoryLockFacade;
     private final InventoryService inventoryService;
 
     @Override
@@ -30,7 +32,7 @@ public class ProductPortAdapter implements ProductPort {
     public long decreaseStockAndGetUnitPrice(Long productId, int quantity) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ProductException(ErrorCode.PRD_001));
-        inventoryService.decreaseStock(productId, quantity);
+        inventoryLockFacade.decreaseStock(productId, quantity);
         return product.getPrice();
     }
 

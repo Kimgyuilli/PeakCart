@@ -1,6 +1,6 @@
 package com.peekcart.global.outbox;
 
-import com.peekcart.notification.application.port.SlackPort;
+import com.peekcart.global.port.SlackPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;

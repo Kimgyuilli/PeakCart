@@ -291,7 +291,6 @@ Phase 2에서 Kafka + Outbox 패턴 도입에 따라 아래 패키지/클래스�
 │       ├── outbox/
 │       │   └── OrderOutboxEventPublisher.java  # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
 │       ├── kafka/
-│       │   ├── OrderEventProducer.java         # Kafka 발행 (NEW)
 │       │   └── OrderEventConsumer.java         # payment.completed/failed 소비 (NEW)
 │       └── event/
 │           └── OrderEventListener.java         # Phase 1 유지 (Kafka 대체 대상)
@@ -301,7 +300,6 @@ Phase 2에서 Kafka + Outbox 패턴 도입에 따라 아래 패키지/클래스�
 │       ├── outbox/
 │       │   └── PaymentOutboxEventPublisher.java  # 비즈니스 트랜잭션 내 Outbox 저장 (NEW)
 │       └── kafka/
-│           ├── PaymentEventProducer.java       # Kafka 발행 (NEW)
 │           └── PaymentEventConsumer.java       # order.created 소비 (NEW)
 │
 ├── notification/

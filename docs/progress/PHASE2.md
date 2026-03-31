@@ -204,4 +204,22 @@
 - **Payment payload에서 orderNumber 제외**: Payment 엔티티에 orderNumber가 없어 포함 불가. 설계 문서의 이상적 스키마와 현재 구현 사이의 차이 인지
 - **기존 EventListener 비활성화 방식**: `@Component` 제거로 빈 등록 해제. 파일은 보존하여 Phase 1 로직 참조 가능
 
+#### Task 2-3: 코드 리뷰 개선 (3건)
+
+설계서 전체 대조 + 코드 리뷰 수행 후 아래 항목 개선 완료:
+
+**P0 — eventId 이중 생성 수정**:
+- `OrderOutboxEventPublisher`, `PaymentOutboxEventPublisher`에서 `KafkaEventEnvelope`의 `eventId`와 `OutboxEvent`의 `eventId`가 서로 다른 UUID로 생성되던 문제 수정
+- `OutboxEvent`를 먼저 생성하고, 그 `eventId`를 `KafkaEventEnvelope`에 전달하도록 순서 변경
+- `OutboxEvent`에 `updatePayload()` 메서드 추가
+- Task 2-4 멱등성 처리에서 `event_id` 기반 중복 체크 시 Kafka 메시지와 DB의 eventId 정합성 보장
+
+**P1 — Consumer `extractPayload()` NPE 방어**:
+- `OrderEventConsumer`, `PaymentEventConsumer`, `NotificationConsumer` 3개 Consumer에서 `get("payload")`가 `null`일 때 명시적 `IllegalArgumentException` 발생으로 변경
+- NPE 대신 원인을 특정할 수 있는 에러 메시지 제공
+
+**설계 문서 동기화 (2건)**:
+- `02-architecture.md`: Phase 2 패키지 구조에서 `OrderEventProducer`, `PaymentEventProducer` 제거 (OutboxPollingScheduler에 통합되어 불필요)
+- `04-design-deep-dive.md`: `order.created` payload에서 `productName` 제거 (OrderItem에 없는 필드), `payment.completed` payload에서 `orderNumber` → `userId` 반영 (실제 구현과 일치)
+
 ---

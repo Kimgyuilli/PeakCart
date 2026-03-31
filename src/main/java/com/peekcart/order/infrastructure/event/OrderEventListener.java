@@ -9,7 +9,6 @@ import com.peekcart.order.domain.repository.OrderRepository;
 import com.peekcart.payment.domain.event.PaymentCompletedEvent;
 import com.peekcart.payment.domain.event.PaymentFailedEvent;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;

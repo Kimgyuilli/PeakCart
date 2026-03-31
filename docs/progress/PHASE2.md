@@ -222,4 +222,24 @@
 - `02-architecture.md`: Phase 2 패키지 구조에서 `OrderEventProducer`, `PaymentEventProducer` 제거 (OutboxPollingScheduler에 통합되어 불필요)
 - `04-design-deep-dive.md`: `order.created` payload에서 `productName` 제거 (OrderItem에 없는 필드), `payment.completed` payload에서 `orderNumber` → `userId` 반영 (실제 구현과 일치)
 
+#### Task 2-3: 2차 코드 리뷰 개선 (3건)
+
+설계서 전체 대조 + 코드 리뷰 수행 후 아래 항목 개선 완료:
+
+**P0 — OutboxPollingScheduler → SlackPort 크로스 도메인 의존 해결**:
+- `OutboxPollingScheduler`(`global/outbox/`)가 `notification/application/port/SlackPort`를 직접 참조 — global이 특정 도메인에 의존하는 아키텍처 위반
+- `SlackPort` 인터페이스를 `global/port/SlackPort`로 이동 (횡단 관심사)
+- `SlackNotificationClient`, `NotificationCommandService`, `NotificationCommandServiceTest` import 일괄 수정
+- 기존 `notification/application/port/` 빈 디렉토리 삭제
+
+**P1 — OutboxEvent 팩토리 빈 payload 임시 상태 제거**:
+- 기존: `OutboxEvent.create(..., "")` → `updatePayload()` 2단계 호출 — 엔티티가 `payload=""`인 invalid 상태로 잠시 존재
+- 변경: `OutboxEvent.create(..., Function<String, String> payloadFactory)` — eventId 생성 후 팩토리 함수로 payload 즉시 주입
+- `updatePayload()` public 메서드 제거, `OrderOutboxEventPublisher`/`PaymentOutboxEventPublisher` 수정
+
+**P1 — 비활성화된 EventListener 미사용 import 제거**:
+- `OrderEventListener`, `PaymentEventListener`, `NotificationEventListener` 3개 파일에서 `import org.springframework.stereotype.Component` 제거
+
+전체 222건 테스트 통과 확인.
+
 ---

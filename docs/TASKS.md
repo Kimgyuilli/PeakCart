@@ -325,3 +325,4 @@
 | 2026-03-29 | Task 2-1 | Redis 캐싱 완료 (Cache Aside 패턴, CacheConfig, ProductCacheService, CachedPage, 코드리뷰 개선 4건, 통합 테스트 5건) |
 | 2026-03-30 | Task 2-2 | Redis 분산 락 완료 (Redisson, DistributedLockManager, InventoryLockFacade, 50스레드 동시성 통합 테스트, 오버셀링 0건) |
 | 2026-03-31 | Task 2-3 (12/13) | Kafka + Outbox 구현 (KRaft, Flyway V2, OutboxEvent Entity/Repository, Publisher 2개, Scheduler, Consumer 3개, EventListener 비활성화, 기존 테스트 44건 통과). 통합 테스트 미완료 |
+| 2026-03-31 | Task 2-3 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 3건 개선: SlackPort를 global/port/로 이동(P0 아키텍처 위반), OutboxEvent 팩토리 Function 패턴 적용(P1), EventListener 미사용 import 제거(P1). 전체 222건 테스트 통과 |

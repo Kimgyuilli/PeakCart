@@ -14,7 +14,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
@@ -57,14 +56,14 @@ public class OrderOutboxEventPublisher {
     }
 
     private void saveOutboxEvent(String eventType, String aggregateId, Object payload) {
+        OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, aggregateId, eventType, "");
         KafkaEventEnvelope envelope = new KafkaEventEnvelope(
-                UUID.randomUUID().toString(),
+                outboxEvent.getEventId(),
                 eventType,
                 LocalDateTime.now(),
                 payload);
 
-        String json = serialize(envelope);
-        OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, aggregateId, eventType, json);
+        outboxEvent.updatePayload(serialize(envelope));
         outboxEventRepository.save(outboxEvent);
     }
 

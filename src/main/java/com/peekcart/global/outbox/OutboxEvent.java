@@ -63,6 +63,10 @@ public class OutboxEvent {
         return event;
     }
 
+    public void updatePayload(String payload) {
+        this.payload = payload;
+    }
+
     public void markPublished() {
         this.status = OutboxEventStatus.PUBLISHED;
         this.publishedAt = LocalDateTime.now();

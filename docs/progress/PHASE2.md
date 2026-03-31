@@ -177,4 +177,31 @@
 
 **Phase 2 Exit Criteria 달성**: 동시 주문 테스트 시 오버셀링 0건 ✅
 
+### 2026-03-31
+
+#### Task 2-3: Kafka + Outbox 구현 (통합 테스트 제외)
+
+**완료 항목**:
+- `docker-compose.yml`에 Kafka 서비스 추가 (apache/kafka:3.8.1, KRaft 모드)
+- `build.gradle`에 spring-kafka + spring-kafka-test + testcontainers:kafka 의존성 추가
+- Flyway `V2__outbox_processed_events.sql` 생성 (outbox_events + processed_events 테이블)
+- `OutboxEvent` Entity + `OutboxEventStatus` Enum (`global/outbox/`)
+- `OutboxEventRepository` 계층 (인터페이스 + JPA + Impl)
+- Kafka 이벤트 페이로드 DTO 정의 (`KafkaEventEnvelope` 래핑 구조 + 4개 Payload record)
+- `OrderOutboxEventPublisher` / `PaymentOutboxEventPublisher` (도메인별 `infrastructure/outbox/`)
+- `OrderCommandService`, `PaymentCommandService`에서 `ApplicationEventPublisher` → `OutboxEventPublisher` 전환
+- `KafkaConfig` 생성 (4개 NewTopic Bean, Producer/Consumer 설정)
+- `OutboxPollingScheduler` 생성 (5초 폴링, MAX_RETRY=5, Slack 알림)
+- Kafka Consumer 3개 생성 (`PaymentEventConsumer`, `OrderEventConsumer`, `NotificationConsumer`)
+- 기존 `@TransactionalEventListener` 3개 비활성화 (`@Component` 제거)
+- 기존 단위 테스트 수정 (OrderCommandServiceTest, PaymentCommandServiceTest) — 44개 전부 통과
+- `application.yml`에 Kafka producer/consumer 설정 추가, `application-local.yml`에 bootstrap-servers 추가
+
+**미완료**: 통합 테스트 (Testcontainers Kafka + MySQL + Redis, E2E 플로우 검증)
+
+**주요 결정**:
+- **Payment Kafka payload에 userId 추가**: Payment 엔티티에 userId가 없으나, NotificationConsumer가 알림 생성 시 userId 필요. OrderPort를 통한 조회 대신 Publisher에서 userId를 직접 전달받아 payload에 포함
+- **Payment payload에서 orderNumber 제외**: Payment 엔티티에 orderNumber가 없어 포함 불가. 설계 문서의 이상적 스키마와 현재 구현 사이의 차이 인지
+- **기존 EventListener 비활성화 방식**: `@Component` 제거로 빈 등록 해제. 파일은 보존하여 Phase 1 로직 참조 가능
+
 ---

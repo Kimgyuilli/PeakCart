@@ -217,23 +217,23 @@
 ---
 
 ### Task 2-3: Kafka + Outbox 도입
-**상태**: 🔲 대기
+**상태**: 🔄 진행 중
 **목표**: `@TransactionalEventListener` → Outbox 패턴 + Kafka 전환, 이벤트 유실 방지
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `docker-compose.yml` Kafka (KRaft) 추가 | 🔲 | Zookeeper 없이 KRaft 모드 |
-| `build.gradle` spring-kafka 의존성 추가 | 🔲 | |
-| Flyway `V2__outbox_processed_events.sql` 스키마 추가 | 🔲 | outbox_events + processed_events(복합 UK) + 인덱스 |
-| `OutboxEvent` Entity (`global/outbox/`) | 🔲 | PENDING/PUBLISHED/FAILED 상태, retry_count, 횡단 관심사 |
-| `OutboxEventRepository` 계층 (`global/outbox/`) | 🔲 | 단일 Repository — 도메인 구분은 aggregate_type 컬럼 |
-| `OrderOutboxEventPublisher` / `PaymentOutboxEventPublisher` | 🔲 | 도메인별 Publisher (infrastructure/outbox/), 기존 `ApplicationEventPublisher` 대체 |
-| `OutboxPollingScheduler` (`global/outbox/`) | 🔲 | 5초 주기, PENDING 조회 → Kafka 발행 → PUBLISHED, 실패 시 retry_count 증가 |
-| Outbox FAILED 시 Slack 알림 발송 | 🔲 | retry 초과 → FAILED 상태 + SlackPort로 알림 (DLQ와 별개) |
-| 이벤트 페이로드 DTO 정의 | 🔲 | Phase 1 domain/event/ record는 Spring Event용 유지, Kafka DTO는 8-2 래핑 구조로 별도 정의 |
-| `KafkaConfig` 설정 (Producer/Consumer/Topic) | 🔲 | 파티션 키: orderId, Consumer Group 네이밍 규칙 적용 |
-| 기존 `@TransactionalEventListener` → Kafka Consumer 전환 | 🔲 | PaymentEventConsumer, OrderEventConsumer, NotificationConsumer |
-| Kafka 토픽 생성 설정 | 🔲 | 4개 토픽, 파티션 3, Replication 1 |
+| `docker-compose.yml` Kafka (KRaft) 추가 | ✅ | apache/kafka:3.8.1, KRaft 모드 |
+| `build.gradle` spring-kafka 의존성 추가 | ✅ | spring-kafka + spring-kafka-test + testcontainers:kafka |
+| Flyway `V2__outbox_processed_events.sql` 스키마 추가 | ✅ | outbox_events + processed_events(복합 UK) + 인덱스 |
+| `OutboxEvent` Entity (`global/outbox/`) | ✅ | PENDING/PUBLISHED/FAILED 상태, retry_count, 횡단 관심사 |
+| `OutboxEventRepository` 계층 (`global/outbox/`) | ✅ | 단일 Repository — 도메인 구분은 aggregate_type 컬럼 |
+| `OrderOutboxEventPublisher` / `PaymentOutboxEventPublisher` | ✅ | 도메인별 Publisher (infrastructure/outbox/), 기존 `ApplicationEventPublisher` 대체 |
+| `OutboxPollingScheduler` (`global/outbox/`) | ✅ | 5초 주기, PENDING 조회 → Kafka 발행 → PUBLISHED, 실패 시 retry_count 증가 |
+| Outbox FAILED 시 Slack 알림 발송 | ✅ | retry 초과(MAX_RETRY=5) → FAILED 상태 + SlackPort로 알림 |
+| 이벤트 페이로드 DTO 정의 | ✅ | KafkaEventEnvelope 래핑 + 4개 Payload record (global/outbox/dto/) |
+| `KafkaConfig` 설정 (Producer/Consumer/Topic) | ✅ | 파티션 키: orderId, Consumer Group 네이밍 규칙 적용 |
+| 기존 `@TransactionalEventListener` → Kafka Consumer 전환 | ✅ | PaymentEventConsumer, OrderEventConsumer, NotificationConsumer |
+| Kafka 토픽 생성 설정 | ✅ | 4개 토픽, 파티션 3, Replication 1 (KafkaConfig NewTopic Bean) |
 | 통합 테스트 (Outbox → Kafka 발행 → Consumer 수신 검증) | 🔲 | Testcontainers Kafka |
 
 > **Phase 2 이벤트 소비 경로**:
@@ -324,3 +324,4 @@
 | 2026-03-27 | 낙관적 락 동시성 테스트 | Inventory @Version 낙관적 락 통합 테스트 (Testcontainers, 10스레드 동시 차감, lost update 방지 검증), ErrorCode PRD_004 + GlobalExceptionHandler OptimisticLockingFailureException 409 처리 |
 | 2026-03-29 | Task 2-1 | Redis 캐싱 완료 (Cache Aside 패턴, CacheConfig, ProductCacheService, CachedPage, 코드리뷰 개선 4건, 통합 테스트 5건) |
 | 2026-03-30 | Task 2-2 | Redis 분산 락 완료 (Redisson, DistributedLockManager, InventoryLockFacade, 50스레드 동시성 통합 테스트, 오버셀링 0건) |
+| 2026-03-31 | Task 2-3 (12/13) | Kafka + Outbox 구현 (KRaft, Flyway V2, OutboxEvent Entity/Repository, Publisher 2개, Scheduler, Consumer 3개, EventListener 비활성화, 기존 테스트 44건 통과). 통합 테스트 미완료 |

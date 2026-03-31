@@ -4,11 +4,10 @@ import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.payment.application.dto.ConfirmPaymentCommand;
 import com.peekcart.payment.application.dto.PaymentDetailDto;
 import com.peekcart.payment.application.port.OrderPort;
-import com.peekcart.payment.domain.event.PaymentCompletedEvent;
-import com.peekcart.payment.domain.event.PaymentFailedEvent;
 import com.peekcart.payment.domain.exception.PaymentException;
 import com.peekcart.payment.domain.model.Payment;
 import com.peekcart.payment.domain.repository.PaymentRepository;
+import com.peekcart.payment.infrastructure.outbox.PaymentOutboxEventPublisher;
 import com.peekcart.payment.infrastructure.toss.TossConfirmResponse;
 import com.peekcart.payment.infrastructure.toss.TossPaymentClient;
 import com.peekcart.support.ServiceTest;
@@ -17,7 +16,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
@@ -37,7 +35,7 @@ class PaymentCommandServiceTest {
     @Mock PaymentRepository paymentRepository;
     @Mock TossPaymentClient tossPaymentClient;
     @Mock OrderPort orderPort;
-    @Mock ApplicationEventPublisher eventPublisher;
+    @Mock PaymentOutboxEventPublisher outboxEventPublisher;
 
     @Test
     @DisplayName("confirmPayment: 성공 시 APPROVED 상태와 PaymentCompletedEvent가 발행된다")
@@ -58,7 +56,7 @@ class PaymentCommandServiceTest {
         assertThat(result.method()).isEqualTo("카드");
         then(orderPort).should().verifyOrderOwner(PaymentFixture.DEFAULT_USER_ID, command.orderId());
         then(orderPort).should().transitionToPaymentRequested(command.orderId());
-        then(eventPublisher).should().publishEvent(any(PaymentCompletedEvent.class));
+        then(outboxEventPublisher).should().publishPaymentCompleted(any(Payment.class), eq(PaymentFixture.DEFAULT_USER_ID));
     }
 
     @Test
@@ -74,7 +72,7 @@ class PaymentCommandServiceTest {
         PaymentDetailDto result = paymentCommandService.confirmPayment(PaymentFixture.DEFAULT_USER_ID, command);
 
         assertThat(result.status()).isEqualTo("FAILED");
-        then(eventPublisher).should().publishEvent(any(PaymentFailedEvent.class));
+        then(outboxEventPublisher).should().publishPaymentFailed(any(Payment.class), eq(PaymentFixture.DEFAULT_USER_ID));
     }
 
     @Test

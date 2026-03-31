@@ -13,7 +13,6 @@ import org.springframework.transaction.event.TransactionalEventListener;
 /**
  * 주문 도메인 이벤트를 수신하여 결제 레코드를 생성한다.
  */
-@Component
 @RequiredArgsConstructor
 public class PaymentEventListener {
 

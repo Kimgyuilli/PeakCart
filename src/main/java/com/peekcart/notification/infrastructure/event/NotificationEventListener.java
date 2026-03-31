@@ -18,7 +18,6 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * 도메인 이벤트를 수신하여 알림을 생성한다.
  */
 @Slf4j
-@Component
 @RequiredArgsConstructor
 public class NotificationEventListener {
 

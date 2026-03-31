@@ -4,16 +4,14 @@ import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.payment.application.dto.ConfirmPaymentCommand;
 import com.peekcart.payment.application.dto.PaymentDetailDto;
 import com.peekcart.payment.application.port.OrderPort;
-import com.peekcart.payment.domain.event.PaymentCompletedEvent;
-import com.peekcart.payment.domain.event.PaymentFailedEvent;
 import com.peekcart.payment.domain.exception.PaymentException;
 import com.peekcart.payment.domain.model.Payment;
 import com.peekcart.payment.domain.repository.PaymentRepository;
+import com.peekcart.payment.infrastructure.outbox.PaymentOutboxEventPublisher;
 import com.peekcart.payment.infrastructure.toss.TossConfirmResponse;
 import com.peekcart.payment.infrastructure.toss.TossPaymentClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,7 +29,7 @@ public class PaymentCommandService {
     private final PaymentRepository paymentRepository;
     private final TossPaymentClient tossPaymentClient;
     private final OrderPort orderPort;
-    private final ApplicationEventPublisher eventPublisher;
+    private final PaymentOutboxEventPublisher outboxEventPublisher;
 
     /**
      * 결제를 승인한다.
@@ -53,15 +51,12 @@ public class PaymentCommandService {
                     command.paymentKey(), command.orderId().toString(), command.amount());
             payment.approve(response.method(), OffsetDateTime.parse(response.approvedAt()).toLocalDateTime());
 
-            eventPublisher.publishEvent(new PaymentCompletedEvent(
-                    payment.getId(), payment.getOrderId(), userId, payment.getPaymentKey(),
-                    payment.getAmount(), payment.getMethod()));
+            outboxEventPublisher.publishPaymentCompleted(payment, userId);
         } catch (Exception e) {
             log.error("Toss 결제 승인 실패 — orderId={}, paymentKey={}: {}",
                     command.orderId(), command.paymentKey(), e.getMessage());
             payment.fail();
-            eventPublisher.publishEvent(new PaymentFailedEvent(
-                    payment.getId(), payment.getOrderId(), userId, payment.getPaymentKey(), payment.getAmount()));
+            outboxEventPublisher.publishPaymentFailed(payment, userId);
         }
 
         return PaymentDetailDto.from(payment);

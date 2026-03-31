@@ -4,22 +4,19 @@ import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.dto.CreateOrderCommand;
 import com.peekcart.order.application.dto.OrderDetailDto;
 import com.peekcart.order.application.port.ProductPort;
-import com.peekcart.order.domain.event.OrderCancelledEvent;
-import com.peekcart.order.domain.event.OrderCreatedEvent;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Cart;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.CartRepository;
 import com.peekcart.order.domain.repository.OrderRepository;
+import com.peekcart.order.infrastructure.outbox.OrderOutboxEventPublisher;
 import com.peekcart.support.ServiceTest;
 import com.peekcart.support.fixture.OrderFixture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
@@ -40,7 +37,7 @@ class OrderCommandServiceTest {
     @Mock OrderRepository orderRepository;
     @Mock CartRepository cartRepository;
     @Mock ProductPort productPort;
-    @Mock ApplicationEventPublisher eventPublisher;
+    @Mock OrderOutboxEventPublisher outboxEventPublisher;
 
     @Test
     @DisplayName("createOrder: 장바구니 기반 주문이 생성되고 이벤트가 발행된다")
@@ -59,7 +56,7 @@ class OrderCommandServiceTest {
         assertThat(result.receiverName()).isEqualTo(OrderFixture.DEFAULT_RECEIVER_NAME);
         assertThat(result.items()).hasSize(1);
         assertThat(cart.isEmpty()).isTrue();
-        then(eventPublisher).should().publishEvent(any(OrderCreatedEvent.class));
+        then(outboxEventPublisher).should().publishOrderCreated(any(Order.class));
     }
 
     @Test
@@ -96,7 +93,7 @@ class OrderCommandServiceTest {
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
         then(productPort).should().restoreStock(OrderFixture.DEFAULT_PRODUCT_ID, OrderFixture.DEFAULT_QUANTITY);
-        then(eventPublisher).should().publishEvent(any(OrderCancelledEvent.class));
+        then(outboxEventPublisher).should().publishOrderCancelled(any(Order.class));
     }
 
     @Test
@@ -122,7 +119,7 @@ class OrderCommandServiceTest {
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
         then(productPort).should().restoreStock(OrderFixture.DEFAULT_PRODUCT_ID, OrderFixture.DEFAULT_QUANTITY);
-        then(eventPublisher).should().publishEvent(any(OrderCancelledEvent.class));
+        then(outboxEventPublisher).should().publishOrderCancelled(any(Order.class));
     }
 
     @Test

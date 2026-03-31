@@ -33,7 +33,12 @@ public class PaymentEventConsumer {
 
     private JsonNode extractPayload(String message) {
         try {
-            return objectMapper.readTree(message).get("payload");
+            JsonNode root = objectMapper.readTree(message);
+            JsonNode payload = root.get("payload");
+            if (payload == null) {
+                throw new IllegalArgumentException("Kafka 메시지에 payload 필드가 없습니다: " + message);
+            }
+            return payload;
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Kafka 메시지 역직렬화 실패", e);
         }

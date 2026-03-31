@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.function.Function;
 
 @Entity
 @Table(name = "outbox_events")
@@ -50,21 +51,18 @@ public class OutboxEvent {
     private LocalDateTime publishedAt;
 
     public static OutboxEvent create(String aggregateType, String aggregateId,
-                                     String eventType, String payload) {
+                                     String eventType,
+                                     Function<String, String> payloadFactory) {
         OutboxEvent event = new OutboxEvent();
         event.aggregateType = aggregateType;
         event.aggregateId = aggregateId;
         event.eventType = eventType;
         event.eventId = UUID.randomUUID().toString();
-        event.payload = payload;
+        event.payload = payloadFactory.apply(event.eventId);
         event.status = OutboxEventStatus.PENDING;
         event.retryCount = 0;
         event.createdAt = LocalDateTime.now();
         return event;
-    }
-
-    public void updatePayload(String payload) {
-        this.payload = payload;
     }
 
     public void markPublished() {

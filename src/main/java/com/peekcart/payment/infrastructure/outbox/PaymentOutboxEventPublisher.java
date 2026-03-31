@@ -49,14 +49,8 @@ public class PaymentOutboxEventPublisher {
     }
 
     private void saveOutboxEvent(String eventType, String aggregateId, Object payload) {
-        OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, aggregateId, eventType, "");
-        KafkaEventEnvelope envelope = new KafkaEventEnvelope(
-                outboxEvent.getEventId(),
-                eventType,
-                LocalDateTime.now(),
-                payload);
-
-        outboxEvent.updatePayload(serialize(envelope));
+        OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, aggregateId, eventType,
+                eventId -> serialize(new KafkaEventEnvelope(eventId, eventType, LocalDateTime.now(), payload)));
         outboxEventRepository.save(outboxEvent);
     }
 

@@ -3,6 +3,7 @@ package com.peekcart.payment.infrastructure.kafka;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.peekcart.global.idempotency.IdempotencyChecker;
 import com.peekcart.payment.domain.model.Payment;
 import com.peekcart.payment.domain.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
@@ -17,28 +18,35 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentEventConsumer {
 
     private final PaymentRepository paymentRepository;
+    private final IdempotencyChecker idempotencyChecker;
     private final ObjectMapper objectMapper;
 
     @KafkaListener(topics = "order.created", groupId = "payment-svc-order-created-group")
     @Transactional
     public void handleOrderCreated(String message) {
-        JsonNode payload = extractPayload(message);
-        Long orderId = payload.get("orderId").asLong();
-        long totalAmount = payload.get("totalAmount").asLong();
+        JsonNode root = parseMessage(message);
+        String eventId = root.get("eventId").asText();
+        JsonNode payload = root.get("payload");
 
-        Payment payment = Payment.create(orderId, totalAmount);
-        paymentRepository.save(payment);
-        log.debug("Payment(PENDING) 생성 — orderId={}", orderId);
+        idempotencyChecker.executeIfNew(eventId, "payment-svc-order-created-group", () -> {
+            Long orderId = payload.get("orderId").asLong();
+            long totalAmount = payload.get("totalAmount").asLong();
+            Payment payment = Payment.create(orderId, totalAmount);
+            paymentRepository.save(payment);
+            log.debug("Payment(PENDING) 생성 — orderId={}", orderId);
+        });
     }
 
-    private JsonNode extractPayload(String message) {
+    private JsonNode parseMessage(String message) {
         try {
             JsonNode root = objectMapper.readTree(message);
-            JsonNode payload = root.get("payload");
-            if (payload == null) {
+            if (root.get("eventId") == null) {
+                throw new IllegalArgumentException("Kafka 메시지에 eventId 필드가 없습니다: " + message);
+            }
+            if (root.get("payload") == null) {
                 throw new IllegalArgumentException("Kafka 메시지에 payload 필드가 없습니다: " + message);
             }
-            return payload;
+            return root;
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Kafka 메시지 역직렬화 실패", e);
         }

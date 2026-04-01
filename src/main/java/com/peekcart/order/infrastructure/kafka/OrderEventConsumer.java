@@ -1,10 +1,9 @@
 package com.peekcart.order.infrastructure.kafka;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.global.idempotency.IdempotencyChecker;
+import com.peekcart.global.kafka.KafkaMessageParser;
 import com.peekcart.order.application.port.ProductPort;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Order;
@@ -26,20 +25,23 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class OrderEventConsumer {
 
+    private static final String GROUP_PAYMENT_COMPLETED = "order-svc-payment-completed-group";
+    private static final String GROUP_PAYMENT_FAILED = "order-svc-payment-failed-group";
+
     private final OrderRepository orderRepository;
     private final ProductPort productPort;
     private final IdempotencyChecker idempotencyChecker;
-    private final ObjectMapper objectMapper;
+    private final KafkaMessageParser kafkaMessageParser;
 
     /** 결제 성공 시 주문 상태를 {@code PAYMENT_COMPLETED}로 전이한다. */
-    @KafkaListener(topics = "payment.completed", groupId = "order-svc-payment-completed-group")
+    @KafkaListener(topics = "payment.completed", groupId = GROUP_PAYMENT_COMPLETED)
     @Transactional
     public void handlePaymentCompleted(String message) {
-        JsonNode root = parseMessage(message);
+        JsonNode root = kafkaMessageParser.parse(message);
         String eventId = root.get("eventId").asText();
         JsonNode payload = root.get("payload");
 
-        idempotencyChecker.executeIfNew(eventId, "order-svc-payment-completed-group", () -> {
+        idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_COMPLETED, () -> {
             Long orderId = payload.get("orderId").asLong();
             Order order = orderRepository.findById(orderId)
                     .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
@@ -49,14 +51,14 @@ public class OrderEventConsumer {
     }
 
     /** 결제 실패 시 주문을 취소하고 재고를 복구한다. */
-    @KafkaListener(topics = "payment.failed", groupId = "order-svc-payment-failed-group")
+    @KafkaListener(topics = "payment.failed", groupId = GROUP_PAYMENT_FAILED)
     @Transactional
     public void handlePaymentFailed(String message) {
-        JsonNode root = parseMessage(message);
+        JsonNode root = kafkaMessageParser.parse(message);
         String eventId = root.get("eventId").asText();
         JsonNode payload = root.get("payload");
 
-        idempotencyChecker.executeIfNew(eventId, "order-svc-payment-failed-group", () -> {
+        idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_FAILED, () -> {
             Long orderId = payload.get("orderId").asLong();
             Order order = orderRepository.findById(orderId)
                     .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
@@ -66,20 +68,5 @@ public class OrderEventConsumer {
             }
             log.debug("결제 실패로 주문 취소 + 재고 복구 — orderId={}", orderId);
         });
-    }
-
-    private JsonNode parseMessage(String message) {
-        try {
-            JsonNode root = objectMapper.readTree(message);
-            if (root.get("eventId") == null) {
-                throw new IllegalArgumentException("Kafka 메시지에 eventId 필드가 없습니다: " + message);
-            }
-            if (root.get("payload") == null) {
-                throw new IllegalArgumentException("Kafka 메시지에 payload 필드가 없습니다: " + message);
-            }
-            return root;
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Kafka 메시지 역직렬화 실패", e);
-        }
     }
 }

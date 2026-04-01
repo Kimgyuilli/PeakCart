@@ -249,14 +249,14 @@
 ---
 
 ### Task 2-4: Consumer 멱등성
-**상태**: 🔲 대기
+**상태**: 🔄 진행 중
 **목표**: `processed_events` 테이블 기반 중복 소비 방지
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `ProcessedEvent` Entity (`global/idempotency/`) | 🔲 | `(event_id, consumer_group)` 복합 UK |
-| `ProcessedEventRepository` 계층 (`global/idempotency/`) | 🔲 | |
-| Consumer 멱등성 처리 로직 (event_id + consumer_group 중복 체크) | 🔲 | 비즈니스 로직 + processed_events 기록 단일 트랜잭션 |
+| `ProcessedEvent` Entity (`global/idempotency/`) | ✅ | `(event_id, consumer_group)` 복합 UK |
+| `ProcessedEventRepository` 계층 (`global/idempotency/`) | ✅ | 인터페이스 + JPA + Impl |
+| Consumer 멱등성 처리 로직 (event_id + consumer_group 중복 체크) | ✅ | `IdempotencyChecker.executeIfNew()` + Consumer 3개(7메서드) 적용 |
 | 멱등성 통합 테스트 (동일 이벤트 2회 소비 시 1회만 처리) | 🔲 | 같은 event_id, 다른 consumer_group은 각각 처리 확인 |
 
 **완료 기준**: 동일 (event_id, consumer_group) 중복 소비 시 1회만 실행, 다른 consumer_group은 독립 처리

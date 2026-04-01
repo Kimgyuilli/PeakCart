@@ -327,3 +327,4 @@
 | 2026-03-31 | Task 2-3 (12/13) | Kafka + Outbox 구현 (KRaft, Flyway V2, OutboxEvent Entity/Repository, Publisher 2개, Scheduler, Consumer 3개, EventListener 비활성화, 기존 테스트 44건 통과). 통합 테스트 미완료 |
 | 2026-03-31 | Task 2-3 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 3건 개선: SlackPort를 global/port/로 이동(P0 아키텍처 위반), OutboxEvent 팩토리 Function 패턴 적용(P1), EventListener 미사용 import 제거(P1). 전체 222건 테스트 통과 |
 | 2026-04-01 | Task 2-3 완료 | Outbox → Kafka E2E 통합 테스트 5건 (Testcontainers Kafka + MySQL + Redis, Awaitility 비동기 대기). 전체 227건 테스트 통과 |
+| 2026-04-01 | Task 2-4 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: IdempotencyChecker save-first + UK 선점 패턴(P0 race condition), KafkaMessageParser 공통 추출(P1 3중 중복), Consumer Group ID 상수 추출(P1 이중 관리), 02-architecture.md 패키지 구조 동기화(P2). 전체 227건 테스트 통과 |

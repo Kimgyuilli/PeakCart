@@ -12,6 +12,11 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 주문/결제 관련 Kafka 이벤트를 소비하여 알림을 생성하는 Consumer.
+ * <p>
+ * 소비 토픽: {@code order.created}, {@code payment.completed}, {@code payment.failed}, {@code order.cancelled}
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -21,6 +26,7 @@ public class NotificationConsumer {
     private final IdempotencyChecker idempotencyChecker;
     private final ObjectMapper objectMapper;
 
+    /** 주문 생성 알림을 발송한다. */
     @KafkaListener(topics = "order.created", groupId = "notification-svc-order-created-group")
     @Transactional
     public void handleOrderCreated(String message) {
@@ -37,6 +43,7 @@ public class NotificationConsumer {
         });
     }
 
+    /** 결제 완료 알림을 발송한다. */
     @KafkaListener(topics = "payment.completed", groupId = "notification-svc-payment-completed-group")
     @Transactional
     public void handlePaymentCompleted(String message) {
@@ -55,6 +62,7 @@ public class NotificationConsumer {
         });
     }
 
+    /** 결제 실패 알림을 발송한다. */
     @KafkaListener(topics = "payment.failed", groupId = "notification-svc-payment-failed-group")
     @Transactional
     public void handlePaymentFailed(String message) {
@@ -71,6 +79,7 @@ public class NotificationConsumer {
         });
     }
 
+    /** 주문 취소 알림을 발송한다. */
     @KafkaListener(topics = "order.cancelled", groupId = "notification-svc-order-cancelled-group")
     @Transactional
     public void handleOrderCancelled(String message) {

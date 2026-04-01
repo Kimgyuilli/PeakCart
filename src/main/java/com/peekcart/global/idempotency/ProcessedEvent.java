@@ -7,6 +7,10 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
+/**
+ * Kafka Consumer 멱등성 보장을 위한 처리 이력 엔티티.
+ * {@code (event_id, consumer_group)} 복합 UK로 동일 이벤트의 중복 소비를 방지한다.
+ */
 @Entity
 @Table(name = "processed_events")
 @Getter
@@ -26,6 +30,13 @@ public class ProcessedEvent {
     @Column(name = "processed_at", nullable = false)
     private LocalDateTime processedAt;
 
+    /**
+     * 처리 이력을 생성한다.
+     *
+     * @param eventId       Kafka 메시지의 이벤트 ID (UUID)
+     * @param consumerGroup Kafka Consumer Group ID
+     * @return 생성된 처리 이력
+     */
     public static ProcessedEvent create(String eventId, String consumerGroup) {
         ProcessedEvent event = new ProcessedEvent();
         event.eventId = eventId;

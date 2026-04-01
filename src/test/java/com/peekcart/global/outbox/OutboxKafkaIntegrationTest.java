@@ -171,9 +171,12 @@ class OutboxKafkaIntegrationTest {
         // then
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
             EntityManager em = emf.createEntityManager();
-            Order updated = em.find(Order.class, order.getId());
-            assertThat(updated.getStatus()).isEqualTo(OrderStatus.PAYMENT_COMPLETED);
-            em.close();
+            try {
+                Order updated = em.find(Order.class, order.getId());
+                assertThat(updated.getStatus()).isEqualTo(OrderStatus.PAYMENT_COMPLETED);
+            } finally {
+                em.close();
+            }
 
             List<Notification> notifications = notificationJpaRepository
                     .findByUserId(userId, PageRequest.of(0, 10)).getContent();
@@ -196,9 +199,12 @@ class OutboxKafkaIntegrationTest {
         // then
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
             EntityManager em = emf.createEntityManager();
-            Order updated = em.find(Order.class, order.getId());
-            assertThat(updated.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-            em.close();
+            try {
+                Order updated = em.find(Order.class, order.getId());
+                assertThat(updated.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+            } finally {
+                em.close();
+            }
 
             Inventory inventory = inventoryRepository.findByProductId(productId)
                     .orElseThrow();
@@ -213,8 +219,9 @@ class OutboxKafkaIntegrationTest {
     @Test
     @DisplayName("order.cancelled → NotificationConsumer만 소비 (알림 생성)")
     void orderCancelled_e2e() {
-        // given
+        // given: 실제 플로우처럼 주문 취소 후 이벤트 발행
         Order order = persistOrder(OrderStatus.PENDING);
+        cancelOrder(order.getId());
 
         // when
         orderOutboxEventPublisher.publishOrderCancelled(order);
@@ -284,6 +291,15 @@ class OutboxKafkaIntegrationTest {
         em.getTransaction().commit();
         em.close();
         return order;
+    }
+
+    private void cancelOrder(Long orderId) {
+        EntityManager em = emf.createEntityManager();
+        em.getTransaction().begin();
+        Order order = em.find(Order.class, orderId);
+        order.cancel();
+        em.getTransaction().commit();
+        em.close();
     }
 
     private void decreaseStock(Long productId, int quantity) {

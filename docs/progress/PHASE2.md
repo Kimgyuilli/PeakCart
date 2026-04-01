@@ -271,4 +271,26 @@
 
 전체 227건 테스트 통과 확인.
 
+### 2026-04-01 (2)
+
+#### Task 2-4: Consumer 멱등성 구현 (통합 테스트 제외)
+
+**완료 항목**:
+- `ProcessedEvent` Entity 생성 (`global/idempotency/`) — `(event_id, consumer_group)` 복합 UK, `create()` 팩토리
+- `ProcessedEventRepository` 계층 생성 (인터페이스 + JpaRepository + Impl)
+- `IdempotencyChecker` 컴포넌트 생성 — `executeIfNew(eventId, consumerGroup, Runnable)` 단일 메서드
+- Consumer 3개(7메서드) 멱등성 적용:
+  - `OrderEventConsumer` (2메서드): `order-svc-payment-completed-group`, `order-svc-payment-failed-group`
+  - `PaymentEventConsumer` (1메서드): `payment-svc-order-created-group`
+  - `NotificationConsumer` (4메서드): `notification-svc-order-created-group`, `notification-svc-payment-completed-group`, `notification-svc-payment-failed-group`, `notification-svc-order-cancelled-group`
+- Consumer `extractPayload()` → `parseMessage()` 리네이밍 (root JsonNode 반환, eventId + payload 추출)
+- 기존 전체 테스트 227건 통과 확인
+
+**미완료**: 멱등성 통합 테스트 (동일 이벤트 중복 소비 검증, 다른 consumerGroup 독립 처리 검증)
+
+**주요 결정**:
+- **IdempotencyChecker 공유 컴포넌트 방식 채택**: 7개 메서드에 동일한 check-execute-record 패턴 반복을 피하기 위해 `Runnable`을 받는 간결한 헬퍼 컴포넌트로 구현. 상속/AOP/어노테이션 없이 단일 메서드로 해결
+- **트랜잭션 참여 방식**: `IdempotencyChecker`는 자체 트랜잭션을 관리하지 않고 Consumer의 `@Transactional`에 참여. 비즈니스 로직 + `processed_events` 기록이 단일 트랜잭션으로 원자성 보장. 실패 시 전체 롤백 → 재시도 시 재처리 가능
+- **parseMessage() 리팩토링**: 기존 `extractPayload()`가 `root.get("payload")`만 반환하여 `eventId` 접근 불가. `parseMessage()`로 변경하여 root JsonNode 반환, eventId + payload null 체크 포함
+
 ---

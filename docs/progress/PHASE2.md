@@ -293,4 +293,28 @@
 - **트랜잭션 참여 방식**: `IdempotencyChecker`는 자체 트랜잭션을 관리하지 않고 Consumer의 `@Transactional`에 참여. 비즈니스 로직 + `processed_events` 기록이 단일 트랜잭션으로 원자성 보장. 실패 시 전체 롤백 → 재시도 시 재처리 가능
 - **parseMessage() 리팩토링**: 기존 `extractPayload()`가 `root.get("payload")`만 반환하여 `eventId` 접근 불가. `parseMessage()`로 변경하여 root JsonNode 반환, eventId + payload null 체크 포함
 
+#### Task 2-4: 코드 리뷰 개선 (4건)
+
+설계서 전체 대조 + 코드 리뷰 수행 후 아래 항목 개선 완료:
+
+**P0 — IdempotencyChecker race condition 수정**:
+- 기존: `exists()` → `action.run()` → `save()` 순서 — Kafka 리밸런스 시 동일 메시지 동시 소비 시 두 스레드 모두 `exists()=false` 통과 → 비즈니스 로직 이중 실행 가능
+- 변경: `exists()` → `save()` → `action.run()` (save-first) — UK 제약이 선점 락 역할, 동시 진입 시 하나만 insert 성공, 나머지는 `DataIntegrityViolationException` catch → `return false`
+- `action.run()` 실패 시 Consumer의 `@Transactional` 롤백으로 `processed_events` 레코드도 함께 삭제 → 재시도 시 재처리 가능
+
+**P1 — parseMessage() 3중 중복 → KafkaMessageParser 추출**:
+- 3개 Consumer에 완전히 동일한 `parseMessage()` 메서드(11줄)가 복사되어 있던 문제
+- `global/kafka/KafkaMessageParser` 공통 컴포넌트 생성, Consumer 3개에서 `kafkaMessageParser.parse()` 호출로 변경
+- Consumer에서 `ObjectMapper` 직접 의존 제거
+
+**P1 — Consumer Group ID 문자열 이중 관리 → 상수 추출**:
+- `@KafkaListener(groupId = "...")` 어노테이션과 `idempotencyChecker.executeIfNew(eventId, "...", ...)` 호출부에 동일 문자열 하드코딩 — 오타 시 멱등성 깨짐
+- Consumer별 `private static final String GROUP_*` 상수 추출, 두 곳에서 동일 상수 참조
+
+**P2 — 02-architecture.md 패키지 구조 동기화**:
+- `global/idempotency/` 하위 파일 2개 → 5개로 업데이트 (`ProcessedEventJpaRepository`, `ProcessedEventRepositoryImpl`, `IdempotencyChecker` 추가)
+- `global/kafka/KafkaMessageParser` 추가
+
+전체 227건 테스트 통과 확인.
+
 ---

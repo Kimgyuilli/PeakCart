@@ -16,6 +16,11 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 결제 관련 Kafka 이벤트를 소비하여 주문 상태를 전이하는 Consumer.
+ * <p>
+ * 소비 토픽: {@code payment.completed}, {@code payment.failed}
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -26,6 +31,7 @@ public class OrderEventConsumer {
     private final IdempotencyChecker idempotencyChecker;
     private final ObjectMapper objectMapper;
 
+    /** 결제 성공 시 주문 상태를 {@code PAYMENT_COMPLETED}로 전이한다. */
     @KafkaListener(topics = "payment.completed", groupId = "order-svc-payment-completed-group")
     @Transactional
     public void handlePaymentCompleted(String message) {
@@ -42,6 +48,7 @@ public class OrderEventConsumer {
         });
     }
 
+    /** 결제 실패 시 주문을 취소하고 재고를 복구한다. */
     @KafkaListener(topics = "payment.failed", groupId = "order-svc-payment-failed-group")
     @Transactional
     public void handlePaymentFailed(String message) {

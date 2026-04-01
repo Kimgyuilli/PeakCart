@@ -12,6 +12,11 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 주문 관련 Kafka 이벤트를 소비하여 결제를 생성하는 Consumer.
+ * <p>
+ * 소비 토픽: {@code order.created}
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -21,6 +26,7 @@ public class PaymentEventConsumer {
     private final IdempotencyChecker idempotencyChecker;
     private final ObjectMapper objectMapper;
 
+    /** 주문 생성 시 {@code PENDING} 상태의 Payment를 생성한다. */
     @KafkaListener(topics = "order.created", groupId = "payment-svc-order-created-group")
     @Transactional
     public void handleOrderCreated(String message) {

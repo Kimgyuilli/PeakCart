@@ -3,6 +3,9 @@ package com.peekcart.global.idempotency;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+/**
+ * {@link ProcessedEventRepository} 구현체. {@link ProcessedEventJpaRepository}에 위임한다.
+ */
 @Repository
 @RequiredArgsConstructor
 public class ProcessedEventRepositoryImpl implements ProcessedEventRepository {

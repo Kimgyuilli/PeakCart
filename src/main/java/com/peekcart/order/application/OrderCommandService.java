@@ -4,16 +4,14 @@ import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.dto.CreateOrderCommand;
 import com.peekcart.order.application.dto.OrderDetailDto;
 import com.peekcart.order.application.port.ProductPort;
-import com.peekcart.order.domain.event.OrderCancelledEvent;
-import com.peekcart.order.domain.event.OrderCreatedEvent;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Cart;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderItemData;
 import com.peekcart.order.domain.repository.CartRepository;
 import com.peekcart.order.domain.repository.OrderRepository;
+import com.peekcart.order.infrastructure.outbox.OrderOutboxEventPublisher;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +32,7 @@ public class OrderCommandService {
     private final OrderRepository orderRepository;
     private final CartRepository cartRepository;
     private final ProductPort productPort;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OrderOutboxEventPublisher outboxEventPublisher;
 
     /**
      * 장바구니를 기반으로 주문을 생성하고 재고를 즉시 차감한다.
@@ -70,8 +68,7 @@ public class OrderCommandService {
 
         cart.clear();
 
-        eventPublisher.publishEvent(
-                new OrderCreatedEvent(order.getId(), userId, order.getOrderNumber(), order.getTotalAmount()));
+        outboxEventPublisher.publishOrderCreated(order);
 
         return OrderDetailDto.from(order);
     }
@@ -91,8 +88,7 @@ public class OrderCommandService {
             productPort.restoreStock(item.getProductId(), item.getQuantity());
         }
 
-        eventPublisher.publishEvent(
-                new OrderCancelledEvent(order.getId(), userId, order.getOrderNumber()));
+        outboxEventPublisher.publishOrderCancelled(order);
     }
 
     /**
@@ -111,8 +107,7 @@ public class OrderCommandService {
             productPort.restoreStock(item.getProductId(), item.getQuantity());
         }
 
-        eventPublisher.publishEvent(
-                new OrderCancelledEvent(order.getId(), order.getUserId(), order.getOrderNumber()));
+        outboxEventPublisher.publishOrderCancelled(order);
     }
 
     private String generateOrderNumber() {

@@ -9,7 +9,6 @@ import com.peekcart.order.domain.repository.OrderRepository;
 import com.peekcart.payment.domain.event.PaymentCompletedEvent;
 import com.peekcart.payment.domain.event.PaymentFailedEvent;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
@@ -19,7 +18,6 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * 결제 도메인 이벤트를 수신하여 주문 상태를 전이한다.
  * Task 1-4에서 보류했던 OrderEventListener 구현.
  */
-@Component
 @RequiredArgsConstructor
 public class OrderEventListener {
 

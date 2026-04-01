@@ -10,7 +10,7 @@
 **Exit Criteria**:
 - [x] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
 - [x] 동시 주문 테스트 시 오버셀링 0건
-- [ ] Outbox → Kafka 이벤트 발행 정상 동작
+- [x] Outbox → Kafka 이벤트 발행 정상 동작
 - [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
 
 ---
@@ -176,5 +176,99 @@
 - 기존 낙관적 락 테스트(10스레드)와 함께 2건의 동시성 테스트 보유
 
 **Phase 2 Exit Criteria 달성**: 동시 주문 테스트 시 오버셀링 0건 ✅
+
+### 2026-03-31
+
+#### Task 2-3: Kafka + Outbox 구현 (통합 테스트 제외)
+
+**완료 항목**:
+- `docker-compose.yml`에 Kafka 서비스 추가 (apache/kafka:3.8.1, KRaft 모드)
+- `build.gradle`에 spring-kafka + spring-kafka-test + testcontainers:kafka 의존성 추가
+- Flyway `V2__outbox_processed_events.sql` 생성 (outbox_events + processed_events 테이블)
+- `OutboxEvent` Entity + `OutboxEventStatus` Enum (`global/outbox/`)
+- `OutboxEventRepository` 계층 (인터페이스 + JPA + Impl)
+- Kafka 이벤트 페이로드 DTO 정의 (`KafkaEventEnvelope` 래핑 구조 + 4개 Payload record)
+- `OrderOutboxEventPublisher` / `PaymentOutboxEventPublisher` (도메인별 `infrastructure/outbox/`)
+- `OrderCommandService`, `PaymentCommandService`에서 `ApplicationEventPublisher` → `OutboxEventPublisher` 전환
+- `KafkaConfig` 생성 (4개 NewTopic Bean, Producer/Consumer 설정)
+- `OutboxPollingScheduler` 생성 (5초 폴링, MAX_RETRY=5, Slack 알림)
+- Kafka Consumer 3개 생성 (`PaymentEventConsumer`, `OrderEventConsumer`, `NotificationConsumer`)
+- 기존 `@TransactionalEventListener` 3개 비활성화 (`@Component` 제거)
+- 기존 단위 테스트 수정 (OrderCommandServiceTest, PaymentCommandServiceTest) — 44개 전부 통과
+- `application.yml`에 Kafka producer/consumer 설정 추가, `application-local.yml`에 bootstrap-servers 추가
+
+**미완료**: 통합 테스트 (Testcontainers Kafka + MySQL + Redis, E2E 플로우 검증)
+
+**주요 결정**:
+- **Payment Kafka payload에 userId 추가**: Payment 엔티티에 userId가 없으나, NotificationConsumer가 알림 생성 시 userId 필요. OrderPort를 통한 조회 대신 Publisher에서 userId를 직접 전달받아 payload에 포함
+- **Payment payload에서 orderNumber 제외**: Payment 엔티티에 orderNumber가 없어 포함 불가. 설계 문서의 이상적 스키마와 현재 구현 사이의 차이 인지
+- **기존 EventListener 비활성화 방식**: `@Component` 제거로 빈 등록 해제. 파일은 보존하여 Phase 1 로직 참조 가능
+
+#### Task 2-3: 코드 리뷰 개선 (3건)
+
+설계서 전체 대조 + 코드 리뷰 수행 후 아래 항목 개선 완료:
+
+**P0 — eventId 이중 생성 수정**:
+- `OrderOutboxEventPublisher`, `PaymentOutboxEventPublisher`에서 `KafkaEventEnvelope`의 `eventId`와 `OutboxEvent`의 `eventId`가 서로 다른 UUID로 생성되던 문제 수정
+- `OutboxEvent`를 먼저 생성하고, 그 `eventId`를 `KafkaEventEnvelope`에 전달하도록 순서 변경
+- `OutboxEvent`에 `updatePayload()` 메서드 추가
+- Task 2-4 멱등성 처리에서 `event_id` 기반 중복 체크 시 Kafka 메시지와 DB의 eventId 정합성 보장
+
+**P1 — Consumer `extractPayload()` NPE 방어**:
+- `OrderEventConsumer`, `PaymentEventConsumer`, `NotificationConsumer` 3개 Consumer에서 `get("payload")`가 `null`일 때 명시적 `IllegalArgumentException` 발생으로 변경
+- NPE 대신 원인을 특정할 수 있는 에러 메시지 제공
+
+**설계 문서 동기화 (2건)**:
+- `02-architecture.md`: Phase 2 패키지 구조에서 `OrderEventProducer`, `PaymentEventProducer` 제거 (OutboxPollingScheduler에 통합되어 불필요)
+- `04-design-deep-dive.md`: `order.created` payload에서 `productName` 제거 (OrderItem에 없는 필드), `payment.completed` payload에서 `orderNumber` → `userId` 반영 (실제 구현과 일치)
+
+#### Task 2-3: 2차 코드 리뷰 개선 (3건)
+
+설계서 전체 대조 + 코드 리뷰 수행 후 아래 항목 개선 완료:
+
+**P0 — OutboxPollingScheduler → SlackPort 크로스 도메인 의존 해결**:
+- `OutboxPollingScheduler`(`global/outbox/`)가 `notification/application/port/SlackPort`를 직접 참조 — global이 특정 도메인에 의존하는 아키텍처 위반
+- `SlackPort` 인터페이스를 `global/port/SlackPort`로 이동 (횡단 관심사)
+- `SlackNotificationClient`, `NotificationCommandService`, `NotificationCommandServiceTest` import 일괄 수정
+- 기존 `notification/application/port/` 빈 디렉토리 삭제
+
+**P1 — OutboxEvent 팩토리 빈 payload 임시 상태 제거**:
+- 기존: `OutboxEvent.create(..., "")` → `updatePayload()` 2단계 호출 — 엔티티가 `payload=""`인 invalid 상태로 잠시 존재
+- 변경: `OutboxEvent.create(..., Function<String, String> payloadFactory)` — eventId 생성 후 팩토리 함수로 payload 즉시 주입
+- `updatePayload()` public 메서드 제거, `OrderOutboxEventPublisher`/`PaymentOutboxEventPublisher` 수정
+
+**P1 — 비활성화된 EventListener 미사용 import 제거**:
+- `OrderEventListener`, `PaymentEventListener`, `NotificationEventListener` 3개 파일에서 `import org.springframework.stereotype.Component` 제거
+
+전체 222건 테스트 통과 확인.
+
+### 2026-04-01
+
+#### Task 2-3: 통합 테스트 완료 (5건) — Task 2-3 완료
+
+`OutboxKafkaIntegrationTest` 작성 — Testcontainers Kafka + MySQL + Redis 기반 E2E 플로우 검증:
+
+**완료 항목**:
+- `build.gradle`에 `org.awaitility:awaitility` 테스트 의존성 추가
+- `OutboxKafkaIntegrationTest` 생성 (`global/outbox/`)
+- 3개 Testcontainer 구성: MySQL 8.0 + Redis 7 + Kafka (apache/kafka:3.8.1)
+- SlackPort no-op stub (`@TestConfiguration`)
+- Awaitility 비동기 Consumer 처리 대기 (최대 10초)
+
+**테스트 항목**:
+1. `order.created` E2E: Outbox 저장 → Kafka 발행 → Payment(PENDING) 생성 + Notification(ORDER_CREATED) 생성
+2. `payment.completed` E2E: 주문 상태 PAYMENT_COMPLETED 전이 + Notification(PAYMENT_COMPLETED) 생성
+3. `payment.failed` E2E: 주문 취소 + 재고 복구(100→98→100) + Notification(PAYMENT_FAILED) 생성
+4. `order.cancelled` E2E: NotificationConsumer만 소비, Payment 미생성 확인
+5. PUBLISHED 이벤트 중복 발행 방지: 재폴링 시 Notification 수 변화 없음
+
+**주요 결정**:
+- **KafkaContainer 이미지**: `org.testcontainers.kafka.KafkaContainer`(`apache/kafka:3.8.1`) 사용. `org.testcontainers.containers.KafkaContainer`는 `confluentinc/cp-kafka` 전용이므로 별도 패키지의 클래스 사용
+- **스케줄러 제어**: `spring.task.scheduling.pool.size=1` 유지 + `pollAndPublish()` 수동 호출. pool.size=0은 Spring Boot에서 `IllegalArgumentException` 발생
+- **재고 복구 테스트**: 테스트에서 재고를 미리 차감한 뒤 복구를 검증 (차감 없이 복구하면 100→102로 초과)
+
+**Phase 2 Exit Criteria 달성**: Outbox → Kafka 이벤트 발행 정상 동작 ✅
+
+전체 227건 테스트 통과 확인.
 
 ---

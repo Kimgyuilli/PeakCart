@@ -1,6 +1,6 @@
 package com.peekcart.notification.application;
 
-import com.peekcart.notification.application.port.SlackPort;
+import com.peekcart.global.port.SlackPort;
 import com.peekcart.notification.domain.model.Notification;
 import com.peekcart.notification.domain.model.NotificationType;
 import com.peekcart.notification.domain.repository.NotificationRepository;

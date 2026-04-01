@@ -30,7 +30,6 @@ Producer는 DB 트랜잭션 내에서 Outbox 테이블에 이벤트를 저장하
     "items": [
       {
         "productId": 10,
-        "productName": "스프링 부트 입문서",
         "quantity": 2,
         "unitPrice": 29500
       }
@@ -51,7 +50,7 @@ Producer는 DB 트랜잭션 내에서 Outbox 테이블에 이벤트를 저장하
   "payload": {
     "paymentId": 501,
     "orderId": 1001,
-    "orderNumber": "ORD-20260320-0001",
+    "userId": 42,
     "paymentKey": "toss_pay_key_abc123",
     "amount": 59000,
     "method": "CARD",

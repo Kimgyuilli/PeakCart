@@ -8,7 +8,6 @@ import com.peekcart.payment.domain.event.PaymentCompletedEvent;
 import com.peekcart.payment.domain.event.PaymentFailedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
@@ -18,7 +17,6 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * 도메인 이벤트를 수신하여 알림을 생성한다.
  */
 @Slf4j
-@Component
 @RequiredArgsConstructor
 public class NotificationEventListener {
 

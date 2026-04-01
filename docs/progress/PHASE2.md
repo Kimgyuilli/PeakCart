@@ -10,7 +10,7 @@
 **Exit Criteria**:
 - [x] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
 - [x] 동시 주문 테스트 시 오버셀링 0건
-- [ ] Outbox → Kafka 이벤트 발행 정상 동작
+- [x] Outbox → Kafka 이벤트 발행 정상 동작
 - [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
 
 ---
@@ -241,5 +241,34 @@
 - `OrderEventListener`, `PaymentEventListener`, `NotificationEventListener` 3개 파일에서 `import org.springframework.stereotype.Component` 제거
 
 전체 222건 테스트 통과 확인.
+
+### 2026-04-01
+
+#### Task 2-3: 통합 테스트 완료 (5건) — Task 2-3 완료
+
+`OutboxKafkaIntegrationTest` 작성 — Testcontainers Kafka + MySQL + Redis 기반 E2E 플로우 검증:
+
+**완료 항목**:
+- `build.gradle`에 `org.awaitility:awaitility` 테스트 의존성 추가
+- `OutboxKafkaIntegrationTest` 생성 (`global/outbox/`)
+- 3개 Testcontainer 구성: MySQL 8.0 + Redis 7 + Kafka (apache/kafka:3.8.1)
+- SlackPort no-op stub (`@TestConfiguration`)
+- Awaitility 비동기 Consumer 처리 대기 (최대 10초)
+
+**테스트 항목**:
+1. `order.created` E2E: Outbox 저장 → Kafka 발행 → Payment(PENDING) 생성 + Notification(ORDER_CREATED) 생성
+2. `payment.completed` E2E: 주문 상태 PAYMENT_COMPLETED 전이 + Notification(PAYMENT_COMPLETED) 생성
+3. `payment.failed` E2E: 주문 취소 + 재고 복구(100→98→100) + Notification(PAYMENT_FAILED) 생성
+4. `order.cancelled` E2E: NotificationConsumer만 소비, Payment 미생성 확인
+5. PUBLISHED 이벤트 중복 발행 방지: 재폴링 시 Notification 수 변화 없음
+
+**주요 결정**:
+- **KafkaContainer 이미지**: `org.testcontainers.kafka.KafkaContainer`(`apache/kafka:3.8.1`) 사용. `org.testcontainers.containers.KafkaContainer`는 `confluentinc/cp-kafka` 전용이므로 별도 패키지의 클래스 사용
+- **스케줄러 제어**: `spring.task.scheduling.pool.size=1` 유지 + `pollAndPublish()` 수동 호출. pool.size=0은 Spring Boot에서 `IllegalArgumentException` 발생
+- **재고 복구 테스트**: 테스트에서 재고를 미리 차감한 뒤 복구를 검증 (차감 없이 복구하면 100→102로 초과)
+
+**Phase 2 Exit Criteria 달성**: Outbox → Kafka 이벤트 발행 정상 동작 ✅
+
+전체 227건 테스트 통과 확인.
 
 ---

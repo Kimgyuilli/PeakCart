@@ -169,9 +169,9 @@
 ## 현재 Phase: Phase 2 — 성능 개선
 
 **Phase 2 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
-- [ ] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
+- [x] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
 - [x] 동시 주문 테스트 시 오버셀링 0건
-- [ ] Outbox → Kafka 이벤트 발행 정상 동작
+- [x] Outbox → Kafka 이벤트 발행 정상 동작
 - [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
 
 ---
@@ -217,7 +217,7 @@
 ---
 
 ### Task 2-3: Kafka + Outbox 도입
-**상태**: 🔄 진행 중
+**상태**: ✅ 완료
 **목표**: `@TransactionalEventListener` → Outbox 패턴 + Kafka 전환, 이벤트 유실 방지
 
 | 항목 | 상태 | 비고 |
@@ -234,7 +234,7 @@
 | `KafkaConfig` 설정 (Producer/Consumer/Topic) | ✅ | 파티션 키: orderId, Consumer Group 네이밍 규칙 적용 |
 | 기존 `@TransactionalEventListener` → Kafka Consumer 전환 | ✅ | PaymentEventConsumer, OrderEventConsumer, NotificationConsumer |
 | Kafka 토픽 생성 설정 | ✅ | 4개 토픽, 파티션 3, Replication 1 (KafkaConfig NewTopic Bean) |
-| 통합 테스트 (Outbox → Kafka 발행 → Consumer 수신 검증) | 🔲 | Testcontainers Kafka |
+| 통합 테스트 (Outbox → Kafka 발행 → Consumer 수신 검증) | ✅ | Testcontainers Kafka + MySQL + Redis, E2E 5건 |
 
 > **Phase 2 이벤트 소비 경로**:
 > - `order.created` → PaymentEventConsumer(결제 생성) + NotificationConsumer(알림)
@@ -326,3 +326,4 @@
 | 2026-03-30 | Task 2-2 | Redis 분산 락 완료 (Redisson, DistributedLockManager, InventoryLockFacade, 50스레드 동시성 통합 테스트, 오버셀링 0건) |
 | 2026-03-31 | Task 2-3 (12/13) | Kafka + Outbox 구현 (KRaft, Flyway V2, OutboxEvent Entity/Repository, Publisher 2개, Scheduler, Consumer 3개, EventListener 비활성화, 기존 테스트 44건 통과). 통합 테스트 미완료 |
 | 2026-03-31 | Task 2-3 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 3건 개선: SlackPort를 global/port/로 이동(P0 아키텍처 위반), OutboxEvent 팩토리 Function 패턴 적용(P1), EventListener 미사용 import 제거(P1). 전체 222건 테스트 통과 |
+| 2026-04-01 | Task 2-3 완료 | Outbox → Kafka E2E 통합 테스트 5건 (Testcontainers Kafka + MySQL + Redis, Awaitility 비동기 대기). 전체 227건 테스트 통과 |

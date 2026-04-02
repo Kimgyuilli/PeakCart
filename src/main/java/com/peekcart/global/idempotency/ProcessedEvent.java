@@ -12,7 +12,10 @@ import java.time.LocalDateTime;
  * {@code (event_id, consumer_group)} 복합 UK로 동일 이벤트의 중복 소비를 방지한다.
  */
 @Entity
-@Table(name = "processed_events")
+@Table(name = "processed_events",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_processed_event_consumer",
+                columnNames = {"event_id", "consumer_group"}))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ProcessedEvent {

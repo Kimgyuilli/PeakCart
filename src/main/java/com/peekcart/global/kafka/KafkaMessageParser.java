@@ -27,10 +27,10 @@ public class KafkaMessageParser {
         try {
             JsonNode root = objectMapper.readTree(message);
             if (root.get("eventId") == null) {
-                throw new IllegalArgumentException("Kafka 메시지에 eventId 필드가 없습니다: " + message);
+                throw new IllegalArgumentException("Kafka 메시지에 eventId 필드가 없습니다 (length=" + message.length() + ")");
             }
             if (root.get("payload") == null) {
-                throw new IllegalArgumentException("Kafka 메시지에 payload 필드가 없습니다: " + message);
+                throw new IllegalArgumentException("Kafka 메시지에 payload 필드가 없습니다 (length=" + message.length() + ")");
             }
             return root;
         } catch (JsonProcessingException e) {

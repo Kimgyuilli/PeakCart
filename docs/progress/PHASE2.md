@@ -333,4 +333,29 @@
 
 전체 229건 테스트 통과 확인.
 
+### 2026-04-02 (2)
+
+#### Task 2-5: DLQ 구성 (통합 테스트 제외)
+
+**완료 항목**:
+- `FixedSequenceBackOff` 생성 (`global/kafka/`) — `BackOff` 인터페이스 구현, `long[]` 배열 기반 커스텀 재시도 간격 (1s, 5s, 30s)
+- `KafkaConfig` 확장:
+  - DLQ 토픽 4개 `NewTopic` Bean 추가 (`order.created.dlq`, `payment.completed.dlq`, `payment.failed.dlq`, `order.cancelled.dlq`, 파티션 1)
+  - `DeadLetterPublishingRecoverer` — destination resolver로 `{topic}.dlq` 라우팅
+  - recoverer 람다에서 `SlackPort.send()` 호출 (Slack 알림)
+  - `DefaultErrorHandler` — recoverer + `FixedSequenceBackOff(1000, 5000, 30000)`
+  - `ConcurrentKafkaListenerContainerFactory` Bean 등록 (ackMode=RECORD, commonErrorHandler 설정)
+- `FixedSequenceBackOffTest` 단위 테스트 3건 (간격 순서, 빈 배열, 독립 실행)
+- 기존 Consumer 3개(7메서드) 변경 없음
+
+**미완료**: DLQ 통합 테스트 (처리 실패 → DLQ 토픽 라우팅 검증)
+
+**주요 결정**:
+- **FixedSequenceBackOff 커스텀 구현**: 1s/5s/30s는 정확한 exponential이 아님 (multiplier=5이면 1s, 5s, 25s). `BackOff` 인터페이스를 직접 구현하여 정확한 간격 배열 적용
+- **Slack 알림 시점**: 별도 DLQ Consumer 없이 `DeadLetterPublishingRecoverer`를 감싸는 recoverer 람다에서 처리 (PHASE2.md P1-5 결정 사항 준수)
+- **ConcurrentKafkaListenerContainerFactory 수동 등록**: `DefaultErrorHandler`를 설정하려면 커스텀 factory 필요. `ConsumerFactory`는 auto-config Bean을 주입받아 deserializer 등 설정 유지, `ackMode=RECORD`만 수동 설정
+- **Consumer 코드 변경 불필요**: `DefaultErrorHandler`가 listener container 레벨에서 동작. `@Transactional` + `IdempotencyChecker` save-first 패턴과 호환 (롤백 시 재시도 가능)
+
+전체 232건 테스트 통과 확인.
+
 ---

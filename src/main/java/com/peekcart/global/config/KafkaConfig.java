@@ -84,8 +84,8 @@ public class KafkaConfig {
                     exception.getMessage()
             );
             log.error(message, exception);
-            slackPort.send(message);
             dlqRecoverer.accept(record, exception);
+            slackPort.send(message);
         }, new FixedSequenceBackOff(1_000, 5_000, 30_000));
     }
 

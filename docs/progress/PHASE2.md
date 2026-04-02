@@ -358,4 +358,21 @@
 
 전체 232건 테스트 통과 확인.
 
+#### Task 2-5: 코드 리뷰 개선 (3건)
+
+설계서 대조 + 코드 리뷰 수행 후 아래 항목 개선 완료:
+
+**P0 — slackPort.send() 예외 안전 처리**:
+- recoverer 람다에서 `slackPort.send()`가 예외를 던지면 `DefaultErrorHandler`가 해당 레코드를 재시도 → DLQ에 동일 메시지 중복 발행 가능
+- `slackPort.send()`를 try-catch로 감싸 Slack 실패가 DLQ 발행에 영향을 주지 않도록 수정
+
+**P1 — 설계 문서 "exponential backoff" 용어 수정**:
+- `04-design-deep-dive.md` 8-3: "exponential backoff: 1s, 5s, 30s" → "fixed sequence backoff: 1s, 5s, 30s"
+- 1→5→30은 지수 패턴이 아님 (지수라면 1→2→4). 구현체 `FixedSequenceBackOff` 명칭과 일치하도록 수정
+
+**P2 — 02-architecture.md 패키지 구조 동기화**:
+- `global/kafka/` 하위에 `FixedSequenceBackOff.java` 추가 (기존 `KafkaMessageParser.java`만 등록되어 있었음)
+
+전체 232건 테스트 통과 확인.
+
 ---

@@ -269,7 +269,7 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| Consumer 재시도 정책 설정 (3회, exponential backoff) | ✅ | FixedSequenceBackOff(1s, 5s, 30s), 단위 테스트 3건 |
+| Consumer 재시도 정책 설정 (3회, fixed sequence backoff) | ✅ | FixedSequenceBackOff(1s, 5s, 30s), 단위 테스트 3건 |
 | DLQ 토픽 설정 (`{원본토픽}.dlq`) | ✅ | 4개 DLQ 토픽 (KafkaConfig NewTopic Bean) |
 | `DeadLetterPublishingRecoverer` 설정 | ✅ | DefaultErrorHandler + destination resolver(`{topic}.dlq`) |
 | DLQ 메시지 수신 시 Slack 알림 발송 | ✅ | recoverer 람다에서 SlackPort.send() 호출 |
@@ -332,3 +332,4 @@
 | 2026-04-01 | Task 2-4 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: IdempotencyChecker save-first + UK 선점 패턴(P0 race condition), KafkaMessageParser 공통 추출(P1 3중 중복), Consumer Group ID 상수 추출(P1 이중 관리), 02-architecture.md 패키지 구조 동기화(P2). 전체 227건 테스트 통과 |
 | 2026-04-02 | Task 2-4 완료 | 멱등성 통합 테스트 2건 (Testcontainers Kafka + MySQL + Redis): 동일 이벤트 중복 소비 시 1회만 처리, 다른 consumer group 독립 처리. 전체 229건 테스트 통과 |
 | 2026-04-02 | Task 2-5 (4/5) | DLQ 구성 (FixedSequenceBackOff, DefaultErrorHandler + DeadLetterPublishingRecoverer, DLQ 토픽 4개, Slack 알림, 단위 테스트 3건). 통합 테스트 미완료. 전체 232건 테스트 통과 |
+| 2026-04-02 | Task 2-5 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 3건 개선: slackPort.send() try-catch 감싸기(P0 Slack 실패 시 DLQ 중복 발행 방지), "exponential backoff" → "fixed sequence backoff" 용어 수정(P1), 02-architecture.md에 FixedSequenceBackOff 패키지 트리 추가(P2). 전체 232건 테스트 통과 |

@@ -11,7 +11,7 @@
 - [x] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
 - [x] 동시 주문 테스트 시 오버셀링 0건
 - [x] Outbox → Kafka 이벤트 발행 정상 동작
-- [ ] DLQ 토픽으로 실패 메시지 라우팅 확인
+- [x] DLQ 토픽으로 실패 메시지 라우팅 확인
 
 ---
 
@@ -374,5 +374,21 @@
 - `global/kafka/` 하위에 `FixedSequenceBackOff.java` 추가 (기존 `KafkaMessageParser.java`만 등록되어 있었음)
 
 전체 232건 테스트 통과 확인.
+
+#### Task 2-5: DLQ 통합 테스트 완료 (1건) — Task 2-5 완료
+
+`DlqIntegrationTest` 작성 — Testcontainers Kafka + MySQL + Redis 기반 DLQ 라우팅 검증:
+
+**테스트 항목**:
+1. **Consumer 처리 실패 → DLQ 라우팅 + Slack 알림**: 잘못된 JSON 메시지를 `order.created` 토픽에 전송 → 2개 consumer group(payment-svc, notification-svc) 모두 파싱 실패 → 재시도 소진 → `order.created.dlq`에 2건 도착, 원본 메시지 보존 확인, Slack 알림 2회 발송 확인
+
+**검증 방식**:
+- `DlqTestListener` Bean — DLQ 토픽 4개를 구독하여 `BlockingQueue`에 메시지 수집
+- `@Primary CommonErrorHandler` — backoff를 100ms로 오버라이드하여 테스트 속도 확보
+- Awaitility `atMost(15s)` — DLQ 메시지 + Slack 호출 카운트 동시 검증
+
+**Phase 2 Exit Criteria 달성**: DLQ 토픽으로 실패 메시지 라우팅 확인 ✅
+
+전체 233건 테스트 통과 확인.
 
 ---

@@ -85,7 +85,11 @@ public class KafkaConfig {
             );
             log.error(message, exception);
             dlqRecoverer.accept(record, exception);
-            slackPort.send(message);
+            try {
+                slackPort.send(message);
+            } catch (Exception e) {
+                log.warn("DLQ Slack 알림 발송 실패", e);
+            }
         }, new FixedSequenceBackOff(1_000, 5_000, 30_000));
     }
 

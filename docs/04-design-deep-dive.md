@@ -63,7 +63,7 @@ Producer는 DB 트랜잭션 내에서 Outbox 테이블에 이벤트를 저장하
 
 ```
 Consumer 재시도 흐름:
-  1. 메시지 처리 실패 시 최대 3회 재시도 (exponential backoff: 1s, 5s, 30s)
+  1. 메시지 처리 실패 시 최대 3회 재시도 (fixed sequence backoff: 1s, 5s, 30s)
   2. 3회 초과 실패 → {원본 토픽}.dlq 토픽으로 이동
      예: order.created 실패 → order.created.dlq
   3. DLQ 메시지 모니터링 → Slack 알림 발송

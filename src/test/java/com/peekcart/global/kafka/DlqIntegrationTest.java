@@ -1,0 +1,133 @@
+package com.peekcart.global.kafka;
+
+import com.peekcart.global.port.SlackPort;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.CommonErrorHandler;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.test.context.TestPropertySource;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
+
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+
+@SpringBootTest
+@Testcontainers
+@TestPropertySource(properties = "spring.task.scheduling.pool.size=1")
+@Import(DlqIntegrationTest.TestConfig.class)
+@DisplayName("DLQ 통합 테스트")
+class DlqIntegrationTest {
+
+    @Container
+    @ServiceConnection
+    static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("peekcart_test");
+
+    @Container
+    @ServiceConnection(name = "redis")
+    static GenericContainer<?> redis = new GenericContainer<>("redis:7")
+            .withExposedPorts(6379);
+
+    @Container
+    @ServiceConnection
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.1");
+
+    @Autowired KafkaTemplate<String, String> kafkaTemplate;
+    @Autowired DlqTestListener dlqTestListener;
+
+    @TestConfiguration
+    static class TestConfig {
+        static final AtomicInteger slackCallCount = new AtomicInteger(0);
+
+        @Bean
+        SlackPort slackPort() {
+            return message -> slackCallCount.incrementAndGet();
+        }
+
+        @Bean
+        @Primary
+        CommonErrorHandler testKafkaErrorHandler(KafkaTemplate<String, String> kafkaTemplate, SlackPort slackPort) {
+            DeadLetterPublishingRecoverer dlqRecoverer = new DeadLetterPublishingRecoverer(
+                    kafkaTemplate,
+                    (record, ex) -> new TopicPartition(record.topic() + ".dlq", -1)
+            );
+
+            return new DefaultErrorHandler((record, exception) -> {
+                dlqRecoverer.accept(record, exception);
+                try {
+                    slackPort.send(String.format("[DLQ] topic=%s", record.topic()));
+                } catch (Exception e) {
+                    // ignore
+                }
+            }, new FixedSequenceBackOff(100, 100, 100));
+        }
+
+        @Bean
+        DlqTestListener dlqTestListener() {
+            return new DlqTestListener();
+        }
+    }
+
+    static class DlqTestListener {
+        final BlockingQueue<ConsumerRecord<String, String>> records = new LinkedBlockingQueue<>();
+
+        @KafkaListener(
+                topics = {"order.created.dlq", "payment.completed.dlq",
+                        "payment.failed.dlq", "order.cancelled.dlq"},
+                groupId = "test-dlq-verification-group"
+        )
+        public void handle(ConsumerRecord<String, String> record) {
+            records.add(record);
+        }
+    }
+
+    @BeforeEach
+    void setUp() {
+        dlqTestListener.records.clear();
+        TestConfig.slackCallCount.set(0);
+    }
+
+    @Test
+    @DisplayName("Consumer 처리 실패 시 재시도 소진 후 DLQ 토픽으로 라우팅되고 Slack 알림이 발송된다")
+    void consumerFailure_routesToDlqAndSendsSlack() {
+        // given: 파싱 불가능한 잘못된 메시지
+        String invalidMessage = "invalid-json-message";
+
+        // when: order.created 토픽에 전송 → PaymentEventConsumer + NotificationConsumer 모두 실패
+        kafkaTemplate.send("order.created", "test-key", invalidMessage);
+
+        // then: 2개 consumer group 모두 재시도 소진 → DLQ 토픽에 2건 도착 + Slack 2회 발송
+        await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> {
+            assertThat(dlqTestListener.records).hasSize(2);
+            assertThat(TestConfig.slackCallCount.get()).isEqualTo(2);
+        });
+
+        // DLQ 메시지 검증: 원본 메시지 보존 + 토픽 확인
+        assertThat(dlqTestListener.records).allSatisfy(record -> {
+            assertThat(record.topic()).isEqualTo("order.created.dlq");
+            assertThat(record.value()).isEqualTo(invalidMessage);
+        });
+    }
+}

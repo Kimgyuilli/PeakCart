@@ -317,4 +317,20 @@
 
 전체 227건 테스트 통과 확인.
 
+### 2026-04-02
+
+#### Task 2-4: 멱등성 통합 테스트 완료 (2건) — Task 2-4 완료
+
+`IdempotencyIntegrationTest` 작성 — Testcontainers Kafka + MySQL + Redis 기반 멱등성 검증:
+
+**테스트 항목**:
+1. **동일 이벤트 중복 소비 방지**: `order.created` Outbox → Kafka 발행 → Consumer 처리 완료 후, 동일 eventId 메시지를 KafkaTemplate으로 재전송 → Payment/Notification 수 변화 없음 (3초 동안 안정성 확인)
+2. **다른 consumer group 독립 처리**: `order.created` 이벤트를 PaymentEventConsumer(`payment-svc-order-created-group`)와 NotificationConsumer(`notification-svc-order-created-group`)가 각각 독립 처리 → `processed_events`에 같은 eventId로 2건 존재, consumer group 상이
+
+**검증 방식**:
+- 중복 테스트: `await().during(3s)` — 재전송 후 충분한 시간 동안 부수효과 없음 확인
+- 독립 처리 테스트: `ProcessedEventJpaRepository.findAll()` 직접 조회 → eventId 필터링 + consumerGroup 검증
+
+전체 229건 테스트 통과 확인.
+
 ---

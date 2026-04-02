@@ -249,7 +249,7 @@
 ---
 
 ### Task 2-4: Consumer 멱등성
-**상태**: 🔄 진행 중
+**상태**: ✅ 완료
 **목표**: `processed_events` 테이블 기반 중복 소비 방지
 
 | 항목 | 상태 | 비고 |
@@ -257,7 +257,7 @@
 | `ProcessedEvent` Entity (`global/idempotency/`) | ✅ | `(event_id, consumer_group)` 복합 UK |
 | `ProcessedEventRepository` 계층 (`global/idempotency/`) | ✅ | 인터페이스 + JPA + Impl |
 | Consumer 멱등성 처리 로직 (event_id + consumer_group 중복 체크) | ✅ | `IdempotencyChecker.executeIfNew()` + Consumer 3개(7메서드) 적용 |
-| 멱등성 통합 테스트 (동일 이벤트 2회 소비 시 1회만 처리) | 🔲 | 같은 event_id, 다른 consumer_group은 각각 처리 확인 |
+| 멱등성 통합 테스트 (동일 이벤트 2회 소비 시 1회만 처리) | ✅ | Testcontainers Kafka + MySQL + Redis, 2건 |
 
 **완료 기준**: 동일 (event_id, consumer_group) 중복 소비 시 1회만 실행, 다른 consumer_group은 독립 처리
 
@@ -328,3 +328,4 @@
 | 2026-03-31 | Task 2-3 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 3건 개선: SlackPort를 global/port/로 이동(P0 아키텍처 위반), OutboxEvent 팩토리 Function 패턴 적용(P1), EventListener 미사용 import 제거(P1). 전체 222건 테스트 통과 |
 | 2026-04-01 | Task 2-3 완료 | Outbox → Kafka E2E 통합 테스트 5건 (Testcontainers Kafka + MySQL + Redis, Awaitility 비동기 대기). 전체 227건 테스트 통과 |
 | 2026-04-01 | Task 2-4 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: IdempotencyChecker save-first + UK 선점 패턴(P0 race condition), KafkaMessageParser 공통 추출(P1 3중 중복), Consumer Group ID 상수 추출(P1 이중 관리), 02-architecture.md 패키지 구조 동기화(P2). 전체 227건 테스트 통과 |
+| 2026-04-02 | Task 2-4 완료 | 멱등성 통합 테스트 2건 (Testcontainers Kafka + MySQL + Redis): 동일 이벤트 중복 소비 시 1회만 처리, 다른 consumer group 독립 처리. 전체 229건 테스트 통과 |

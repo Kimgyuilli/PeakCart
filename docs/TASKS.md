@@ -166,7 +166,7 @@
 
 ---
 
-## 현재 Phase: Phase 2 — 성능 개선
+## Phase 2 — 성능 개선 (완료)
 
 **Phase 2 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
 - [x] Redis 캐싱 적용 후 통합 테스트에서 캐시 적중/무효화 동작 확인
@@ -298,9 +298,104 @@
 
 ---
 
+## 현재 Phase: Phase 3 — 인프라 / 테스트
+
+**Phase 3 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
+- [ ] K8s에 모든 서비스 정상 배포 확인
+- [ ] Grafana 대시보드에서 API 응답시간/에러율/Kafka Lag 모니터링 확인
+- [ ] nGrinder 부하 테스트 리포트 완성 (캐싱 전/후 TPS 비교 수치 포함)
+- [ ] HPA 동작 확인 (Pod 자동 증설 Grafana 스크린샷)
+
+---
+
+## Phase 3 Tasks
+
+### Task 3-1: GitHub Actions CI
+**상태**: 🔲 대기
+**목표**: PR/push 시 빌드·테스트·Docker 이미지 빌드 자동화 파이프라인
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| 멀티스테이지 Dockerfile 작성 (Gradle 빌드 → JRE 런타임) | 🔲 | |
+| `.github/workflows/ci.yml` 워크플로우 작성 | 🔲 | push/PR 트리거 |
+| Gradle 빌드 + 단위 테스트 실행 | 🔲 | |
+| Testcontainers 통합 테스트 실행 (CI 환경) | 🔲 | DinD 또는 서비스 컨테이너 |
+| Docker 이미지 빌드 + GHCR push | 🔲 | main 브랜치 머지 시 |
+
+**완료 기준**: PR 생성 시 빌드+테스트 자동 실행, main 머지 시 Docker 이미지 GHCR push
+
+---
+
+### Task 3-2: minikube K8s 배포
+**상태**: 🔲 대기
+**목표**: K8s 매니페스트 작성, minikube에 전체 서비스 배포
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| minikube 환경 설정 (CPU 4코어, Memory 8GB) | 🔲 | `docs/04-design-deep-dive.md` 10-7 참고 |
+| Namespace 생성 (`peekcart`) | 🔲 | |
+| ConfigMap / Secret 매니페스트 | 🔲 | DB/Redis/Kafka 접속 정보, Toss/Slack 키 |
+| MySQL Deployment + Service + PVC | 🔲 | |
+| Redis Deployment + Service | 🔲 | |
+| Kafka (KRaft) Deployment + Service | 🔲 | |
+| PeekCart Application Deployment + Service | 🔲 | GHCR 이미지 사용 |
+| Ingress 또는 NodePort 설정 | 🔲 | Swagger UI 외부 접근 |
+| 전체 서비스 정상 기동 검증 | 🔲 | |
+
+**완료 기준**: `kubectl get pods -n peekcart` 전체 Running, API 호출 정상 응답
+
+---
+
+### Task 3-3: kube-prometheus-stack
+**상태**: 🔲 대기
+**목표**: Prometheus + Grafana 구축, 모니터링 대시보드 설정
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `build.gradle` micrometer-prometheus 의존성 추가 | 🔲 | Spring Boot Actuator + Prometheus 엔드포인트 |
+| `application.yml` Actuator/Prometheus 설정 | 🔲 | |
+| kube-prometheus-stack Helm 설치 | 🔲 | |
+| ServiceMonitor 설정 (PeekCart 메트릭 수집) | 🔲 | |
+| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM) | 🔲 | |
+| Kafka Lag 모니터링 대시보드 | 🔲 | |
+
+**완료 기준**: Grafana에서 API 응답시간/에러율/Kafka Lag 실시간 모니터링 확인
+
+---
+
+### Task 3-4: 부하 테스트
+**상태**: 🔲 대기
+**목표**: 부하 테스트 시나리오 실행, 캐싱 전/후 TPS 비교 측정
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| 부하 테스트 도구 선정 + 설치 | 🔲 | nGrinder 또는 k6 등 |
+| 테스트 시나리오 작성 (상품 조회, 주문 생성) | 🔲 | |
+| Baseline 측정 (캐싱 비활성화 상태 TPS) | 🔲 | |
+| 캐싱 활성화 상태 TPS 측정 | 🔲 | |
+| 테스트 리포트 작성 (전/후 비교 수치) | 🔲 | |
+
+**완료 기준**: 캐싱 전/후 TPS 비교 수치가 포함된 부하 테스트 리포트 완성
+
+---
+
+### Task 3-5: HPA 검증
+**상태**: 🔲 대기
+**목표**: Order Service HPA 설정, 부하 테스트 중 자동 스케일아웃 검증
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| metrics-server 설치 (minikube) | 🔲 | |
+| HPA 매니페스트 작성 (CPU 기반, min 1 / max 3) | 🔲 | |
+| 부하 테스트 중 Pod 자동 증설 확인 | 🔲 | |
+| Grafana 스크린샷 캡처 (Pod 스케일아웃 시점) | 🔲 | |
+
+**완료 기준**: 부하 테스트 중 Pod 1개 → 3개 자동 증설 + Grafana 스크린샷
+
+---
+
 ## 다음 Phase 예정
 
-- **Phase 3**: GitHub Actions CI, minikube K8s, Prometheus + Grafana, 부하 테스트
 - **Phase 4**: Gradle 멀티모듈, Spring Cloud Gateway, Choreography Saga, CQRS
 
 ---
@@ -335,3 +430,4 @@
 | 2026-04-02 | Task 2-5 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 3건 개선: slackPort.send() try-catch 감싸기(P0 Slack 실패 시 DLQ 중복 발행 방지), "exponential backoff" → "fixed sequence backoff" 용어 수정(P1), 02-architecture.md에 FixedSequenceBackOff 패키지 트리 추가(P2). 전체 232건 테스트 통과 |
 | 2026-04-02 | Task 2-5 완료 | DLQ 통합 테스트 1건 (Testcontainers Kafka + MySQL + Redis): Consumer 처리 실패 → 재시도 소진 → DLQ 라우팅 + Slack 알림 검증. 전체 233건 테스트 통과 |
 | 2026-04-02 | Task 2-6 완료 | ShedLock 적용 (shedlock-spring 6.3.1, JdbcTemplateLockProvider, Flyway V3, OrderTimeoutScheduler + OutboxPollingScheduler @SchedulerLock 적용, 통합 테스트 2건). 전체 235건 테스트 통과. Phase 2 전체 Task 완료 |
+| 2026-04-03 | Phase 3 환경 구축 | TASKS.md Phase 3 Task 5개 정의 (Task 3-1 ~ 3-5) + PHASE3.md 생성 |

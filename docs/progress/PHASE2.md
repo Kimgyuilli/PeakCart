@@ -391,4 +391,31 @@
 
 전체 233건 테스트 통과 확인.
 
+### 2026-04-02 (3)
+
+#### Task 2-6: ShedLock 적용 — Task 2-6 완료
+
+**완료 항목**:
+- `build.gradle`에 ShedLock 의존성 추가 (`shedlock-spring:6.3.1`, `shedlock-provider-jdbc-template:6.3.1`)
+- Flyway `V3__shedlock.sql` 생성 (shedlock 테이블 DDL)
+- `ShedLockConfig` 설정 클래스 생성 (`global/config/`) — `@EnableSchedulerLock(defaultLockAtMostFor = "PT10M")`, `JdbcTemplateLockProvider` + `usingDbTime()`
+- `OrderTimeoutScheduler`에 `@SchedulerLock` 추가 (`lockAtMostFor = "PT10M"`, `lockAtLeastFor = "PT30S"`)
+- `OutboxPollingScheduler`에 `@SchedulerLock` 추가 (`lockAtMostFor = "PT5M"`, `lockAtLeastFor = "PT4S"`)
+- `ShedLockIntegrationTest` 통합 테스트 2건 (Testcontainers MySQL + Redis + Kafka)
+
+**테스트 항목**:
+1. **shedlock 테이블 + 락 레코드 생성**: Flyway로 테이블 생성 확인 + 스케줄러 실행 후 shedlock 테이블에 락 레코드 1건 이상 존재
+2. **outboxPollingJob 락 레코드 확인**: `name = 'outboxPollingJob'` 레코드가 shedlock 테이블에 생성됨
+
+**주요 결정**:
+- **LockProvider**: `JdbcTemplateLockProvider` (MySQL 기반) — 이미 MySQL 사용 중이므로 별도 인프라 불필요
+- **usingDbTime()**: DB 서버 시각 기준 락 관리 — 다중 인스턴스 간 시각 차이 문제 방지
+- **lockAtLeastFor 설정**: 스케줄 주기보다 약간 짧게 설정하여 같은 주기 내 중복 실행 방지 (OrderTimeout: 60초 주기 → 30초, Outbox: 5초 주기 → 4초)
+
+전체 235건 테스트 통과 확인.
+
+#### Phase 2 전체 Task 완료
+
+Phase 2 Task 6개(2-1 ~ 2-6) 전부 완료. Exit Criteria 4/4 달성.
+
 ---

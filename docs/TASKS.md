@@ -282,17 +282,17 @@
 ---
 
 ### Task 2-6: ShedLock
-**상태**: 🔲 대기
+**상태**: ✅ 완료
 **목표**: 타임아웃/Outbox 스케줄러에 ShedLock 적용, 분산 환경 중복 실행 방지
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `build.gradle` ShedLock 의존성 추가 | 🔲 | shedlock-spring + shedlock-provider-jdbc-template |
-| Flyway `V3__shedlock.sql` 스키마 추가 | 🔲 | shedlock 테이블 |
-| `ShedLockConfig` 설정 (`@EnableSchedulerLock`) | 🔲 | |
-| `OrderTimeoutScheduler` ShedLock 적용 | 🔲 | `@SchedulerLock(name = "orderTimeoutCancelJob", lockAtMostFor = "PT10M")` |
-| `OutboxPollingScheduler` ShedLock 적용 | 🔲 | `@SchedulerLock(name = "outboxPollingJob", lockAtMostFor = "PT5M")` |
-| 통합 테스트 (ShedLock 동작 검증) | 🔲 | |
+| `build.gradle` ShedLock 의존성 추가 | ✅ | shedlock-spring + shedlock-provider-jdbc-template 6.3.1 |
+| Flyway `V3__shedlock.sql` 스키마 추가 | ✅ | shedlock 테이블 |
+| `ShedLockConfig` 설정 (`@EnableSchedulerLock`) | ✅ | JdbcTemplateLockProvider, usingDbTime() |
+| `OrderTimeoutScheduler` ShedLock 적용 | ✅ | `@SchedulerLock(name = "orderTimeoutCancelJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")` |
+| `OutboxPollingScheduler` ShedLock 적용 | ✅ | `@SchedulerLock(name = "outboxPollingJob", lockAtMostFor = "PT5M", lockAtLeastFor = "PT4S")` |
+| 통합 테스트 (ShedLock 동작 검증) | ✅ | Testcontainers MySQL + Redis + Kafka, 2건 |
 
 **완료 기준**: 스케줄러 중복 실행 방지 동작 확인
 
@@ -334,3 +334,4 @@
 | 2026-04-02 | Task 2-5 (4/5) | DLQ 구성 (FixedSequenceBackOff, DefaultErrorHandler + DeadLetterPublishingRecoverer, DLQ 토픽 4개, Slack 알림, 단위 테스트 3건). 통합 테스트 미완료. 전체 232건 테스트 통과 |
 | 2026-04-02 | Task 2-5 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 3건 개선: slackPort.send() try-catch 감싸기(P0 Slack 실패 시 DLQ 중복 발행 방지), "exponential backoff" → "fixed sequence backoff" 용어 수정(P1), 02-architecture.md에 FixedSequenceBackOff 패키지 트리 추가(P2). 전체 232건 테스트 통과 |
 | 2026-04-02 | Task 2-5 완료 | DLQ 통합 테스트 1건 (Testcontainers Kafka + MySQL + Redis): Consumer 처리 실패 → 재시도 소진 → DLQ 라우팅 + Slack 알림 검증. 전체 233건 테스트 통과 |
+| 2026-04-02 | Task 2-6 완료 | ShedLock 적용 (shedlock-spring 6.3.1, JdbcTemplateLockProvider, Flyway V3, OrderTimeoutScheduler + OutboxPollingScheduler @SchedulerLock 적용, 통합 테스트 2건). 전체 235건 테스트 통과. Phase 2 전체 Task 완료 |

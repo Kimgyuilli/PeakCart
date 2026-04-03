@@ -334,7 +334,8 @@
 |------|------|------|
 | minikube 환경 설정 (CPU 4코어, Memory 8GB) | 🔲 | `docs/04-design-deep-dive.md` 10-7 참고 |
 | Namespace 생성 (`peekcart`) | 🔲 | |
-| ConfigMap / Secret 매니페스트 | 🔲 | DB/Redis/Kafka 접속 정보, Toss/Slack 키 |
+| `application-k8s.yml` 환경 profile 작성 | 🔲 | K8s 환경용 설정 분리 (`docs/03-requirements.md` 7-4) |
+| ConfigMap / Secret 매니페스트 | 🔲 | DB/Redis/Kafka 접속 정보, Toss/Slack 키, `SPRING_PROFILES_ACTIVE=k8s` |
 | MySQL Deployment + Service + PVC | 🔲 | |
 | Redis Deployment + Service | 🔲 | |
 | Kafka (KRaft) Deployment + Service | 🔲 | |
@@ -357,9 +358,10 @@
 |------|------|------|
 | `build.gradle` micrometer-prometheus 의존성 추가 | 🔲 | Spring Boot Actuator + Prometheus 엔드포인트 |
 | `application.yml` Actuator/Prometheus 설정 | 🔲 | |
+| 구조화된 로깅 설정 (JSON 포맷 + MDC traceId/userId/orderId) | 🔲 | `docs/03-requirements.md` 7-6, Logback JSON encoder |
 | kube-prometheus-stack Helm 설치 | 🔲 | |
 | ServiceMonitor 설정 (PeekCart 메트릭 수집) | 🔲 | |
-| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM) | 🔲 | |
+| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | 🔲 | `docs/03-requirements.md` 7-3 |
 | Kafka Lag 모니터링 대시보드 | 🔲 | |
 | Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | 🔲 | `docs/03-requirements.md` 7-3 |
 | Grafana Alert 설정 (에러율/응답시간 임계치) | 🔲 | 임계치 초과 시 알림 (`docs/03-requirements.md` 7-3) |
@@ -376,6 +378,7 @@
 |------|------|------|
 | nGrinder 설치 + 설정 | 🔲 | 상품 조회 TPS 측정용 (`docs/03-requirements.md` 7-1) |
 | JMeter 설치 + 설정 | 🔲 | 동시 주문 정합성 시나리오용 (`docs/03-requirements.md` 7-1) |
+| Baseline TPS 측정 (캐싱 비활성화 상태) | 🔲 | 목표 수치 확정 기준 (`docs/03-requirements.md` 7-1) |
 | 시나리오 1: 상품 조회 TPS (캐싱 전/후 비교) | 🔲 | 목표: p99 ≤ 100ms, 캐시 미적용 대비 TPS 3배 이상 |
 | 시나리오 2: 동시 주문 정합성 (1,000 VUser) | 🔲 | 목표: 정합성 100%, 오버셀링 0건 |
 | 시나리오 3: Kafka Consumer Lag 모니터링 | 🔲 | 목표: 정상 구간 Lag 0 유지 (Prometheus 대시보드 연계) |
@@ -395,8 +398,8 @@
 |------|------|------|
 | metrics-server 설치 (minikube) | 🔲 | |
 | HPA 매니페스트 작성 (CPU 기반, min 1 / max 3) | 🔲 | |
-| 부하 테스트 중 Pod 자동 증설 확인 | 🔲 | |
-| Grafana 스크린샷 캡처 (Pod 스케일아웃 시점) | 🔲 | |
+| nGrinder 부하 중 Pod 자동 증설 확인 | 🔲 | Task 3-4 부하 테스트와 연계 실행 (`docs/03-requirements.md` 7-1) |
+| Grafana에서 HPA 스케일 이벤트 + Pod 증설 시점 스크린샷 캡처 | 🔲 | Task 3-3 Grafana 대시보드 연계 |
 
 **완료 기준**: 부하 테스트 중 Pod 1개 → 3개 자동 증설 + Grafana 스크린샷
 

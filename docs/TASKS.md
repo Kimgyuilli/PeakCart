@@ -339,8 +339,11 @@
 | Redis Deployment + Service | 🔲 | |
 | Kafka (KRaft) Deployment + Service | 🔲 | |
 | PeekCart Application Deployment + Service | 🔲 | GHCR 이미지 사용 |
+| Liveness / Readiness Probe 설정 | 🔲 | Actuator health 엔드포인트 (`docs/03-requirements.md` 7-2) |
 | Ingress 또는 NodePort 설정 | 🔲 | Swagger UI 외부 접근 |
 | 전체 서비스 정상 기동 검증 | 🔲 | |
+
+> **k8s 디렉토리 구조**: Phase 3에서는 `k8s/app/`, `k8s/infra/` 수준으로 구성합니다. Phase 4 MSA 전환 시 `k8s/order-service/`, `k8s/payment-service/` 등 서비스별 분리 예정 (`docs/02-architecture.md` Phase 4 패키지 구조 참고).
 
 **완료 기준**: `kubectl get pods -n peekcart` 전체 Running, API 호출 정상 응답
 
@@ -358,24 +361,29 @@
 | ServiceMonitor 설정 (PeekCart 메트릭 수집) | 🔲 | |
 | Grafana 대시보드 구성 (API 응답시간, 에러율, JVM) | 🔲 | |
 | Kafka Lag 모니터링 대시보드 | 🔲 | |
+| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | 🔲 | `docs/03-requirements.md` 7-3 |
+| Grafana Alert 설정 (에러율/응답시간 임계치) | 🔲 | 임계치 초과 시 알림 (`docs/03-requirements.md` 7-3) |
 
-**완료 기준**: Grafana에서 API 응답시간/에러율/Kafka Lag 실시간 모니터링 확인
+**완료 기준**: Grafana에서 API 응답시간/에러율/Kafka Lag/Pod 리소스 실시간 모니터링 + Alert 동작 확인
 
 ---
 
 ### Task 3-4: 부하 테스트
 **상태**: 🔲 대기
-**목표**: 부하 테스트 시나리오 실행, 캐싱 전/후 TPS 비교 측정
+**목표**: 부하 테스트 시나리오 실행, 캐싱 전/후 TPS 비교 + 동시 주문 정합성 + Kafka Lag 측정
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| 부하 테스트 도구 선정 + 설치 | 🔲 | nGrinder 또는 k6 등 |
-| 테스트 시나리오 작성 (상품 조회, 주문 생성) | 🔲 | |
-| Baseline 측정 (캐싱 비활성화 상태 TPS) | 🔲 | |
-| 캐싱 활성화 상태 TPS 측정 | 🔲 | |
+| nGrinder 설치 + 설정 | 🔲 | 상품 조회 TPS 측정용 (`docs/03-requirements.md` 7-1) |
+| JMeter 설치 + 설정 | 🔲 | 동시 주문 정합성 시나리오용 (`docs/03-requirements.md` 7-1) |
+| 시나리오 1: 상품 조회 TPS (캐싱 전/후 비교) | 🔲 | 목표: p99 ≤ 100ms, 캐시 미적용 대비 TPS 3배 이상 |
+| 시나리오 2: 동시 주문 정합성 (1,000 VUser) | 🔲 | 목표: 정합성 100%, 오버셀링 0건 |
+| 시나리오 3: Kafka Consumer Lag 모니터링 | 🔲 | 목표: 정상 구간 Lag 0 유지 (Prometheus 대시보드 연계) |
 | 테스트 리포트 작성 (전/후 비교 수치) | 🔲 | |
 
-**완료 기준**: 캐싱 전/후 TPS 비교 수치가 포함된 부하 테스트 리포트 완성
+> **측정 환경 맥락** (`docs/04-design-deep-dive.md` 10-7): minikube 로컬 환경(macOS, CPU 4코어, Memory 8GB)에서 수행. 수치는 절대값보다 **개선 비율**(캐싱 전/후 TPS 비교, HPA 적용 전/후 처리량 변화)에 초점을 맞춥니다. 목표 수치는 baseline 측정 후 확정합니다.
+
+**완료 기준**: 3개 시나리오 측정 결과 + 캐싱 전/후 TPS 비교 수치가 포함된 부하 테스트 리포트 완성
 
 ---
 

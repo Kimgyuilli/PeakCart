@@ -13,7 +13,7 @@ RUN ./gradlew bootJar -x test --no-daemon
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 
-COPY --from=build /app/build/libs/*.jar app.jar
+COPY --from=build /app/build/libs/app.jar app.jar
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 USER appuser

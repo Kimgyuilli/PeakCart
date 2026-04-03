@@ -316,11 +316,11 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| 멀티스테이지 Dockerfile 작성 (Gradle 빌드 → JRE 런타임) | ✅ | eclipse-temurin:17-jdk → 17-jre, 의존성 레이어 캐싱, non-root 실행 |
-| `.github/workflows/ci.yml` 워크플로우 작성 | ✅ | push/PR 트리거, 단일 job 구조 |
+| 멀티스테이지 Dockerfile 작성 (Gradle 빌드 → JRE 런타임) | ✅ | eclipse-temurin:17-jdk → 17-jre, 의존성 레이어 캐싱, non-root 실행, `.dockerignore` 포함 |
+| `.github/workflows/ci.yml` 워크플로우 작성 | ✅ | push/PR 트리거, 단일 job, concurrency 설정, Docker 레이어 캐시(GHA) |
 | Gradle 빌드 + 단위 테스트 실행 | ✅ | `./gradlew build --no-daemon`, SPRING_PROFILES_ACTIVE=test |
 | Testcontainers 통합 테스트 실행 (CI 환경) | ✅ | ubuntu runner Docker 데몬 직접 사용, @ServiceConnection 자동 설정 |
-| Docker 이미지 빌드 + GHCR push | ✅ | main push 시 조건부 실행, latest + SHA 태그 |
+| Docker 이미지 빌드 + GHCR push | ✅ | main push 시 조건부 실행, latest + SHA 태그, JAR 파일명 고정(`app.jar`) |
 
 **완료 기준**: PR 생성 시 빌드+테스트 자동 실행, main 머지 시 Docker 이미지 GHCR push
 
@@ -443,3 +443,4 @@
 | 2026-04-02 | Task 2-6 완료 | ShedLock 적용 (shedlock-spring 6.3.1, JdbcTemplateLockProvider, Flyway V3, OrderTimeoutScheduler + OutboxPollingScheduler @SchedulerLock 적용, 통합 테스트 2건). 전체 235건 테스트 통과. Phase 2 전체 Task 완료 |
 | 2026-04-03 | Phase 3 환경 구축 | TASKS.md Phase 3 Task 5개 정의 (Task 3-1 ~ 3-5) + PHASE3.md 생성 |
 | 2026-04-03 | Task 3-1 완료 | GitHub Actions CI 파이프라인 (멀티스테이지 Dockerfile, ci.yml 워크플로우, Testcontainers CI 환경, GHCR push). 로컬 Docker 빌드 검증 완료 |
+| 2026-04-04 | Task 3-1 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: `.dockerignore` 추가(P0 빌드 컨텍스트 경량화), JAR 파일명 고정 `app.jar`(P1 글로브 제거), Docker 레이어 캐시 GHA(P1), CI concurrency 설정(P2 중복 실행 방지). plain JAR 비활성화 |

@@ -7,6 +7,7 @@ import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +26,7 @@ public class OrderTimeoutScheduler {
     private final OrderCommandService orderCommandService;
 
     @Scheduled(fixedDelay = 60_000)
+    @SchedulerLock(name = "orderTimeoutCancelJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     public void cancelExpiredOrders() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
         List<Order> expiredOrders = orderRepository.findByStatusAndOrderedAtBefore(

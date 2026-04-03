@@ -44,3 +44,18 @@
 - **CI 구조**: 단일 job. test와 Docker push를 분리하면 artifact 전달이 필요해 복잡도 증가. 조건부 step(`if: github.ref == 'refs/heads/main'`)으로 해결.
 - **Testcontainers CI 설정**: 추가 설정 없음. ubuntu runner에 Docker 내장, `@ServiceConnection`이 자동 설정하므로 DinD 불필요.
 - **이미지 태그**: `latest` + `${{ github.sha }}` — SHA로 추적성, latest로 편의성.
+
+### 2026-04-04
+
+#### Task 3-1: 코드 리뷰 개선 (P0~P1)
+
+**완료 항목**:
+- `.dockerignore` 추가 — `.git`, `build/`, `.gradle/`, `docs/`, `.github/` 등 빌드 컨텍스트 제외
+- `build.gradle`에 `bootJar { archiveFileName = 'app.jar' }` + `jar { enabled = false }` — JAR 파일명 고정, plain JAR 비활성화
+- `Dockerfile` COPY 대상 `*.jar` → `app.jar` 명시적 참조
+- `ci.yml`에 `concurrency` 설정 추가 (동일 ref 중복 워크플로우 자동 취소)
+- `ci.yml`에 `docker/setup-buildx-action@v3` + `cache-from`/`cache-to: type=gha` — Docker 레이어 캐시 CI 간 공유
+
+**주요 결정**:
+- **JAR 파일명 고정**: `archiveFileName = 'app.jar'`로 글로브 패턴 제거. Dockerfile에서 명시적으로 참조하여 복수 JAR 빌드 시 실패 방지.
+- **Docker 캐시 전략**: GitHub Actions Cache(`type=gha`) 사용. Registry 캐시 대비 설정 간편하고 추가 인증 불필요.

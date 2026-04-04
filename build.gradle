@@ -44,6 +44,9 @@ dependencies {
 	// Cache
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 
+	// Actuator
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
 	// Kafka
 	implementation 'org.springframework.kafka:spring-kafka'
 

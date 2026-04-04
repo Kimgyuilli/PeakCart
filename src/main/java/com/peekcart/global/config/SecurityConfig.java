@@ -42,7 +42,8 @@ public class SecurityConfig {
             "/api/v1/payments/webhook",
             "/swagger-ui/**",
             "/swagger-ui.html",
-            "/api-docs/**"
+            "/api-docs/**",
+            "/actuator/health/**"
     };
 
     /**

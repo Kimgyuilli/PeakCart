@@ -301,7 +301,7 @@
 ## 현재 Phase: Phase 3 — 인프라 / 테스트
 
 **Phase 3 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
-- [ ] K8s에 모든 서비스 정상 배포 확인
+- [x] K8s에 모든 서비스 정상 배포 확인
 - [ ] Grafana 대시보드에서 API 응답시간/에러율/Kafka Lag 모니터링 확인
 - [ ] nGrinder 부하 테스트 리포트 완성 (캐싱 전/후 TPS 비교 수치 포함)
 - [ ] HPA 동작 확인 (Pod 자동 증설 Grafana 스크린샷)
@@ -327,22 +327,22 @@
 ---
 
 ### Task 3-2: minikube K8s 배포
-**상태**: 🔲 대기
+**상태**: ✅ 완료
 **목표**: K8s 매니페스트 작성, minikube에 전체 서비스 배포
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| minikube 환경 설정 (CPU 4코어, Memory 8GB) | 🔲 | `docs/04-design-deep-dive.md` 10-7 참고 |
-| Namespace 생성 (`peekcart`) | 🔲 | |
-| `application-k8s.yml` 환경 profile 작성 | 🔲 | K8s 환경용 설정 분리 (`docs/03-requirements.md` 7-4) |
-| ConfigMap / Secret 매니페스트 | 🔲 | DB/Redis/Kafka 접속 정보, Toss/Slack 키, `SPRING_PROFILES_ACTIVE=k8s` |
-| MySQL Deployment + Service + PVC | 🔲 | |
-| Redis Deployment + Service | 🔲 | |
-| Kafka (KRaft) Deployment + Service | 🔲 | |
-| PeekCart Application Deployment + Service | 🔲 | GHCR 이미지 사용 |
-| Liveness / Readiness Probe 설정 | 🔲 | Actuator health 엔드포인트 (`docs/03-requirements.md` 7-2) |
-| Ingress 또는 NodePort 설정 | 🔲 | Swagger UI 외부 접근 |
-| 전체 서비스 정상 기동 검증 | 🔲 | |
+| minikube 환경 설정 (CPU 4코어, Memory 8GB) | ✅ | 매니페스트 resource limits 반영, minikube start는 사용자 실행 |
+| Namespace 생성 (`peekcart`) | ✅ | `k8s/namespace.yml` |
+| `application-k8s.yml` 환경 profile 작성 | ✅ | K8s Service DNS 접속, Actuator health probe 노출 |
+| ConfigMap / Secret 매니페스트 | ✅ | `k8s/app/configmap.yml` + `k8s/app/secret.yml` |
+| MySQL Deployment + Service + PVC | ✅ | `k8s/infra/mysql-deployment.yml`, PVC 1Gi |
+| Redis Deployment + Service | ✅ | `k8s/infra/redis-deployment.yml` |
+| Kafka (KRaft) Deployment + Service | ✅ | `k8s/infra/kafka-deployment.yml`, KRaft 단일 노드 |
+| PeekCart Application Deployment + Service | ✅ | `k8s/app/peekcart-deployment.yml`, GHCR 이미지, `imagePullPolicy: Never` (로컬 빌드) |
+| Liveness / Readiness Probe 설정 | ✅ | Actuator `/actuator/health/liveness`, `/actuator/health/readiness` |
+| Ingress 또는 NodePort 설정 | ✅ | NodePort 30080 (minikube 환경 단순성 우선) |
+| 전체 서비스 정상 기동 검증 | ✅ | minikube 전체 Pod Running + Swagger UI 접근 확인 완료 |
 
 > **k8s 디렉토리 구조**: Phase 3에서는 `k8s/app/`, `k8s/infra/` 수준으로 구성합니다. Phase 4 MSA 전환 시 `k8s/order-service/`, `k8s/payment-service/` 등 서비스별 분리 예정 (`docs/02-architecture.md` Phase 4 패키지 구조 참고).
 
@@ -444,3 +444,4 @@
 | 2026-04-03 | Phase 3 환경 구축 | TASKS.md Phase 3 Task 5개 정의 (Task 3-1 ~ 3-5) + PHASE3.md 생성 |
 | 2026-04-03 | Task 3-1 완료 | GitHub Actions CI 파이프라인 (멀티스테이지 Dockerfile, ci.yml 워크플로우, Testcontainers CI 환경, GHCR push). 로컬 Docker 빌드 검증 완료 |
 | 2026-04-04 | Task 3-1 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: `.dockerignore` 추가(P0 빌드 컨텍스트 경량화), JAR 파일명 고정 `app.jar`(P1 글로브 제거), Docker 레이어 캐시 GHA(P1), CI concurrency 설정(P2 중복 실행 방지). plain JAR 비활성화 |
+| 2026-04-04 | Task 3-2 완료 | minikube K8s 배포 매니페스트 (Namespace, MySQL+PVC, Redis, Kafka KRaft, ConfigMap/Secret, PeekCart Deployment+NodePort 30080, Actuator Liveness/Readiness Probe). application-k8s.yml 프로파일 추가, spring-boot-starter-actuator 의존성 추가, SecurityConfig actuator 공개 URL 추가. 전체 235건 테스트 통과 |

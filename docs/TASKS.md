@@ -336,11 +336,11 @@
 | Namespace 생성 (`peekcart`) | ✅ | `k8s/namespace.yml` |
 | `application-k8s.yml` 환경 profile 작성 | ✅ | K8s Service DNS 접속, Actuator health probe 노출 |
 | ConfigMap / Secret 매니페스트 | ✅ | `k8s/app/configmap.yml` + `k8s/app/secret.yml` |
-| MySQL Deployment + Service + PVC | ✅ | `k8s/infra/mysql-deployment.yml`, PVC 1Gi |
-| Redis Deployment + Service | ✅ | `k8s/infra/redis-deployment.yml` |
-| Kafka (KRaft) Deployment + Service | ✅ | `k8s/infra/kafka-deployment.yml`, KRaft 단일 노드 |
-| PeekCart Application Deployment + Service | ✅ | `k8s/app/peekcart-deployment.yml`, GHCR 이미지, `imagePullPolicy: Never` (로컬 빌드) |
-| Liveness / Readiness Probe 설정 | ✅ | Actuator `/actuator/health/liveness`, `/actuator/health/readiness` |
+| MySQL Deployment + Service + PVC | ✅ | `k8s/infra/mysql-deployment.yml`, PVC 1Gi, 크레덴셜 `secretKeyRef` 참조 |
+| Redis Deployment + Service + PVC | ✅ | `k8s/infra/redis-deployment.yml`, PVC 512Mi (JWT 블랙리스트 영속화) |
+| Kafka (KRaft) Deployment + Service + PVC | ✅ | `k8s/infra/kafka-deployment.yml`, KRaft 단일 노드, PVC 1Gi |
+| PeekCart Application Deployment + Service | ✅ | `k8s/app/peekcart-deployment.yml`, GHCR 이미지, `imagePullPolicy: Never` (로컬 빌드), `startupProbe` 포함 |
+| Liveness / Readiness / Startup Probe 설정 | ✅ | Actuator `/actuator/health/liveness`, `/actuator/health/readiness`, `startupProbe`(최대 150초 기동 대기) |
 | Ingress 또는 NodePort 설정 | ✅ | NodePort 30080 (minikube 환경 단순성 우선) |
 | 전체 서비스 정상 기동 검증 | ✅ | minikube 전체 Pod Running + Swagger UI 접근 확인 완료 |
 
@@ -445,3 +445,4 @@
 | 2026-04-03 | Task 3-1 완료 | GitHub Actions CI 파이프라인 (멀티스테이지 Dockerfile, ci.yml 워크플로우, Testcontainers CI 환경, GHCR push). 로컬 Docker 빌드 검증 완료 |
 | 2026-04-04 | Task 3-1 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: `.dockerignore` 추가(P0 빌드 컨텍스트 경량화), JAR 파일명 고정 `app.jar`(P1 글로브 제거), Docker 레이어 캐시 GHA(P1), CI concurrency 설정(P2 중복 실행 방지). plain JAR 비활성화 |
 | 2026-04-04 | Task 3-2 완료 | minikube K8s 배포 매니페스트 (Namespace, MySQL+PVC, Redis, Kafka KRaft, ConfigMap/Secret, PeekCart Deployment+NodePort 30080, Actuator Liveness/Readiness Probe). application-k8s.yml 프로파일 추가, spring-boot-starter-actuator 의존성 추가, SecurityConfig actuator 공개 URL 추가. 전체 235건 테스트 통과 |
+| 2026-04-04 | Task 3-2 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: MySQL 크레덴셜 `secretKeyRef` 참조(P1 하드코딩 제거), Redis/Kafka PVC 추가(P1 데이터 영속화), `startupProbe` 추가(P2 기동 지연 안전), K8s 권장 labels 추가(P2 ServiceMonitor 연계). 전체 235건 테스트 통과 |

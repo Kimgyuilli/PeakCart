@@ -80,3 +80,18 @@
 - **인프라 리소스 제한**: minikube 8GB 제약 내에서 MySQL(512Mi~1Gi), Redis(128Mi~256Mi), Kafka(512Mi~1Gi), App(512Mi~1Gi) 할당.
 - **Kafka 리스너 구조**: docker-compose의 EXTERNAL 리스너 제거. K8s 내부 통신은 `PLAINTEXT://kafka:29092`로 통일 (Service DNS).
 - **imagePullPolicy: Never**: GHCR private 레포 인증 문제 회피. `eval $(minikube docker-env)` + 로컬 빌드로 minikube에 직접 이미지 적재.
+
+#### Task 3-2: 코드 리뷰 개선 (P1~P2)
+
+**완료 항목**:
+- `k8s/infra/mysql-deployment.yml` — MySQL 크레덴셜 하드코딩 제거, `secretKeyRef`로 `peekcart-secret` 참조
+- `k8s/infra/redis-deployment.yml` — PVC 512Mi 추가 + `volumeMount` (JWT 블랙리스트 영속화)
+- `k8s/infra/kafka-deployment.yml` — PVC 1Gi 추가 + `volumeMount` (미소비 메시지 유실 방지)
+- `k8s/app/peekcart-deployment.yml` — `startupProbe` 추가 (`failureThreshold: 30`, `periodSeconds: 5`, 최대 150초 기동 대기), readiness/liveness에서 `initialDelaySeconds` 제거 (startupProbe가 대체)
+- 전체 매니페스트에 K8s 권장 labels 추가 (`app.kubernetes.io/name`, `app.kubernetes.io/component`, `app.kubernetes.io/part-of`)
+
+**주요 결정**:
+- **MySQL 크레덴셜 Secret 통합**: MySQL env에 하드코딩된 비밀번호를 `peekcart-secret`의 `DB_USERNAME`/`DB_PASSWORD`로 통일. 크레덴셜 관리 포인트 단일화.
+- **Redis/Kafka PVC 추가**: Pod 재시작 시 JWT 블랙리스트 유실(보안 이슈) 및 Kafka 미소비 메시지 유실 방지. MySQL과 동일하게 PVC 영속화.
+- **startupProbe 도입**: Spring Boot 기동 시간이 `livenessProbe.initialDelaySeconds`를 초과하면 Pod가 kill되는 문제 방지. startupProbe가 기동 완료를 보장한 후 liveness/readiness가 동작.
+- **K8s 권장 labels**: Task 3-3 ServiceMonitor selector 설정 연계를 위해 `app.kubernetes.io/*` labels 사전 추가.

@@ -15,6 +15,10 @@ kind: Deployment
 metadata:
   name: mysql
   namespace: peekcart
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: peekcart
 spec:
   replicas: 1
   selector:
@@ -24,6 +28,9 @@ spec:
     metadata:
       labels:
         app: mysql
+        app.kubernetes.io/name: mysql
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: peekcart
     spec:
       containers:
         - name: mysql
@@ -32,13 +39,22 @@ spec:
             - containerPort: 3306
           env:
             - name: MYSQL_ROOT_PASSWORD
-              value: root
+              valueFrom:
+                secretKeyRef:
+                  name: peekcart-secret
+                  key: DB_PASSWORD
             - name: MYSQL_DATABASE
               value: peekcart
             - name: MYSQL_USER
-              value: peekcart
+              valueFrom:
+                secretKeyRef:
+                  name: peekcart-secret
+                  key: DB_USERNAME
             - name: MYSQL_PASSWORD
-              value: peekcart
+              valueFrom:
+                secretKeyRef:
+                  name: peekcart-secret
+                  key: DB_PASSWORD
           resources:
             requests:
               cpu: 250m

@@ -8,7 +8,7 @@
 ## Phase 3 목표
 
 **Exit Criteria**:
-- [ ] K8s에 모든 서비스 정상 배포 확인
+- [x] K8s에 모든 서비스 정상 배포 확인
 - [ ] Grafana 대시보드에서 API 응답시간/에러율/Kafka Lag 모니터링 확인
 - [ ] nGrinder 부하 테스트 리포트 완성 (캐싱 전/후 TPS 비교 수치 포함)
 - [ ] HPA 동작 확인 (Pod 자동 증설 Grafana 스크린샷)
@@ -59,3 +59,24 @@
 **주요 결정**:
 - **JAR 파일명 고정**: `archiveFileName = 'app.jar'`로 글로브 패턴 제거. Dockerfile에서 명시적으로 참조하여 복수 JAR 빌드 시 실패 방지.
 - **Docker 캐시 전략**: GitHub Actions Cache(`type=gha`) 사용. Registry 캐시 대비 설정 간편하고 추가 인증 불필요.
+
+#### Task 3-2: minikube K8s 배포 완료
+
+**완료 항목**:
+- `build.gradle`에 `spring-boot-starter-actuator` 의존성 추가
+- `SecurityConfig`에 `/actuator/health/**` 공개 URL 추가 (K8s Probe 인증 없이 접근)
+- `application-k8s.yml` — K8s Service DNS 접속 (`mysql:3306`, `redis:6379`, `kafka:29092`), Actuator health probe 노출
+- `k8s/namespace.yml` — `peekcart` 네임스페이스
+- `k8s/infra/mysql-deployment.yml` — MySQL 8.0 Deployment + Service + PVC(1Gi), readiness/liveness probe
+- `k8s/infra/redis-deployment.yml` — Redis 7.2 Deployment + Service, readiness/liveness probe
+- `k8s/infra/kafka-deployment.yml` — Apache Kafka 3.8.1 KRaft 단일 노드, Deployment + Service
+- `k8s/app/configmap.yml` — `SPRING_PROFILES_ACTIVE=k8s`
+- `k8s/app/secret.yml` — DB/JWT/Toss/Slack 키 (`stringData`)
+- `k8s/app/peekcart-deployment.yml` — GHCR 이미지, Actuator Liveness/Readiness Probe, NodePort 30080
+
+**주요 결정**:
+- **외부 접근 방식**: NodePort(30080) 선택. minikube 환경에서 Ingress Controller 설치보다 단순하고 `minikube service` 명령으로 즉시 접근 가능.
+- **Actuator 도입**: Liveness/Readiness Probe를 위해 `spring-boot-starter-actuator` 추가. `/actuator/health/liveness`, `/actuator/health/readiness` 엔드포인트만 노출하여 최소 공개.
+- **인프라 리소스 제한**: minikube 8GB 제약 내에서 MySQL(512Mi~1Gi), Redis(128Mi~256Mi), Kafka(512Mi~1Gi), App(512Mi~1Gi) 할당.
+- **Kafka 리스너 구조**: docker-compose의 EXTERNAL 리스너 제거. K8s 내부 통신은 `PLAINTEXT://kafka:29092`로 통일 (Service DNS).
+- **imagePullPolicy: Never**: GHCR private 레포 인증 문제 회피. `eval $(minikube docker-env)` + 로컬 빌드로 minikube에 직접 이미지 적재.

@@ -68,7 +68,7 @@ class OutboxKafkaIntegrationTest {
     @Autowired EntityManagerFactory emf;
     @Autowired OrderOutboxEventPublisher orderOutboxEventPublisher;
     @Autowired PaymentOutboxEventPublisher paymentOutboxEventPublisher;
-    @Autowired OutboxPollingScheduler outboxPollingScheduler;
+    @Autowired OutboxPollingService outboxPollingService;
     @Autowired OutboxEventRepository outboxEventRepository;
     @Autowired PaymentRepository paymentRepository;
     @Autowired InventoryRepository inventoryRepository;
@@ -139,7 +139,7 @@ class OutboxKafkaIntegrationTest {
         assertThat(pending.get(0).getStatus()).isEqualTo(OutboxEventStatus.PENDING);
 
         // when: 스케줄러 수동 호출 → Kafka 발행
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         // then: OutboxEvent PUBLISHED 전이
         List<OutboxEvent> afterPublish = outboxEventRepository.findPendingEvents(100);
@@ -166,7 +166,7 @@ class OutboxKafkaIntegrationTest {
 
         // when
         paymentOutboxEventPublisher.publishPaymentCompleted(payment, userId);
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         // then
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
@@ -194,7 +194,7 @@ class OutboxKafkaIntegrationTest {
 
         // when
         paymentOutboxEventPublisher.publishPaymentFailed(payment, userId);
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         // then
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
@@ -225,7 +225,7 @@ class OutboxKafkaIntegrationTest {
 
         // when
         orderOutboxEventPublisher.publishOrderCancelled(order);
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         // then
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
@@ -245,7 +245,7 @@ class OutboxKafkaIntegrationTest {
         // given
         Order order = persistOrder(OrderStatus.PENDING);
         orderOutboxEventPublisher.publishOrderCancelled(order);
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
             List<Notification> notifications = notificationJpaRepository
@@ -254,7 +254,7 @@ class OutboxKafkaIntegrationTest {
         });
 
         // when: 재폴링
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         // then: PENDING 이벤트 없음 + Notification 수 변화 없음
         List<OutboxEvent> pending = outboxEventRepository.findPendingEvents(100);

@@ -3,7 +3,7 @@ package com.peekcart.global.idempotency;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.outbox.OutboxEvent;
 import com.peekcart.global.outbox.OutboxEventRepository;
-import com.peekcart.global.outbox.OutboxPollingScheduler;
+import com.peekcart.global.outbox.OutboxPollingService;
 import com.peekcart.global.outbox.dto.KafkaEventEnvelope;
 import com.peekcart.global.outbox.dto.OrderCreatedPayload;
 import com.peekcart.global.outbox.dto.OrderItemPayload;
@@ -69,7 +69,7 @@ class IdempotencyIntegrationTest {
 
     @Autowired EntityManagerFactory emf;
     @Autowired OrderOutboxEventPublisher orderOutboxEventPublisher;
-    @Autowired OutboxPollingScheduler outboxPollingScheduler;
+    @Autowired OutboxPollingService outboxPollingService;
     @Autowired OutboxEventRepository outboxEventRepository;
     @Autowired PaymentRepository paymentRepository;
     @Autowired NotificationJpaRepository notificationJpaRepository;
@@ -144,7 +144,7 @@ class IdempotencyIntegrationTest {
         String payload = pending.get(0).getPayload();
 
         // Kafka로 발행 + Consumer 처리 대기
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {
             assertThat(paymentRepository.findByOrderId(order.getId())).isPresent();
@@ -175,7 +175,7 @@ class IdempotencyIntegrationTest {
         String eventId = pending.get(0).getEventId();
 
         // when
-        outboxPollingScheduler.pollAndPublish();
+        outboxPollingService.pollAndPublish();
 
         // then: 두 consumer group 모두 처리 완료
         await().atMost(10, TimeUnit.SECONDS).untilAsserted(() -> {

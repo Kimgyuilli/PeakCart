@@ -3,6 +3,10 @@ kind: Deployment
 metadata:
   name: peekcart
   namespace: peekcart
+  labels:
+    app.kubernetes.io/name: peekcart
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: peekcart
 spec:
   replicas: 1
   selector:
@@ -12,6 +16,9 @@ spec:
     metadata:
       labels:
         app: peekcart
+        app.kubernetes.io/name: peekcart
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: peekcart
     spec:
       containers:
         - name: peekcart
@@ -31,17 +38,21 @@ spec:
             limits:
               cpu: 1000m
               memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: 8080
-            initialDelaySeconds: 30
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8080
-            initialDelaySeconds: 40
             periodSeconds: 10
 ---
 apiVersion: v1

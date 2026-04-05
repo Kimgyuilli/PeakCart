@@ -17,7 +17,7 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": { "unit": "percentunit" },
         "overrides": []
       }
     },

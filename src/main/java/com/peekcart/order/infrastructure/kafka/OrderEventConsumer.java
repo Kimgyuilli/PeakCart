@@ -11,6 +11,7 @@ import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,13 +42,18 @@ public class OrderEventConsumer {
         String eventId = root.get("eventId").asText();
         JsonNode payload = root.get("payload");
 
-        idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_COMPLETED, () -> {
-            Long orderId = payload.get("orderId").asLong();
-            Order order = orderRepository.findById(orderId)
-                    .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
-            order.transitionTo(OrderStatus.PAYMENT_COMPLETED);
-            log.debug("주문 상태 전이 → PAYMENT_COMPLETED — orderId={}", orderId);
-        });
+        try {
+            idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_COMPLETED, () -> {
+                Long orderId = payload.get("orderId").asLong();
+                MDC.put("orderId", orderId.toString());
+                Order order = orderRepository.findById(orderId)
+                        .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
+                order.transitionTo(OrderStatus.PAYMENT_COMPLETED);
+                log.debug("주문 상태 전이 → PAYMENT_COMPLETED — orderId={}", orderId);
+            });
+        } finally {
+            MDC.remove("orderId");
+        }
     }
 
     /** 결제 실패 시 주문을 취소하고 재고를 복구한다. */
@@ -58,15 +64,20 @@ public class OrderEventConsumer {
         String eventId = root.get("eventId").asText();
         JsonNode payload = root.get("payload");
 
-        idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_FAILED, () -> {
-            Long orderId = payload.get("orderId").asLong();
-            Order order = orderRepository.findById(orderId)
-                    .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
-            order.cancel();
-            for (var item : order.getOrderItems()) {
-                productPort.restoreStock(item.getProductId(), item.getQuantity());
-            }
-            log.debug("결제 실패로 주문 취소 + 재고 복구 — orderId={}", orderId);
-        });
+        try {
+            idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_FAILED, () -> {
+                Long orderId = payload.get("orderId").asLong();
+                MDC.put("orderId", orderId.toString());
+                Order order = orderRepository.findById(orderId)
+                        .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
+                order.cancel();
+                for (var item : order.getOrderItems()) {
+                    productPort.restoreStock(item.getProductId(), item.getQuantity());
+                }
+                log.debug("결제 실패로 주문 취소 + 재고 복구 — orderId={}", orderId);
+            });
+        } finally {
+            MDC.remove("orderId");
+        }
     }
 }

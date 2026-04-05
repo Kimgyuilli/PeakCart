@@ -7,6 +7,7 @@ import com.peekcart.payment.domain.model.Payment;
 import com.peekcart.payment.domain.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,12 +36,17 @@ public class PaymentEventConsumer {
         String eventId = root.get("eventId").asText();
         JsonNode payload = root.get("payload");
 
-        idempotencyChecker.executeIfNew(eventId, GROUP_ORDER_CREATED, () -> {
-            Long orderId = payload.get("orderId").asLong();
-            long totalAmount = payload.get("totalAmount").asLong();
-            Payment payment = Payment.create(orderId, totalAmount);
-            paymentRepository.save(payment);
-            log.debug("Payment(PENDING) 생성 — orderId={}", orderId);
-        });
+        try {
+            idempotencyChecker.executeIfNew(eventId, GROUP_ORDER_CREATED, () -> {
+                Long orderId = payload.get("orderId").asLong();
+                MDC.put("orderId", orderId.toString());
+                long totalAmount = payload.get("totalAmount").asLong();
+                Payment payment = Payment.create(orderId, totalAmount);
+                paymentRepository.save(payment);
+                log.debug("Payment(PENDING) 생성 — orderId={}", orderId);
+            });
+        } finally {
+            MDC.remove("orderId");
+        }
     }
 }

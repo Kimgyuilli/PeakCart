@@ -3,7 +3,7 @@
 
 prometheus:
   prometheusSpec:
-    retention: 2h
+    retention: 6h
     resources:
       requests:
         cpu: 100m
@@ -37,6 +37,13 @@ grafana:
   service:
     type: NodePort
     nodePort: 30030
+  additionalDataSources:
+    - name: prometheus
+      type: prometheus
+      uid: prometheus
+      url: http://kube-prometheus-stack-prometheus.monitoring:9090
+      access: proxy
+      isDefault: true
   grafana.ini:
     unified_alerting:
       enabled: true
@@ -44,7 +51,7 @@ grafana:
 alertmanager:
   enabled: false
 
-nodeExporter:
+prometheus-node-exporter:
   resources:
     requests:
       cpu: 25m
@@ -53,7 +60,7 @@ nodeExporter:
       cpu: 100m
       memory: 128Mi
 
-kubeStateMetrics:
+kube-state-metrics:
   resources:
     requests:
       cpu: 25m

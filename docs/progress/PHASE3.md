@@ -95,3 +95,29 @@
 - **Redis/Kafka PVC 추가**: Pod 재시작 시 JWT 블랙리스트 유실(보안 이슈) 및 Kafka 미소비 메시지 유실 방지. MySQL과 동일하게 PVC 영속화.
 - **startupProbe 도입**: Spring Boot 기동 시간이 `livenessProbe.initialDelaySeconds`를 초과하면 Pod가 kill되는 문제 방지. startupProbe가 기동 완료를 보장한 후 liveness/readiness가 동작.
 - **K8s 권장 labels**: Task 3-3 ServiceMonitor selector 설정 연계를 위해 `app.kubernetes.io/*` labels 사전 추가.
+
+### 2026-04-05
+
+#### Task 3-3: kube-prometheus-stack 완료
+
+**완료 항목**:
+- `build.gradle` — `micrometer-registry-prometheus` + `logstash-logback-encoder:8.0` 의존성 추가
+- `application-k8s.yml` — Actuator 엔드포인트 `health,prometheus` 노출
+- `SecurityConfig` — `/actuator/prometheus` 공개 URL 추가 + `MdcFilter` 등록 (JwtFilter 뒤)
+- `logback-spring.xml` — `springProfile` 기반 분기: k8s=JSON (`LogstashEncoder`), local=plain text (Spring Boot 기본)
+- `MdcFilter` — 요청마다 `traceId`(UUID 16자리) + `userId`(SecurityContext) MDC 설정
+- `k8s/monitoring/values-prometheus.yml` — minikube 경량 Helm values (총 ~1.2GB, Alertmanager 비활성화)
+- `k8s/monitoring/install.sh` — Helm 설치 스크립트
+- `k8s/monitoring/servicemonitor.yml` — PeekCart 메트릭 스크래핑 (15초 간격, `/actuator/prometheus`)
+- `k8s/app/peekcart-deployment.yml` — Service 포트 `name: http` 추가 (ServiceMonitor 연계)
+- `k8s/monitoring/dashboards/` — Grafana 대시보드 3개 (API&JVM, Kafka Lag, Pod Resources&HPA) + ConfigMap 프로비저닝
+- `k8s/monitoring/alerts/grafana-alerts.yml` — Grafana unified alerting 규칙 2개 (5xx 에러율 5% 초과, p95 응답시간 2s 초과)
+
+**주요 결정**:
+- **트레이싱 방식**: MDC UUID 수동 생성. Brave/Zipkin 미도입 — 모놀리스 Phase에서 cross-service tracing 불필요. Phase 4 MSA 전환 시 Micrometer Tracing 도입 예정.
+- **Actuator 노출 범위**: `health,prometheus`만 노출. `metrics`, `env` 등은 보안상 비노출. SecurityConfig에 `/actuator/prometheus` 단일 추가 (와일드카드 `/actuator/**` 회피).
+- **로깅 분기 전략**: `logback-spring.xml`의 `springProfile`로 k8s/local 분기. 로컬 개발 영향 없음 (plain text 유지). `LogstashEncoder`가 MDC 필드(`traceId`, `userId`, `orderId`)를 JSON에 자동 포함.
+- **모니터링 네임스페이스 분리**: `monitoring` 네임스페이스 별도 생성. kube-prometheus-stack CRD/RBAC를 `peekcart`와 분리하여 관심사 격리.
+- **Alertmanager 비활성화**: Grafana unified alerting으로 대체. 스택 단순화 + minikube 리소스 절약.
+- **Kafka 모니터링**: JMX exporter 없이 Micrometer consumer lag 메트릭만 수집. `kafka_consumer_fetch_manager_records_lag_max`로 consumer 관점 lag 모니터링 충분.
+- **리소스 할당**: Prometheus 512Mi, Grafana 256Mi, node-exporter 128Mi, kube-state-metrics 128Mi, operator 128Mi. 모니터링 총 ~1.2GB — 기존 인프라 ~2.5GB + App 1Gi와 합쳐 minikube 8GB 내 수용.

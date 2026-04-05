@@ -351,20 +351,20 @@
 ---
 
 ### Task 3-3: kube-prometheus-stack
-**상태**: 🔲 대기
+**상태**: ✅ 완료
 **목표**: Prometheus + Grafana 구축, 모니터링 대시보드 설정
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| `build.gradle` micrometer-prometheus 의존성 추가 | 🔲 | Spring Boot Actuator + Prometheus 엔드포인트 |
-| `application.yml` Actuator/Prometheus 설정 | 🔲 | |
-| 구조화된 로깅 설정 (JSON 포맷 + MDC traceId/userId/orderId) | 🔲 | `docs/03-requirements.md` 7-6, Logback JSON encoder |
-| kube-prometheus-stack Helm 설치 | 🔲 | |
-| ServiceMonitor 설정 (PeekCart 메트릭 수집) | 🔲 | |
-| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | 🔲 | `docs/03-requirements.md` 7-3 |
-| Kafka Lag 모니터링 대시보드 | 🔲 | |
-| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | 🔲 | `docs/03-requirements.md` 7-3 |
-| Grafana Alert 설정 (에러율/응답시간 임계치) | 🔲 | 임계치 초과 시 알림 (`docs/03-requirements.md` 7-3) |
+| `build.gradle` micrometer-prometheus 의존성 추가 | ✅ | `micrometer-registry-prometheus` + `logstash-logback-encoder:8.0` |
+| `application.yml` Actuator/Prometheus 설정 | ✅ | `application-k8s.yml`에 `health,prometheus` 엔드포인트 노출 |
+| 구조화된 로깅 설정 (JSON 포맷 + MDC traceId/userId/orderId) | ✅ | `logback-spring.xml` (`springProfile`: k8s=JSON, local=plain text) + `MdcFilter` |
+| kube-prometheus-stack Helm 설치 | ✅ | `k8s/monitoring/values-prometheus.yml` + `install.sh`, minikube 경량 설정 (~1.2GB) |
+| ServiceMonitor 설정 (PeekCart 메트릭 수집) | ✅ | `k8s/monitoring/servicemonitor.yml`, Service 포트 `name: http` 추가 |
+| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | ✅ | `k8s/monitoring/dashboards/api-jvm-dashboard.json`, ConfigMap sidecar 자동 로드 |
+| Kafka Lag 모니터링 대시보드 | ✅ | `k8s/monitoring/dashboards/kafka-lag-dashboard.json`, Micrometer consumer lag 메트릭 |
+| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | ✅ | `k8s/monitoring/dashboards/pod-resources-dashboard.json`, HPA 패널 사전 구성 |
+| Grafana Alert 설정 (에러율/응답시간 임계치) | ✅ | `k8s/monitoring/alerts/grafana-alerts.yml`, 5xx>5% / p95>2s (2분 지속) |
 
 **완료 기준**: Grafana에서 API 응답시간/에러율/Kafka Lag/Pod 리소스 실시간 모니터링 + Alert 동작 확인
 
@@ -446,3 +446,4 @@
 | 2026-04-04 | Task 3-1 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: `.dockerignore` 추가(P0 빌드 컨텍스트 경량화), JAR 파일명 고정 `app.jar`(P1 글로브 제거), Docker 레이어 캐시 GHA(P1), CI concurrency 설정(P2 중복 실행 방지). plain JAR 비활성화 |
 | 2026-04-04 | Task 3-2 완료 | minikube K8s 배포 매니페스트 (Namespace, MySQL+PVC, Redis, Kafka KRaft, ConfigMap/Secret, PeekCart Deployment+NodePort 30080, Actuator Liveness/Readiness Probe). application-k8s.yml 프로파일 추가, spring-boot-starter-actuator 의존성 추가, SecurityConfig actuator 공개 URL 추가. 전체 235건 테스트 통과 |
 | 2026-04-04 | Task 3-2 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: MySQL 크레덴셜 `secretKeyRef` 참조(P1 하드코딩 제거), Redis/Kafka PVC 추가(P1 데이터 영속화), `startupProbe` 추가(P2 기동 지연 안전), K8s 권장 labels 추가(P2 ServiceMonitor 연계). 전체 235건 테스트 통과 |
+| 2026-04-05 | Task 3-3 완료 | kube-prometheus-stack 모니터링 구축: Micrometer Prometheus + LogstashEncoder 의존성, Actuator prometheus 엔드포인트 노출, MdcFilter(traceId/userId), logback-spring.xml(k8s=JSON/local=plain), Helm values + install.sh, ServiceMonitor, Grafana 대시보드 3개(API&JVM/Kafka Lag/Pod Resources) + Alert 2개(에러율 5%/응답시간 2s). 전체 235건 테스트 통과 |

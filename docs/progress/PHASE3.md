@@ -137,3 +137,31 @@
 **주요 결정**:
 - **P0 metrics.tags.application**: Spring Boot 3.x에서 `spring.application.name`이 Micrometer `application` 태그에 자동 매핑되지 않음. `management.metrics.tags.application` 명시 필수. 이 설정 없이는 대시보드 6개 패널 + Alert 2개 모두 `No data`.
 - **orderId MDC 위치**: HTTP 요청 흐름은 MdcFilter가 `MDC.clear()`하므로 `MDC.put`만 호출. Kafka Consumer는 MdcFilter가 동작하지 않으므로 `try-finally { MDC.remove("orderId") }`로 명시적 정리.
+
+#### Task 3-3: minikube 검증 + 매니페스트 수정
+
+**완료 항목**:
+- `k8s/app/peekcart-deployment.yml` — Service `metadata.labels`에 `app: peekcart` 추가. ServiceMonitor `selector.matchLabels`는 Service의 메타데이터 레이블을 매칭하므로 필수.
+- `k8s/monitoring/servicemonitor.yml` — `release: kube-prometheus-stack` 레이블 추가. Prometheus `serviceMonitorSelector`가 이 레이블을 요구.
+- `k8s/monitoring/values-prometheus.yml` — `serviceMonitorNamespaceSelector: {}` 전체 네임스페이스 허용. `peekcart` 전용이면 `monitoring` 네임스페이스의 kubelet/kube-state-metrics 등이 dropped.
+- `k8s/monitoring/values-prometheus.yml` — `additionalDataSources` 제거. Helm 차트가 자동 프로비저닝하는 기본 datasource(uid: `prometheus`)와 중복되어 Grafana 기동 실패.
+
+**minikube 검증 결과**:
+
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| `application="peekcart"` 메트릭 태그 | ✅ | `curl /actuator/prometheus`로 검증 |
+| Prometheus 타겟 | ✅ | 16개 active (peekcart + kubelet + kube-state-metrics 등) |
+| API & JVM 대시보드 | ⚠️ 부분 | JVM Heap/GC Pause 정상. API Response Time/Error Rate/RPS는 HTTP 트래픽 없어 No data (정상) |
+| Kafka Consumer Lag 대시보드 | ✅ | 전체 패널 데이터 표시 |
+| Pod Resources & HPA 대시보드 | ⚠️ 부분 | Pod Restarts 정상. CPU/Memory는 cAdvisor 수집 지연 추정. HPA는 Task 3-5에서 설정 예정 |
+| Grafana Alert | ❓ | Alerting → Alert rules 확인 필요 |
+
+**추가 확인 필요 항목** (Task 3-4 부하 테스트 시 연계 확인):
+- API Response Time/Error Rate/RPS 패널: HTTP 트래픽 발생 후 데이터 표시 여부
+- Pod CPU/Memory 패널: cAdvisor 메트릭 수집 정상화 여부
+- Grafana Alert 2개: 프로비저닝 + 동작 확인
+
+**주요 결정**:
+- **serviceMonitorNamespaceSelector 전체 허용**: minikube 단일 클러스터에서 네임스페이스를 제한하면 monitoring 네임스페이스의 기본 ServiceMonitor(kubelet, kube-state-metrics 등)가 전부 dropped. 보안보다 관측성 우선.
+- **additionalDataSources 제거**: kube-prometheus-stack Helm 차트가 기본 Prometheus datasource를 `uid: prometheus`로 자동 프로비저닝. 수동 추가 시 "Only one datasource per organization can be marked as default" 에러로 Grafana 기동 실패.

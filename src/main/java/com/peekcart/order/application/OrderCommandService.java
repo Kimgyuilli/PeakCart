@@ -12,6 +12,7 @@ import com.peekcart.order.domain.repository.CartRepository;
 import com.peekcart.order.domain.repository.OrderRepository;
 import com.peekcart.order.infrastructure.outbox.OrderOutboxEventPublisher;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,6 +66,9 @@ public class OrderCommandService {
                 itemDataList
         );
         orderRepository.save(order);
+        if (order.getId() != null) {
+            MDC.put("orderId", order.getId().toString());
+        }
 
         cart.clear();
 
@@ -79,6 +83,7 @@ public class OrderCommandService {
      * @throws OrderException 주문이 없으면 {@code ORD-001}, 취소 불가 상태면 {@code ORD-003}
      */
     public void cancelOrder(Long userId, Long orderId) {
+        MDC.put("orderId", orderId.toString());
         Order order = orderRepository.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
 
@@ -98,6 +103,7 @@ public class OrderCommandService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void cancelExpiredOrder(Long orderId) {
+        MDC.put("orderId", orderId.toString());
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
 

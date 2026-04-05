@@ -1,5 +1,6 @@
 package com.peekcart.global.config;
 
+import com.peekcart.global.filter.MdcFilter;
 import com.peekcart.global.jwt.JwtFilter;
 import com.peekcart.global.jwt.JwtProvider;
 import com.peekcart.global.security.JwtAccessDeniedHandler;
@@ -43,7 +44,8 @@ public class SecurityConfig {
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/api-docs/**",
-            "/actuator/health/**"
+            "/actuator/health/**",
+            "/actuator/prometheus"
     };
 
     /**
@@ -65,7 +67,8 @@ public class SecurityConfig {
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler)
                 )
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(new MdcFilter(), JwtFilter.class);
 
         return http.build();
     }

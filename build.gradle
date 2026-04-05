@@ -47,6 +47,12 @@ dependencies {
 	// Actuator
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
+	// Micrometer Prometheus
+	implementation 'io.micrometer:micrometer-registry-prometheus'
+
+	// Structured Logging
+	implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
+
 	// Kafka
 	implementation 'org.springframework.kafka:spring-kafka'
 

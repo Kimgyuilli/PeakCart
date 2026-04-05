@@ -1,0 +1,72 @@
+# kube-prometheus-stack Helm values — minikube 경량 설정
+# minikube 8GB 환경: 모니터링 총 ~1.2GB 이내
+
+prometheus:
+  prometheusSpec:
+    retention: 2h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    serviceMonitorNamespaceSelector:
+      matchNames:
+        - peekcart
+    serviceMonitorSelector: {}
+    podMonitorSelector: {}
+    storageSpec: {}
+
+grafana:
+  adminPassword: admin
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+    alerts:
+      enabled: true
+      searchNamespace: ALL
+  service:
+    type: NodePort
+    nodePort: 30030
+  grafana.ini:
+    unified_alerting:
+      enabled: true
+
+alertmanager:
+  enabled: false
+
+nodeExporter:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+kubeStateMetrics:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

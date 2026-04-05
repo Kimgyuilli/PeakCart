@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alerting-rules
+  namespace: monitoring
+  labels:
+    grafana_alert: "1"
+data:
+  alerts.yaml: |-
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: PeekCart Alerts
+        folder: PeekCart
+        interval: 1m
+        rules:
+          - uid: peekcart-high-error-rate
+            title: "High Error Rate (5xx > 5%)"
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: prometheus
+                model:
+                  expr: "sum(rate(http_server_requests_seconds_count{application=\"peekcart\", status=~\"5..\"}[5m]))"
+                  instant: false
+                  range: true
+              - refId: B
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: prometheus
+                model:
+                  expr: "sum(rate(http_server_requests_seconds_count{application=\"peekcart\"}[5m]))"
+                  instant: false
+                  range: true
+              - refId: C
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  type: math
+                  expression: "($A / $B) * 100 > 5"
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "PeekCart 5xx 에러율 5% 초과"
+              description: "최근 5분간 5xx 에러율이 5%를 초과했습니다."
+          - uid: peekcart-slow-response
+            title: "Slow API Response (p95 > 2s)"
+            condition: B
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: prometheus
+                model:
+                  expr: "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"peekcart\", uri!~\"/actuator.*\"}[5m])) by (le))"
+                  instant: false
+                  range: true
+              - refId: B
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator:
+                        type: gt
+                        params: [2]
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PeekCart API p95 응답시간 2초 초과"
+              description: "최근 5분간 API p95 응답시간이 2초를 초과했습니다."

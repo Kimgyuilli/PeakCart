@@ -121,3 +121,19 @@
 - **Alertmanager 비활성화**: Grafana unified alerting으로 대체. 스택 단순화 + minikube 리소스 절약.
 - **Kafka 모니터링**: JMX exporter 없이 Micrometer consumer lag 메트릭만 수집. `kafka_consumer_fetch_manager_records_lag_max`로 consumer 관점 lag 모니터링 충분.
 - **리소스 할당**: Prometheus 512Mi, Grafana 256Mi, node-exporter 128Mi, kube-state-metrics 128Mi, operator 128Mi. 모니터링 총 ~1.2GB — 기존 인프라 ~2.5GB + App 1Gi와 합쳐 minikube 8GB 내 수용.
+
+#### Task 3-3: 코드 리뷰 개선 (P0~P2)
+
+**완료 항목**:
+- `application-k8s.yml` — `management.metrics.tags.application: peekcart` 추가. 모든 PromQL 쿼리의 `{application="peekcart"}` 레이블 매칭 보장 (P0)
+- `OrderCommandService` — `createOrder`/`cancelOrder`/`cancelExpiredOrder`에 `MDC.put("orderId", ...)` 추가 (P1)
+- `OrderEventConsumer`/`PaymentEventConsumer`/`NotificationConsumer` — Kafka Consumer 5개 핸들러에 `MDC.put("orderId", ...)` + `try-finally MDC.remove()` 추가 (P1)
+- `values-prometheus.yml` — Grafana `additionalDataSources`에 `uid: prometheus` 명시적 프로비저닝 (P1)
+- `values-prometheus.yml` — subchart 리소스 키 수정: `nodeExporter` → `prometheus-node-exporter`, `kubeStateMetrics` → `kube-state-metrics` (P2)
+- `values-prometheus.yml` — `retention: 2h` → `6h` (Task 3-4 부하 테스트 사후 분석 여유 확보) (P2)
+- `configmap.yml` + `pod-resources-dashboard.json` — Pod CPU Usage 단위 `short` → `percentunit` (P2)
+- `install.sh` — `helm install` → `helm upgrade --install` 멱등성 확보 (P2)
+
+**주요 결정**:
+- **P0 metrics.tags.application**: Spring Boot 3.x에서 `spring.application.name`이 Micrometer `application` 태그에 자동 매핑되지 않음. `management.metrics.tags.application` 명시 필수. 이 설정 없이는 대시보드 6개 패널 + Alert 2개 모두 `No data`.
+- **orderId MDC 위치**: HTTP 요청 흐름은 MdcFilter가 `MDC.clear()`하므로 `MDC.put`만 호출. Kafka Consumer는 MdcFilter가 동작하지 않으므로 `try-finally { MDC.remove("orderId") }`로 명시적 정리.

@@ -357,13 +357,13 @@
 | 항목 | 상태 | 비고 |
 |------|------|------|
 | `build.gradle` micrometer-prometheus 의존성 추가 | ✅ | `micrometer-registry-prometheus` + `logstash-logback-encoder:8.0` |
-| `application.yml` Actuator/Prometheus 설정 | ✅ | `application-k8s.yml`에 `health,prometheus` 엔드포인트 노출 |
-| 구조화된 로깅 설정 (JSON 포맷 + MDC traceId/userId/orderId) | ✅ | `logback-spring.xml` (`springProfile`: k8s=JSON, local=plain text) + `MdcFilter` |
-| kube-prometheus-stack Helm 설치 | ✅ | `k8s/monitoring/values-prometheus.yml` + `install.sh`, minikube 경량 설정 (~1.2GB) |
+| `application.yml` Actuator/Prometheus 설정 | ✅ | `application-k8s.yml`에 `health,prometheus` 엔드포인트 노출, `metrics.tags.application: peekcart` 추가 (코드리뷰 P0) |
+| 구조화된 로깅 설정 (JSON 포맷 + MDC traceId/userId/orderId) | ✅ | `logback-spring.xml` (`springProfile`: k8s=JSON, local=plain text) + `MdcFilter` + Kafka Consumer/OrderCommandService에 `orderId` MDC 추가 (코드리뷰 P1) |
+| kube-prometheus-stack Helm 설치 | ✅ | `k8s/monitoring/values-prometheus.yml` + `install.sh`(`helm upgrade --install` 멱등성), minikube 경량 설정 (~1.2GB), datasource uid 프로비저닝, subchart 키 수정 (코드리뷰 P1~P2) |
 | ServiceMonitor 설정 (PeekCart 메트릭 수집) | ✅ | `k8s/monitoring/servicemonitor.yml`, Service 포트 `name: http` 추가 |
 | Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | ✅ | `k8s/monitoring/dashboards/api-jvm-dashboard.json`, ConfigMap sidecar 자동 로드 |
 | Kafka Lag 모니터링 대시보드 | ✅ | `k8s/monitoring/dashboards/kafka-lag-dashboard.json`, Micrometer consumer lag 메트릭 |
-| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | ✅ | `k8s/monitoring/dashboards/pod-resources-dashboard.json`, HPA 패널 사전 구성 |
+| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | ✅ | `k8s/monitoring/dashboards/pod-resources-dashboard.json`, HPA 패널 사전 구성, CPU 단위 `percentunit` 수정 (코드리뷰 P2) |
 | Grafana Alert 설정 (에러율/응답시간 임계치) | ✅ | `k8s/monitoring/alerts/grafana-alerts.yml`, 5xx>5% / p95>2s (2분 지속) |
 
 **완료 기준**: Grafana에서 API 응답시간/에러율/Kafka Lag/Pod 리소스 실시간 모니터링 + Alert 동작 확인
@@ -447,3 +447,4 @@
 | 2026-04-04 | Task 3-2 완료 | minikube K8s 배포 매니페스트 (Namespace, MySQL+PVC, Redis, Kafka KRaft, ConfigMap/Secret, PeekCart Deployment+NodePort 30080, Actuator Liveness/Readiness Probe). application-k8s.yml 프로파일 추가, spring-boot-starter-actuator 의존성 추가, SecurityConfig actuator 공개 URL 추가. 전체 235건 테스트 통과 |
 | 2026-04-04 | Task 3-2 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 4건 개선: MySQL 크레덴셜 `secretKeyRef` 참조(P1 하드코딩 제거), Redis/Kafka PVC 추가(P1 데이터 영속화), `startupProbe` 추가(P2 기동 지연 안전), K8s 권장 labels 추가(P2 ServiceMonitor 연계). 전체 235건 테스트 통과 |
 | 2026-04-05 | Task 3-3 완료 | kube-prometheus-stack 모니터링 구축: Micrometer Prometheus + LogstashEncoder 의존성, Actuator prometheus 엔드포인트 노출, MdcFilter(traceId/userId), logback-spring.xml(k8s=JSON/local=plain), Helm values + install.sh, ServiceMonitor, Grafana 대시보드 3개(API&JVM/Kafka Lag/Pod Resources) + Alert 2개(에러율 5%/응답시간 2s). 전체 235건 테스트 통과 |
+| 2026-04-05 | Task 3-3 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 7건 개선: `metrics.tags.application` 추가(P0 PromQL 전체 불일치), orderId MDC 추가(P1 설계 문서 불일치), Grafana datasource uid 프로비저닝(P1), Helm subchart 리소스 키 수정(P2), retention 2h→6h(P2), Pod CPU 단위 수정(P2), install.sh 멱등성(P2). 전체 235건 테스트 통과 |

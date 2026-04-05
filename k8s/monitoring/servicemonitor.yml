@@ -6,6 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: peekcart
     app.kubernetes.io/part-of: peekcart
+    release: kube-prometheus-stack
 spec:
   selector:
     matchLabels:

@@ -60,6 +60,8 @@ kind: Service
 metadata:
   name: peekcart
   namespace: peekcart
+  labels:
+    app: peekcart
 spec:
   type: NodePort
   selector:

@@ -77,6 +77,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 | ERD / 인덱스 전략 | `docs/05-data-design.md` | DB 스키마 / Flyway 작성 시 |
 | 테스트 전략 | `docs/06-testing-strategy.md` | 테스트 코드 작성 시 |
 | 로드맵 / 포트폴리오 | `docs/07-roadmap-portfolio.md` | Phase 범위 확인 시 |
+| 아키텍처 결정 이력 (ADR) | `docs/adr/README.md` | 결정 근거/트레이드오프 확인 시 |
+
+> **문서 레이어 원칙**: Layer 1 (01~07) = 현재 상태(What) · Layer 2 (adr/) = 결정 근거(Why, immutable) · Layer 3 (progress/) = 작업 이력(When).
+> 새 결정 시 ADR을 먼저 작성하고, Layer 1에서는 `(see ADR-NNNN)` 형태로 참조합니다.
 
 ### 아키텍처 규칙 (4-Layered + DDD)
 

@@ -16,5 +16,11 @@
 > Status 컬럼 값: `Proposed` · `Accepted` · `Deprecated` · `Superseded`
 
 <!-- INDEX:BEGIN -->
-_아직 등록된 ADR이 없습니다._
+| # | 제목 | Status | Phase | 관련 Layer 1 문서 |
+|---|------|--------|-------|-------------------|
+| [0001](./0001-layered-ddd-architecture.md) | 4-Layered + DDD 아키텍처 채택 | Accepted | 전체 | 02, 04 |
+| [0002](./0002-monolith-to-msa-evolution.md) | 모놀리식 → MSA 단계적 진화 전략 | Accepted | 전체 | 02, 07 |
+| [0003](./0003-phase1-2-local-minikube.md) | Phase 1·2 로컬 minikube 환경 채택 | Superseded | Phase 1·2 | 02, 04 |
+| [0004](./0004-phase3-gcp-gke-migration.md) | Phase 3 GCP/GKE 환경 전환 | Accepted | Phase 3+ | 01, 04, 07 |
+| [0005](./0005-kustomize-base-overlays-structure.md) | Kustomize base/overlays 매니페스트 구조 | Accepted | Phase 3+ | 02 |
 <!-- INDEX:END -->

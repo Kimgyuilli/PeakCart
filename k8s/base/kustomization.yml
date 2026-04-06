@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# PeekCart base — 환경 비종속 매니페스트 (ADR-0005)
+# 환경별 차이는 k8s/overlays/{minikube,gke}/ 에서 patch.
+#
+# 네임스페이스는 각 매니페스트에 명시적으로 선언되어 있습니다
+# (peekcart 도메인 리소스는 peekcart, Grafana 대시보드/알람 ConfigMap 은 monitoring).
+# kustomize `namespace:` 필드는 사용하지 않습니다 — 모든 리소스를 한 NS 로 강제하기 때문.
+
+resources:
+  - namespace.yml
+  - infra/mysql/mysql.yml
+  - infra/redis/redis.yml
+  - infra/kafka/kafka.yml
+  - services/peekcart/deployment.yml
+  - services/peekcart/configmap.yml
+  - services/peekcart/secret.yml
+  - monitoring/servicemonitor.yml
+  - monitoring/dashboards/configmap.yml
+  - monitoring/alerts/grafana-alerts.yml

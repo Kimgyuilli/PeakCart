@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# GKE overlay — Phase 3 Task 3-4 부하 테스트 / Phase 4 운영 환경 (ADR-0004 / ADR-0005)
+#
+# Task 3-4 Step 0 에서 다음 패치를 추가할 예정:
+#   - StorageClass 명시 (standard-rwo)
+#   - 이미지 태그를 Artifact Registry 경로로 교체
+#   - peekcart Service 를 LoadBalancer (Internal LB) 로 변경
+#   - resources requests/limits 를 GKE 노드 크기에 맞게 상향
+#
+# 현재는 base 를 그대로 참조하는 placeholder 입니다.
+
+resources:
+  - ../../base

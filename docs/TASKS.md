@@ -333,18 +333,18 @@
 | 항목 | 상태 | 비고 |
 |------|------|------|
 | minikube 환경 설정 (CPU 4코어, Memory 8GB) | ✅ | 매니페스트 resource limits 반영, minikube start는 사용자 실행 |
-| Namespace 생성 (`peekcart`) | ✅ | `k8s/namespace.yml` |
+| Namespace 생성 (`peekcart`) | ✅ | `k8s/base/namespace.yml` |
 | `application-k8s.yml` 환경 profile 작성 | ✅ | K8s Service DNS 접속, Actuator health probe 노출 |
-| ConfigMap / Secret 매니페스트 | ✅ | `k8s/app/configmap.yml` + `k8s/app/secret.yml` |
-| MySQL Deployment + Service + PVC | ✅ | `k8s/infra/mysql-deployment.yml`, PVC 1Gi, 크레덴셜 `secretKeyRef` 참조 |
-| Redis Deployment + Service + PVC | ✅ | `k8s/infra/redis-deployment.yml`, PVC 512Mi (JWT 블랙리스트 영속화) |
-| Kafka (KRaft) Deployment + Service + PVC | ✅ | `k8s/infra/kafka-deployment.yml`, KRaft 단일 노드, PVC 1Gi |
-| PeekCart Application Deployment + Service | ✅ | `k8s/app/peekcart-deployment.yml`, GHCR 이미지, `imagePullPolicy: Never` (로컬 빌드), `startupProbe` 포함 |
+| ConfigMap / Secret 매니페스트 | ✅ | `k8s/base/services/peekcart/configmap.yml` + `secret.yml` |
+| MySQL Deployment + Service + PVC | ✅ | `k8s/base/infra/mysql/mysql.yml`, PVC 1Gi, 크레덴셜 `secretKeyRef` 참조 |
+| Redis Deployment + Service + PVC | ✅ | `k8s/base/infra/redis/redis.yml`, PVC 512Mi (JWT 블랙리스트 영속화) |
+| Kafka (KRaft) Deployment + Service + PVC | ✅ | `k8s/base/infra/kafka/kafka.yml`, KRaft 단일 노드, PVC 1Gi |
+| PeekCart Application Deployment + Service | ✅ | `k8s/base/services/peekcart/deployment.yml`, GHCR 이미지, `startupProbe` 포함 (`imagePullPolicy: Never` 는 minikube overlay 패치) |
 | Liveness / Readiness / Startup Probe 설정 | ✅ | Actuator `/actuator/health/liveness`, `/actuator/health/readiness`, `startupProbe`(최대 150초 기동 대기) |
-| Ingress 또는 NodePort 설정 | ✅ | NodePort 30080 (minikube 환경 단순성 우선) |
+| Ingress 또는 NodePort 설정 | ✅ | NodePort 30080 — minikube overlay 에서 패치 적용 (`k8s/overlays/minikube/patches/peekcart-service.yml`) |
 | 전체 서비스 정상 기동 검증 | ✅ | minikube 전체 Pod Running + Swagger UI 접근 확인 완료 |
 
-> **k8s 디렉토리 구조**: 본 Task 완료 시점에서는 `k8s/app/`, `k8s/infra/`, `k8s/monitoring/` 평면 구조였습니다. Task 3-4 Step 0 에서 Kustomize `base/` + `overlays/{minikube,gke}/` 구조로 재배치 예정 (ADR-0005). 상세 트리는 `docs/02-architecture.md` §12 Phase 3 섹션.
+> **k8s 디렉토리 구조**: Phase 3 GCP 재설계 작업으로 Kustomize `base/` + `overlays/{minikube,gke}/` 구조로 재배치 완료 (ADR-0005). 배포는 `kubectl apply -k k8s/overlays/minikube/` 또는 `k8s/overlays/gke/`. 상세 트리는 `docs/02-architecture.md` §12 Phase 3 섹션.
 
 **완료 기준 (minikube 범위)**: `kubectl get pods -n peekcart` 전체 Running, API 호출 정상 응답 — **완료됨**
 
@@ -364,12 +364,12 @@
 | `build.gradle` micrometer-prometheus 의존성 추가 | ✅ | `micrometer-registry-prometheus` + `logstash-logback-encoder:8.0` |
 | `application.yml` Actuator/Prometheus 설정 | ✅ | `application-k8s.yml`에 `health,prometheus` 엔드포인트 노출, `metrics.tags.application: peekcart` 추가 (코드리뷰 P0) |
 | 구조화된 로깅 설정 (JSON 포맷 + MDC traceId/userId/orderId) | ✅ | `logback-spring.xml` (`springProfile`: k8s=JSON, local=plain text) + `MdcFilter` + Kafka Consumer/OrderCommandService에 `orderId` MDC 추가 (코드리뷰 P1) |
-| kube-prometheus-stack Helm 설치 | ✅ | `k8s/monitoring/values-prometheus.yml` + `install.sh`(`helm upgrade --install` 멱등성), minikube 경량 설정 (~1.2GB), subchart 키 수정, `serviceMonitorNamespaceSelector: {}` 전체 네임스페이스 허용 (minikube 검증) |
-| ServiceMonitor 설정 (PeekCart 메트릭 수집) | ✅ | `k8s/monitoring/servicemonitor.yml`, Service 포트 `name: http` + `app: peekcart` 레이블 추가, `release: kube-prometheus-stack` 레이블 추가 (minikube 검증) |
-| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | ✅ | `k8s/monitoring/dashboards/api-jvm-dashboard.json`, ConfigMap sidecar 자동 로드 |
-| Kafka Lag 모니터링 대시보드 | ✅ | `k8s/monitoring/dashboards/kafka-lag-dashboard.json`, Micrometer consumer lag 메트릭 |
-| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | ✅ | `k8s/monitoring/dashboards/pod-resources-dashboard.json`, HPA 패널 사전 구성, CPU 단위 `percentunit` 수정 (코드리뷰 P2) |
-| Grafana Alert 설정 (에러율/응답시간 임계치) | ✅ | `k8s/monitoring/alerts/grafana-alerts.yml`, 5xx>5% / p95>2s (2분 지속) |
+| kube-prometheus-stack Helm 설치 | ✅ | `k8s/base/monitoring/values-prometheus.yml` + `install.sh`(`helm upgrade --install` 멱등성), minikube 경량 설정 (~1.2GB), subchart 키 수정, `serviceMonitorNamespaceSelector: {}` 전체 네임스페이스 허용 (minikube 검증) |
+| ServiceMonitor 설정 (PeekCart 메트릭 수집) | ✅ | `k8s/base/monitoring/servicemonitor.yml`, Service 포트 `name: http` + `app: peekcart` 레이블 추가, `release: kube-prometheus-stack` 레이블 추가 (minikube 검증) |
+| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | ✅ | `k8s/base/monitoring/dashboards/api-jvm-dashboard.json`, ConfigMap sidecar 자동 로드 |
+| Kafka Lag 모니터링 대시보드 | ✅ | `k8s/base/monitoring/dashboards/kafka-lag-dashboard.json`, Micrometer consumer lag 메트릭 |
+| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | ✅ | `k8s/base/monitoring/dashboards/pod-resources-dashboard.json`, HPA 패널 사전 구성, CPU 단위 `percentunit` 수정 (코드리뷰 P2) |
+| Grafana Alert 설정 (에러율/응답시간 임계치) | ✅ | `k8s/base/monitoring/alerts/grafana-alerts.yml`, 5xx>5% / p95>2s (2분 지속) |
 
 **완료 기준**: Grafana에서 API 응답시간/에러율/Kafka Lag/Pod 리소스 실시간 모니터링 + Alert 동작 확인
 

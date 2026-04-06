@@ -23,7 +23,6 @@ spec:
       containers:
         - name: peekcart
           image: ghcr.io/kimgyuilli/peakcart:latest
-          imagePullPolicy: Never
           ports:
             - containerPort: 8080
           envFrom:
@@ -63,11 +62,10 @@ metadata:
   labels:
     app: peekcart
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: peekcart
   ports:
     - name: http
       port: 8080
       targetPort: 8080
-      nodePort: 30080

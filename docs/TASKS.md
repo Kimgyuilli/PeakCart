@@ -326,9 +326,9 @@
 
 ---
 
-### Task 3-2: minikube K8s 배포
-**상태**: ✅ 완료
-**목표**: K8s 매니페스트 작성, minikube에 전체 서비스 배포
+### Task 3-2: K8s 배포 (minikube 초기 / GKE 운영 전환)
+**상태**: ✅ 완료 (minikube 범위) · 🔄 GKE 마이그레이션은 Task 3-4 Step 0 에서 수행
+**목표**: K8s 매니페스트 작성. Phase 3 초기 검증은 로컬 minikube, 부하 테스트부터는 GKE 로 운영 전환 (ADR-0003, ADR-0004).
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
@@ -344,9 +344,14 @@
 | Ingress 또는 NodePort 설정 | ✅ | NodePort 30080 (minikube 환경 단순성 우선) |
 | 전체 서비스 정상 기동 검증 | ✅ | minikube 전체 Pod Running + Swagger UI 접근 확인 완료 |
 
-> **k8s 디렉토리 구조**: Phase 3에서는 `k8s/app/`, `k8s/infra/` 수준으로 구성합니다. Phase 4 MSA 전환 시 `k8s/order-service/`, `k8s/payment-service/` 등 서비스별 분리 예정 (`docs/02-architecture.md` Phase 4 패키지 구조 참고).
+> **k8s 디렉토리 구조**: 본 Task 완료 시점에서는 `k8s/app/`, `k8s/infra/`, `k8s/monitoring/` 평면 구조였습니다. Task 3-4 Step 0 에서 Kustomize `base/` + `overlays/{minikube,gke}/` 구조로 재배치 예정 (ADR-0005). 상세 트리는 `docs/02-architecture.md` §12 Phase 3 섹션.
 
-**완료 기준**: `kubectl get pods -n peekcart` 전체 Running, API 호출 정상 응답
+**완료 기준 (minikube 범위)**: `kubectl get pods -n peekcart` 전체 Running, API 호출 정상 응답 — **완료됨**
+
+**GKE 마이그레이션** (Task 3-4 Step 0 에서 수행):
+- GKE 클러스터 생성 (asia-northeast3-a, e2-standard-4 × 1)
+- Kustomize `overlays/gke/` 로 배포, Artifact Registry 이미지 전환
+- 상세 계획은 ADR-0004 참고
 
 ---
 
@@ -384,7 +389,7 @@
 | 시나리오 3: Kafka Consumer Lag 모니터링 | 🔲 | 목표: 정상 구간 Lag 0 유지 (Prometheus 대시보드 연계) |
 | 테스트 리포트 작성 (전/후 비교 수치) | 🔲 | |
 
-> **측정 환경 맥락** (`docs/04-design-deep-dive.md` 10-7): minikube 로컬 환경(macOS, CPU 4코어, Memory 8GB)에서 수행. 수치는 절대값보다 **개선 비율**(캐싱 전/후 TPS 비교, HPA 적용 전/후 처리량 변화)에 초점을 맞춥니다. 목표 수치는 baseline 측정 후 확정합니다.
+> **측정 환경** (`docs/04-design-deep-dive.md` §10-7, `docs/01-project-overview.md` §4): GCP GKE Standard (asia-northeast3-a, e2-standard-4 × 1). 부하 발생기는 같은 zone 의 별도 Compute Engine VM (e2-standard-2). 수치는 절대값보다 **개선 비율**(캐싱 전/후 TPS 비교, HPA 적용 전/후 처리량 변화)에 초점. 목표 수치는 baseline 측정 후 확정. 환경 전환 근거는 ADR-0004.
 
 **완료 기준**: 3개 시나리오 측정 결과 + 캐싱 전/후 TPS 비교 수치가 포함된 부하 테스트 리포트 완성
 
@@ -396,7 +401,7 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| metrics-server 설치 (minikube) | 🔲 | |
+| metrics-server 설치 (GKE 는 기본 제공) | 🔲 | minikube addon 불필요, GKE 는 Cloud Monitoring 연계 |
 | HPA 매니페스트 작성 (CPU 기반, min 1 / max 3) | 🔲 | |
 | nGrinder 부하 중 Pod 자동 증설 확인 | 🔲 | Task 3-4 부하 테스트와 연계 실행 (`docs/03-requirements.md` 7-1) |
 | Grafana에서 HPA 스케일 이벤트 + Pod 증설 시점 스크린샷 캡처 | 🔲 | Task 3-3 Grafana 대시보드 연계 |

@@ -62,7 +62,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 - **프로젝트명**: PeekCart (레포명: PeakCart)
 - **목적**: 대용량 트래픽 환경을 고려한 이커머스 플랫폼 — 포트폴리오
-- **스택**: Java 17 · Spring Boot 3.x · MySQL 8.x · Redis 7.x · Apache Kafka · Kubernetes (minikube)
+- **스택**: Java 17 · Spring Boot 3.x · MySQL 8.x · Redis 7.x · Apache Kafka · Kubernetes (환경별 상세: `docs/01-project-overview.md` §4)
 - **아키텍처**: 4-Layered + DDD, 모놀리식 → MSA (Phase 1~4)
 - **베이스 패키지**: `com.peekcart`
 

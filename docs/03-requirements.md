@@ -72,14 +72,15 @@
 
 ### 7-1. 성능
 
-> 목표 수치는 Phase 1 구현 완료 후 baseline 측정 기반으로 확정합니다.
-아래 수치는 일반적인 이커머스 레퍼런스 기준의 초기 목표값입니다.
+> 아래 수치는 일반적인 이커머스 레퍼런스 기준의 초기 목표값입니다. 최종 목표값은 Phase 3 Task 3-4 부하 테스트의 baseline 측정 결과로 확정합니다.
+>
+> **측정 환경**: GCP GKE (asia-northeast3-a, e2-standard-4), 부하 발생기는 같은 zone 의 별도 Compute Engine VM. 측정 방침 및 수치 해석은 `docs/04-design-deep-dive.md` §10-7, 환경 선택 근거는 ADR-0004 참고. 환경 요약은 `docs/01-project-overview.md` §4.
 >
 
 | 항목 | 목표 수치 | 측정 방법 |
 | --- | --- | --- |
 | 상품 목록 API 응답시간 | p99 기준 100ms 이하 | nGrinder 부하 테스트 |
-| Redis 캐싱 개선 효과 | 캐시 미적용 대비 TPS 3배 이상 | 캐싱 전/후 TPS 비교 |
+| Redis 캐싱 개선 효과 | 캐시 미적용 대비 TPS 3배 이상 | 캐싱 전/후 TPS 비교 (동일 GKE 환경 내) |
 | 동시 주문 처리 | 1,000 VUser 동시 주문 정합성 100% | JMeter 동시성 시나리오 |
 | 주문 이벤트 처리 | Kafka Consumer Lag 0 유지 (정상 구간) | Prometheus 모니터링 |
 | K8s HPA 스케일아웃 | 부하 급증 시 Pod 자동 증설 검증 | nGrinder + Grafana 연계 |

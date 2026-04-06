@@ -29,7 +29,7 @@ Phase 3 Exit Criteria의 "nGrinder 부하 테스트 리포트 (캐싱 전/후 TP
 - **부하 스택**: nGrinder + JMeter 조합 유지 (TASKS 명세 준수)
 - **이미지 레지스트리**: GCP Artifact Registry (`asia-northeast3-docker.pkg.dev/<project>/peekcart/*`)
 - **운영 패턴**: 측정 시에만 클러스터 기동, 종료 시 cluster delete + PD/VM 정리 (비용 최소화)
-- **Phase 1·2의 minikube 환경은 ADR-0003 유지**. `k8s/overlays/minikube/` 는 로컬 개발용 검증 환경으로 계속 사용
+- **Phase 3 Task 3-1~3-3 의 minikube 환경은 ADR-0003 유지**. `k8s/overlays/minikube/` 는 로컬 개발용 검증 환경으로 계속 사용 (Phase 1·2 는 Docker Compose 였음)
 
 ## Alternatives Considered
 
@@ -46,7 +46,7 @@ Phase 3 Exit Criteria의 "nGrinder 부하 테스트 리포트 (캐싱 전/후 TP
 - **단점**:
   - minikube 8GB 리소스 한계 (#1, #3) 는 그대로
   - 클라우드 VM → 집 인터넷 → 공유기 → macOS → minikube 경로로 **네트워크가 새로운 병목**이 됨. 가정용 업로드 대역폭(100Mbps↓)이 TPS 상한을 결정하게 되어 측정이 무의미
-- **기각 sue**: 한 문제를 해결하면서 더 큰 문제를 만듦
+- **기각 사유**: 한 문제를 해결하면서 더 큰 문제를 만듦
 
 ### Alternative C: Oracle Cloud Always Free (Ampere ARM 4 OCPU / 24GB)
 - **장점**: 진짜 $0. 리소스 여유 충분
@@ -69,13 +69,13 @@ Phase 3 Exit Criteria의 "nGrinder 부하 테스트 리포트 (캐싱 전/후 TP
 - 부하 테스트 측정값의 신뢰도 확보 (도구 병목 제거, 메모리 여유, 네트워크 최소화)
 - HPA 검증(Task 3-5) 을 원래 계획대로 max=3 까지 수행 가능
 - Phase 4 MSA 전환 시 클러스터 재사용 가능 (노드풀 scale 만 조정)
-- 포트폴리오 스토리텔링 확장 — "로컬 PoC(Phase 1·2) → 클라우드 측정(Phase 3) → MSA(Phase 4)" 의 환경 진화 서사 획득
-- 부하 테스트 결과에 "GKE / asia-northeast3 / e2-standard-4" 라는 재현 가능한 환경 명시 가능 (Phase 1·2 minikube 수치와 구분)
+- 포트폴리오 스토리텔링 확장 — "로컬 Docker Compose(Phase 1·2) → 로컬 K8s(Phase 3 초기 minikube) → 클라우드 측정(Phase 3 부하 테스트~) → MSA(Phase 4)" 의 환경 진화 서사 획득
+- 부하 테스트 결과에 "GKE / asia-northeast3 / e2-standard-4" 라는 재현 가능한 환경 명시 가능 (이전 minikube 환경 수치와 구분)
 
 ### 부정적 영향 / 트레이드오프
 - **예산 소비**: Phase 3 부하 테스트 ~₩5,500 + Phase 4 ~₩15,000 예상. 크레딧(₩453,008)의 ~5% 수준으로 여유 충분하지만 0은 아님
 - **운영 복잡도 증가** — 클러스터 기동/종료 루틴, PD/VM 정리 체크리스트 필요. 방치 시 크레딧 누수 리스크 (orphan disk 등)
-- **Phase 1·2 minikube 수치와 Phase 3 GKE 수치의 비교 불가** — 환경이 다르므로 동일 축 비교 불가. 다만 Phase 1·2에서 실제 부하 측정을 수행한 기록이 없어 비교 대상 자체가 존재하지 않음 → 실질 영향 없음
+- **Phase 3 초기 minikube 수치와 Phase 3 GKE 수치의 비교 불가** — 환경이 다르므로 동일 축 비교 불가. 다만 minikube 단계에서 실제 부하 측정을 수행한 기록이 없어 비교 대상 자체가 존재하지 않음 → 실질 영향 없음
 - **문서 재설계 비용** — Layer 1 문서(04 10-7 등) 의 환경 가정 갱신 필요. ADR 레이어 분리로 비용은 제한적
 
 ### 후속 결정에 미치는 영향

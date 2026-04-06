@@ -7,7 +7,7 @@
 
 ## Context
 
-ADR-0004 에서 Phase 3 부하 테스트부터 운영 환경을 GCP/GKE 로 전환하기로 결정했습니다. 동시에 ADR-0003 에 따라 **Phase 1·2 minikube 환경은 로컬 개발용으로 보존**해야 합니다. 또한 ADR-0002 의 Phase 4 MSA 전환 시 **서비스별 매니페스트 디렉토리**가 추가될 예정입니다.
+ADR-0004 에서 Phase 3 부하 테스트부터 운영 환경을 GCP/GKE 로 전환하기로 결정했습니다. 동시에 ADR-0003 에 따라 **Phase 3 Task 3-1~3-3 의 minikube 환경은 로컬 개발용으로 보존**해야 합니다 (Phase 1·2 는 Docker Compose 였으며 K8s 매니페스트가 존재하지 않습니다). 또한 ADR-0002 의 Phase 4 MSA 전환 시 **서비스별 매니페스트 디렉토리**가 추가될 예정입니다.
 
 현재 `k8s/` 구조:
 
@@ -34,32 +34,29 @@ k8s/
 k8s/
 ├── base/                            # 환경 무관 공통 매니페스트
 │   ├── namespace.yml
-│   ├── infra/
-│   │   ├── mysql/{deployment,service,pvc,kustomization}.yml
-│   │   ├── redis/{...}
-│   │   └── kafka/{...}
+│   ├── infra/                       # Phase 3 단순화: 디렉토리당 단일 매니페스트 파일
+│   │   ├── mysql/mysql.yml          # Deployment + Service + PVC 통합
+│   │   ├── redis/redis.yml
+│   │   └── kafka/kafka.yml
 │   ├── monitoring/                  # kube-prometheus-stack values + 추가 리소스
 │   │   ├── values-prometheus.yml    # Helm values (Kustomize 대상 아님, install.sh 가 소비)
-│   │   ├── servicemonitor.yml
-│   │   ├── dashboards/
-│   │   ├── alerts/
+│   │   ├── servicemonitor.yml       # Phase 3 시점은 monitoring 하위에 위치
+│   │   ├── dashboards/configmap.yml
+│   │   ├── alerts/grafana-alerts.yml
 │   │   └── install.sh
 │   ├── services/
 │   │   └── peekcart/                # Phase 3: 모놀리스 단일 서비스
-│   │       ├── deployment.yml
-│   │       ├── service.yml
+│   │       ├── deployment.yml       # Deployment + Service 통합 (환경 비종속)
 │   │       ├── configmap.yml
-│   │       ├── secret.yml
-│   │       ├── servicemonitor.yml
-│   │       └── kustomization.yml
-│   └── kustomization.yml
+│   │       └── secret.yml
+│   └── kustomization.yml            # base 전체를 한 곳에서 집계 (per-디렉토리 kustomization 미사용)
 └── overlays/
-    ├── minikube/                    # Phase 1·2 + Phase 3 로컬 검증용 (ADR-0003)
+    ├── minikube/                    # Phase 3 Task 3-1~3-3 로컬 검증용 (ADR-0003)
     │   ├── kustomization.yml
     │   └── patches/                 # imagePullPolicy: Never, Service type: NodePort 등
     └── gke/                         # Phase 3 부하 테스트 + Phase 4 운영 (ADR-0004)
-        ├── kustomization.yml
-        └── patches/                 # storageClassName, Internal LoadBalancer, 리소스 조정
+        ├── kustomization.yml        # 현재는 placeholder, Task 3-4 Step 0 에서 patches 추가
+        └── patches/                 # storageClassName, Internal LoadBalancer, 리소스 조정 (예정)
 ```
 
 - **kube-prometheus-stack 은 Helm 그대로** — Kustomize 로 변환 시도하지 않음. install.sh 가 `helm upgrade --install` 로 idempotent 하게 소비

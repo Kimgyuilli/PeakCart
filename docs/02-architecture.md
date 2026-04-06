@@ -354,32 +354,28 @@ peekcart/
 └── k8s/
     ├── base/                         # 환경 무관 공통 매니페스트
     │   ├── namespace.yml
-    │   ├── infra/
-    │   │   ├── mysql/                # deployment / service / pvc / kustomization
-    │   │   ├── redis/
-    │   │   └── kafka/
+    │   ├── infra/                    # Phase 3 단순화: 디렉토리당 단일 통합 파일
+    │   │   ├── mysql/mysql.yml       # Deployment + Service + PVC
+    │   │   ├── redis/redis.yml
+    │   │   └── kafka/kafka.yml
     │   ├── monitoring/               # kube-prometheus-stack (Helm) + 부속 리소스
     │   │   ├── values-prometheus.yml # Helm values (install.sh 가 소비)
     │   │   ├── servicemonitor.yml
-    │   │   ├── dashboards/
-    │   │   ├── alerts/
+    │   │   ├── dashboards/configmap.yml
+    │   │   ├── alerts/grafana-alerts.yml
     │   │   └── install.sh            # helm upgrade --install (멱등)
     │   ├── services/
     │   │   └── peekcart/             # Phase 3: 모놀리스 단일 서비스
-    │   │       ├── deployment.yml
-    │   │       ├── service.yml
+    │   │       ├── deployment.yml    # Deployment + Service 통합 (환경 비종속)
     │   │       ├── configmap.yml
-    │   │       ├── secret.yml
-    │   │       ├── servicemonitor.yml
-    │   │       └── kustomization.yml
-    │   └── kustomization.yml
+    │   │       └── secret.yml
+    │   └── kustomization.yml         # base 전체를 한 곳에서 집계
     └── overlays/
-        ├── minikube/                 # 로컬 개발/검증 (ADR-0003)
+        ├── minikube/                 # Phase 3 Task 3-1~3-3 로컬 검증 (ADR-0003)
         │   ├── kustomization.yml
         │   └── patches/              # imagePullPolicy: Never, Service type: NodePort 등
         └── gke/                      # 부하 테스트 / 운영 (ADR-0004)
-            ├── kustomization.yml
-            └── patches/              # storageClassName, Internal LoadBalancer 등
+            └── kustomization.yml     # 현재 placeholder, Task 3-4 Step 0 에서 patches 추가
 ```
 
 - **배포 명령**:

@@ -37,4 +37,4 @@
 | 아키텍처 패턴 | 4-Layered Architecture + DDD |
 | 레포 전략 | 모노레포 (Gradle 멀티모듈) |
 | 서비스 구조 | 모놀리식으로 시작 후 핵심 서비스 MSA 분리 |
-| 인프라 | Kubernetes (minikube 로컬) |
+| 인프라 | Docker Compose (Phase 1·2) → Kubernetes (Phase 3 minikube → GKE, see `docs/01-project-overview.md` §4) |

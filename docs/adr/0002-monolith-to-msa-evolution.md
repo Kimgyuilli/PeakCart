@@ -1,7 +1,8 @@
 # ADR-0002: 모놀리식 → MSA 단계적 진화 전략
 
 - **Status**: Accepted
-- **Date**: 2026-01-15 (retroactive — Phase 0 설계 시점)
+- **Decided**: 2026-01-15 (Phase 0 설계 시점)
+- **Documented**: 2026-04-06 (retroactive — ADR 인프라 도입 시점에 소급 기록)
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: 전체
 

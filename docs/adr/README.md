@@ -6,14 +6,19 @@
 ## 원칙
 
 - ADR은 **immutable**. 한 번 작성된 본문은 수정하지 않습니다.
-- 결정이 바뀌면 **새 ADR을 작성**하고 기존 ADR의 Status를 `Superseded by ADR-XXXX`로 변경합니다 (Status 줄만 수정 허용).
+- 결정이 바뀌면 **새 ADR을 작성**하고 기존 ADR의 Status를 변경합니다. Status 변경은 항상 허용됩니다.
+- 결정의 일부만 무효화될 경우 `Partially Superseded by ADR-XXXX`를 사용하고, Status 줄 바로 아래에 **무효화된 범위**를 명시합니다 (예: ADR-0003).
+- **본문 정정 예외 (Update Log)**: 사실 오류(파일명, Phase 귀속, 수치 등) 가 발견된 경우 본문을 직접 수정할 수 있습니다. 단 다음 두 조건을 모두 충족해야 합니다.
+  - ADR 말미에 `## Update Log` 절을 추가하여 변경 일자, 커밋 해시, 변경 사유를 기록한다
+  - 커밋 메시지에 `fix(adr):` 접두사를 사용하여 일반 ADR 작성/Status 변경 커밋과 구분한다
+- 의사결정의 트레이드오프 변경, 대안 추가, Consequences 재해석은 본문 정정이 아니라 **새 ADR 작성** 사유입니다 (Update Log 로 우회 금지).
 - Layer 1 설계 문서(01~07)는 **현재 상태(What)** 만 기술하고, **결정 근거(Why)** 는 이 ADR에 기록 후 참조합니다.
 - 새 ADR 작성 시 `template.md`를 복사하여 `NNNN-{slug}.md` 형식으로 저장합니다.
 
 ## 인덱스
 
 > 신규 ADR 추가 시 이 표의 맨 아래에 행을 추가합니다.
-> Status 컬럼 값: `Proposed` · `Accepted` · `Deprecated` · `Superseded`
+> Status 컬럼 값: `Proposed` · `Accepted` · `Deprecated` · `Superseded` · `Partially Superseded`
 
 <!-- INDEX:BEGIN -->
 | # | 제목 | Status | Phase | 관련 Layer 1 문서 |

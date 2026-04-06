@@ -3,7 +3,8 @@
 - **Status**: Partially superseded by ADR-0004
   - Task 3-1 ~ 3-3 (CI, K8s 최초 배포, 관측성 스택 초기 검증): 본 ADR 유지, 완료됨
   - Task 3-4 ~ (부하 테스트, HPA, Phase 4 운영): ADR-0004 로 전환
-- **Date**: 2026-01-15 (retroactive — Phase 0 초기 설계 시점)
+- **Decided**: 2026-01-15 (Phase 0 초기 설계 시점)
+- **Documented**: 2026-04-06 (retroactive — ADR 인프라 도입 시점에 소급 기록)
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: Phase 3 (Task 3-1 ~ 3-3)
 
@@ -74,3 +75,11 @@ Phase 3 에서 K8s 를 처음 도입할 때 **로컬 minikube** 를 사용한다
 - `docs/progress/PHASE1.md`, `docs/progress/PHASE2.md` — Docker Compose 기반 Phase 1·2 작업 이력
 - `docs/progress/PHASE3.md` — Task 3-1 ~ 3-3 minikube 작업 이력
 - 후속: ADR-0004
+
+## Update Log
+
+본 ADR 은 `docs/adr/README.md` "본문 정정 예외 (Update Log)" 규칙에 따른 본문 직접 수정 이력을 기록합니다. 의사결정 자체는 변경되지 않았으며, 사실 오류만 정정되었습니다.
+
+| Date | Commit | 변경 내용 | 사유 |
+|------|--------|-----------|------|
+| 2026-04-06 | `eb3337e` | 파일명 `0003-phase1-2-local-minikube.md` → `0003-phase3-initial-minikube.md`, 제목/Phase 귀속/Context/Decision/References 의 "Phase 1·2 minikube" 를 "Phase 3 Task 3-1~3-3 minikube" 로 정정. Status 를 `Accepted` → `Partially superseded by ADR-0004` 로 변경 (Task 3-4 이후 범위만 ADR-0004 가 대체) | 초안 작성 시 Phase 귀속을 잘못 적었음. 실제 Phase 1·2 는 Docker Compose 환경이었고, K8s/minikube 도입은 Phase 3 부터였음 (`docs/progress/PHASE1.md:39`, `docs/progress/PHASE2.md:185` 로 검증). 동일 세션 내 발견 — 잘못된 결정 근거가 다른 ADR/문서로 전파되기 전 정정 |

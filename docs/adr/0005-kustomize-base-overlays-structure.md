@@ -62,6 +62,7 @@ k8s/
 - **kube-prometheus-stack 은 Helm 그대로** — Kustomize 로 변환 시도하지 않음. install.sh 가 `helm upgrade --install` 로 idempotent 하게 소비
 - **Phase 4 서비스 추가 시**: `base/services/` 하위에 `order-service/`, `payment-service/` 등 형제 디렉토리 추가 + `base/kustomization.yml` 에 resource 경로 한 줄 추가. 기존 파일 수정 없음
 - **Phase 3 시점에는 `services/peekcart/` 디렉토리 한 단계만** 추가. `gateway/`, `order-service/` 등 미래 디렉토리를 미리 만들지 않음 (CLAUDE.md §2 Simplicity First)
+- **`base/kustomization.yml` 에 `namespace:` 필드를 사용하지 않는다**. base 가 두 개의 네임스페이스(`peekcart` 도메인 리소스 + `monitoring` Grafana ConfigMap/Alert) 에 걸쳐 있고, Kustomize 의 `namespace:` 필드는 모든 리소스를 한 네임스페이스로 강제 변환하기 때문이다. 각 매니페스트가 `metadata.namespace` 를 명시적으로 선언하는 방식으로 회피한다 (대안: 매니페스트를 NS 별로 분리한 base 두 개 구성 — Phase 3 규모에서 과함).
 
 ## Alternatives Considered
 
@@ -93,8 +94,8 @@ k8s/
 ## Consequences
 
 ### 긍정적 영향
-- minikube 배포: `kubectl apply -k k8s/overlays/minikube/`
-- GKE 배포: `kubectl apply -k k8s/overlays/gke/`
+- minikube 배포 (검증 완료): `bash k8s/base/monitoring/install.sh` 로 monitoring 네임스페이스 생성 후 `kubectl apply -k k8s/overlays/minikube/`. 순서 의존성은 `docs/02-architecture.md` §12 배포 절 참고
+- GKE 배포: **현재 `k8s/overlays/gke/` 는 placeholder 이며 deploy-ready 가 아니다.** Task 3-4 Step 0 에서 Artifact Registry 이미지 경로, Service 노출 방식(Internal LB), StorageClass(`standard-rwo`), resources requests/limits 상향, secret 분리 전략을 추가한 후에만 적용 가능. 그 전에 `kubectl apply -k k8s/overlays/gke/` 를 실행하면 base 의 GHCR 이미지/ClusterIP/minikube 튜닝이 그대로 적용되어 imagePullBackoff 등으로 실패한다
 - 환경 차이가 `overlays/*/patches/` 에 국소화되어 리뷰/롤백 단위 명확
 - Phase 4 서비스 추가가 **파일 추가**로 완료 (기존 파일 수정 없음) → PR 리뷰 단순
 - `kubectl kustomize` 로 dry-run 검증 가능 → check-consistency.sh 에 통합 가능
@@ -103,6 +104,8 @@ k8s/
 - Kustomize 학습 필요 (단, Helm 대비 훨씬 낮음)
 - 디렉토리 깊이 증가 — `k8s/base/services/peekcart/deployment.yml` 은 기존 `k8s/app/peekcart-deployment.yml` 보다 한 단계 깊음
 - kube-prometheus-stack 만 Helm으로 남아 **도구 혼재** — 단, install.sh 가 이 복잡성을 감춤
+- `namespace:` 필드 미사용으로 인해 **신규 리소스에서 `metadata.namespace` 누락 시 default NS 로 새는 위험**. Kustomize 의 안전망 없음. 현 base 에 PR 추가 시 리뷰어가 명시적으로 확인해야 함 (자동 lint 미도입)
+- base 가 monitoring 네임스페이스 리소스를 포함하지만 namespace 자체는 `install.sh` 의 `helm upgrade --install --create-namespace` 에 의존 → **fresh 클러스터에서 install.sh 선행 필수** (apply -k 만 먼저 치면 `namespace "monitoring" not found` 로 실패)
 
 ### 후속 결정에 미치는 영향
 - Phase 4 MSA 전환 시 본 구조가 **서비스별 디렉토리 추가 패턴**의 기반이 됨

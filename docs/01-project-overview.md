@@ -19,7 +19,7 @@ Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes
 | 아키텍처 패턴 | 4-Layered Architecture + DDD |
 | 레포 전략 | 모노레포 (Gradle 멀티모듈) |
 | 서비스 구조 | 모놀리식으로 시작 후 핵심 서비스 MSA 분리 |
-| 인프라 | Kubernetes (minikube 로컬) |
+| 인프라 | Kubernetes (환경별 상세: §4 운영 환경) |
 
 ---
 
@@ -63,7 +63,7 @@ Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes
 | 알림 | Slack Webhook | Kafka Consumer 연동, 실제 발송 동작 증명 |
 | 부하 테스트 | nGrinder + JMeter | nGrinder: 분산 테스트 / JMeter: 시나리오 테스트 |
 | 빌드 | Gradle | 멀티모듈 구성, 빌드 캐시 활용 |
-| 컨테이너 | Docker + Kubernetes (minikube) | 서비스별 독립 배포, HPA 자동 스케일아웃 |
+| 컨테이너 | Docker + Kubernetes | 서비스별 독립 배포, HPA 자동 스케일아웃. 환경 상세는 §4 운영 환경 |
 | 레포 전략 | 모노레포 (Gradle 멀티모듈) | 전체 구조 가시성, common 모듈 공유 용이 |
 | 문서화 | Swagger (springdoc) | API 명세 자동화 |
 
@@ -76,3 +76,26 @@ Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes
 | 캐시 | Redis 7.x | Caffeine (로컬 캐시) | 분산 환경 캐시 일관성, 분산 락·블랙리스트 등 다목적 활용 | Caffeine은 단일 인스턴스에서만 유효, MSA 전환 시 캐시 불일치 |
 | Outbox 발행 | Polling 스케줄러 | Debezium CDC | 추가 인프라 없이 Spring Scheduler로 구현 가능, 포트폴리오 범위에서 적정 | CDC는 지연 최소화에 유리하나 Kafka Connect 클러스터 운영 복잡도 증가 |
 | 분산 락 | Redis (Redisson) | MySQL Named Lock | 성능 우수, TTL 자동 해제, 분산 환경 확장 용이 | DB Named Lock은 커넥션 점유, MSA 분리 시 한계 |
+
+---
+
+## 4. 운영 환경
+
+> **본 섹션은 운영 환경 정보의 SSOT입니다.** 다른 문서에서 환경 관련 사실을 기술할 때는 본 섹션을 참조합니다.
+
+### 4-1. Phase별 환경
+
+| Phase | 환경 | 용도 | 근거 ADR |
+|---|---|---|---|
+| Phase 1 · Phase 2 | **로컬 minikube** (CPU 4 / Memory 8GB) | 구현 및 검증 | ADR-0003 |
+| Phase 3 (Task 3-1 ~ 3-3) | **로컬 minikube** (유지) | CI, K8s 매니페스트, 관측성 스택 초기 검증 | ADR-0003 |
+| Phase 3 (Task 3-4 ~ ) · Phase 4 | **GCP / GKE** (asia-northeast3-a, e2-standard-4) | 부하 테스트, HPA 검증, MSA 운영 | ADR-0004 |
+
+### 4-2. 로컬 개발 환경 (상시)
+
+- Phase 3 이후에도 `k8s/overlays/minikube/` 는 **로컬 개발/검증용으로 계속 유효**합니다 (ADR-0005).
+- 코드 변경 후 빠른 반복 검증은 로컬 minikube, 부하/HPA 등 정확한 측정이 필요한 작업은 GKE 를 사용합니다.
+
+### 4-3. 환경 진화의 의도
+
+Phase 1·2 에서는 비용 0 · 오프라인 가능 · 빠른 반복을 우선하여 로컬 minikube 로 시작하였고, Phase 3 의 부하 테스트 단계에서 minikube 의 메모리 한계가 측정 정확도를 제약하는 것이 명시적으로 드러나 GCP/GKE 로 전환했습니다. 결정 과정과 대안 검토는 ADR-0003, ADR-0004 에 상세히 기록되어 있습니다.

@@ -165,3 +165,50 @@
 **주요 결정**:
 - **serviceMonitorNamespaceSelector 전체 허용**: minikube 단일 클러스터에서 네임스페이스를 제한하면 monitoring 네임스페이스의 기본 ServiceMonitor(kubelet, kube-state-metrics 등)가 전부 dropped. 보안보다 관측성 우선.
 - **additionalDataSources 제거**: kube-prometheus-stack Helm 차트가 기본 Prometheus datasource를 `uid: prometheus`로 자동 프로비저닝. 수동 추가 시 "Only one datasource per organization can be marked as default" 에러로 Grafana 기동 실패.
+
+---
+
+### 2026-04-06
+
+#### Phase 3 GCP/GKE 재설계 — 환경 전환 + 문서/매니페스트 정합화
+
+**배경**: Task 3-4 (부하 테스트) 계획 수립 중, 16GB 노트북에서 minikube(8GB) + nGrinder/JMeter 동시 구동 시 측정 정확도가 보장되지 않는 점이 명시적으로 드러남. 마침 GCP 신규 가입 크레딧 ₩453,008 확보 → Phase 3 후반(Task 3-4 ~ ) 부터 GCP/GKE 로 환경 전환 결정. 단순 환경 변경이 아니라 기존 설계 문서가 "로컬 호스팅"을 가정하고 작성되어 있었으므로, **부하 테스트 착수 전에 문서·ADR·매니페스트를 일관되게 재정렬**하는 작업으로 확장.
+
+**작업 브랜치**: `refactor/phase3-gcp-redesign`
+
+**완료 항목** (6개 세션 순차 실행):
+
+| 세션 | 작업 | 산출물 |
+|---|---|---|
+| 1 | ADR 인프라 구축 | `docs/adr/template.md`, `docs/adr/README.md`(인덱스 + 원칙), `docs/check-consistency.sh` |
+| 2 | ADR 0001~0005 작성 | `0001-layered-ddd-architecture` (Accepted) · `0002-monolith-to-msa-evolution` (Accepted) · `0003-phase3-initial-minikube` (Partially Superseded) · `0004-phase3-gcp-gke-migration` (Accepted) · `0005-kustomize-base-overlays-structure` (Accepted) |
+| 3 | Layer 1 핵심 문서 갱신 | `01-project-overview.md` §4 운영 환경 신설 (SSOT), `04-design-deep-dive.md` §10-7 환경 맥락 재구성, `07-roadmap-portfolio.md` Phase 3 환경 전환 노트 |
+| 4 | Layer 1 파생 문서 + TASKS 갱신 | `02-architecture.md` §4-3/§12 Phase 3 인프라 트리 추가, `03-requirements.md` §7-1 측정 환경 명시, `TASKS.md` Task 3-2/3-4/3-5 환경 정정, `CLAUDE.md` ADR 참조 맵 추가 |
+| 5 | 매니페스트 재구조화 | `k8s/{app,infra,monitoring}/` 평면 → `k8s/base/` + `k8s/overlays/{minikube,gke}/` Kustomize 구조. minikube overlay 에 `imagePullPolicy: Never` + `NodePort 30080` 패치 분리 |
+| 6 | 최종 정합성 점검 + PHASE3 기록 | `check-consistency.sh` 통과, 본 항목 |
+
+**주요 결정**:
+- **3-Layer 문서 모델 도입**: Layer 1 (01~07) = 현재 상태(What) · Layer 2 (adr/) = 결정 근거(Why, immutable) · Layer 3 (progress/) = 작업 이력(When). 새 결정은 ADR 우선, Layer 1 은 `(see ADR-NNNN)` 형태로 참조. 환경 같은 변동성 큰 사실의 SSOT 단일화를 통해 문서 불일치 차단.
+- **ADR-0003 사후 정정**: 최초 작성 시 Phase 1·2 까지 minikube 로 잘못 귀속했으나, `progress/PHASE1.md`·`PHASE2.md` 를 재확인하니 실제로는 Docker Compose 였음. 같은 세션 내에서 `fix(adr):` 로 분리 커밋하여 정정 (해당 ADR 의 scope 를 Phase 3 Task 3-1~3-3 으로 축소, status 를 Partially Superseded 로 변경). ADR 의 immutability 원칙 안에서 "사실 오류 정정"은 명시적 커밋으로 허용한다는 운영 규칙 확립.
+- **base/kustomization.yml 의 namespace 필드 미사용**: kustomize 의 `namespace:` 필드가 모든 리소스를 하나의 NS 로 강제 변환하면서 Grafana 대시보드 ConfigMap (원래 `monitoring` NS) 이 `peekcart` NS 로 이동하는 회귀를 발견. 각 매니페스트가 이미 명시적 namespace 를 가지고 있어 `namespace:` 필드를 제거하는 방식으로 해결.
+- **GKE overlay 는 placeholder 로 남김**: Task 3-4 Step 0 에서 실제 GKE 환경 구성 (StorageClass, Internal LB, Artifact Registry 이미지 태그, 노드 사이즈에 맞춘 resources) 을 수행할 때 한 번에 추가. 미리 추측해서 패치를 작성하면 실제 GKE 환경에서 재작성이 필요해질 가능성이 큼.
+- **부하 테스트 비용 추정**: GKE Standard e2-standard-4 × 1 + 별도 부하 발생기 VM, Phase 3 Task 3-4 전체 사이클 ~₩5,500. 크레딧 (₩453,008) 대비 1.2% 수준으로 안전.
+
+**커밋 이력**:
+- `648516d` 세션 1 — ADR 인프라
+- `bce6ce5` 세션 2 — ADR 0001~0005
+- `46693f7` 세션 3 — Layer 1 핵심 문서
+- `eb3337e` 세션 4 (사전) — `fix(adr):` ADR-0003 Phase 귀속 정정
+- `1bf5dd7` 세션 4 — Layer 1 파생 문서 + TASKS
+- `12a5213` 세션 5 — Kustomize base/overlays 재배치
+- (본 커밋) 세션 6 — PHASE3 기록
+
+**검증**:
+- `kubectl kustomize k8s/overlays/minikube/` → 19 리소스 정상 렌더링, NodePort 30080 + imagePullPolicy: Never 패치 적용 확인
+- `kubectl kustomize k8s/overlays/gke/` → 19 리소스 정상 렌더링 (base 그대로)
+- `bash docs/check-consistency.sh` → exit 0 (ADR 참조 모두 유효, Layer 1 환경 단어 위치 ADR 근접)
+
+**이슈 / 후속 작업**:
+- Task 3-4 Step 0 에서 GKE overlay 에 실제 패치 추가 필요 (StorageClass `standard-rwo`, Service Internal LB, Artifact Registry 이미지, resources 상향)
+- Task 3-4 부하 테스트 결과로 `docs/03-requirements.md` §7-1 의 초기 목표값을 baseline 측정값으로 확정
+- 환경 전환 후 첫 운영 시 비용 모니터링 (예산 알람 + 사용량 대시보드)

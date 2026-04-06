@@ -507,11 +507,18 @@ Redis 장애 시:
 - 측정 시 환경·시나리오·도구 버전을 함께 기록하여 재현 가능성을 확보한다.
 - 환경이 바뀌면 이전 수치와 동일 축에서 비교하지 않고 환경별 baseline 을 재수집한다.
 
-#### Phase 1·2 — 기능 검증 단계 (로컬 minikube)
+#### Phase 1·2 — 기능 검증 단계 (로컬 Docker Compose)
 
 - **목적**: 기능 동작 검증 및 통합 테스트. 정식 부하 측정은 수행하지 않음
-- **환경**: 로컬 minikube, CPU 4 / Memory 8GB (macOS)
+- **환경**: 로컬 Docker Compose (MySQL / Redis / Kafka 컨테이너) + 앱 로컬 실행
 - **수치 기록**: 단위/통합 테스트 통과 여부 중심. TPS·p99 등의 성능 수치는 Phase 3 에서 수집
+- **선택 근거**: 기본 로컬 개발 환경 (별도 ADR 없음)
+
+#### Phase 3 초기 (Task 3-1 ~ 3-3) — K8s 도입 (로컬 minikube)
+
+- **목적**: CI, K8s 매니페스트 작성, kube-prometheus-stack 구축의 반복 사이클 확보
+- **환경**: 로컬 minikube, CPU 4 / Memory 8GB (macOS)
+- **수치 기록**: 기능 검증 중심. 본격적인 부하 측정은 Task 3-4 에서 GKE 로 수행
 - **선택 근거**: ADR-0003
 
 #### Phase 3 — 부하 테스트 단계 (GCP / GKE)

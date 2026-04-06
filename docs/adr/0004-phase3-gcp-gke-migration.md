@@ -99,4 +99,4 @@ gcloud compute addresses list     # 예약 IP 확인
 - `docs/04-design-deep-dive.md` Section 10-7 (재구성 대상)
 - `docs/03-requirements.md` Section 7-1 — 성능 목표 수치 및 측정 방법
 - `docs/progress/PHASE3.md` — Task 3-1~3-3 minikube 환경 작업 이력
-- 선행: ADR-0003 (본 ADR이 supersede)
+- 선행: ADR-0003 (본 ADR이 부분 supersede — Task 3-4 이후 범위)

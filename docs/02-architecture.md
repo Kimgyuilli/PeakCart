@@ -378,10 +378,12 @@ peekcart/
             └── kustomization.yml     # 현재 placeholder, Task 3-4 Step 0 에서 patches 추가
 ```
 
-- **배포 명령**:
-  - minikube: `kubectl apply -k k8s/overlays/minikube/`
-  - GKE: `kubectl apply -k k8s/overlays/gke/`
-- **관측성 스택**: Kustomize 대상이 아님. `bash k8s/base/monitoring/install.sh` 로 Helm 설치
+- **최초 배포 순서 (fresh 클러스터)**:
+  1. `bash k8s/base/monitoring/install.sh` — `helm upgrade --install --create-namespace` 로 `monitoring` 네임스페이스와 kube-prometheus-stack 을 먼저 생성 (base 의 Grafana ConfigMap/Alert 가 이 네임스페이스를 전제로 함)
+  2. `kubectl apply -k k8s/overlays/minikube/` (또는 `gke/`) — 순서를 바꾸면 `namespace "monitoring" not found` 로 실패
+- **재배포 (idempotent)**: 동일 두 명령을 순서대로 재실행. install.sh 는 멱등
+- **GKE overlay 는 현재 placeholder**: `k8s/overlays/gke/` 는 Task 3-4 Step 0 완료 전까지 deploy-ready 가 아님. 적용 금지 (ADR-0005 §Consequences 참고)
+- **관측성 스택**: Kustomize 대상이 아님. `install.sh` 가 `helm upgrade --install` 로 소비
 - **Phase 4 서비스 추가 시**: `k8s/base/services/` 하위에 형제 디렉토리 추가 + `base/kustomization.yml` 에 한 줄 참조. 기존 파일 수정 없음
 
 ### Phase 4 — MSA (Gradle 멀티모듈)

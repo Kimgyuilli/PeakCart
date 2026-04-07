@@ -1,6 +1,6 @@
 # ADR-0006: Monitoring 스택 환경 분리 (base 에서 제외)
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Decided**: 2026-04-07
 - **Documented**: 2026-04-07
 - **Deciders**: 프로젝트 오너

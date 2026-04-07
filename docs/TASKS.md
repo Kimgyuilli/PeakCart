@@ -364,12 +364,12 @@
 | `build.gradle` micrometer-prometheus 의존성 추가 | ✅ | `micrometer-registry-prometheus` + `logstash-logback-encoder:8.0` |
 | `application.yml` Actuator/Prometheus 설정 | ✅ | `application-k8s.yml`에 `health,prometheus` 엔드포인트 노출, `metrics.tags.application: peekcart` 추가 (코드리뷰 P0) |
 | 구조화된 로깅 설정 (JSON 포맷 + MDC traceId/userId/orderId) | ✅ | `logback-spring.xml` (`springProfile`: k8s=JSON, local=plain text) + `MdcFilter` + Kafka Consumer/OrderCommandService에 `orderId` MDC 추가 (코드리뷰 P1) |
-| kube-prometheus-stack Helm 설치 | ✅ | `k8s/base/monitoring/values-prometheus.yml` + `install.sh`(`helm upgrade --install` 멱등성), minikube 경량 설정 (~1.2GB), subchart 키 수정, `serviceMonitorNamespaceSelector: {}` 전체 네임스페이스 허용 (minikube 검증) |
-| ServiceMonitor 설정 (PeekCart 메트릭 수집) | ✅ | `k8s/base/monitoring/servicemonitor.yml`, Service 포트 `name: http` + `app: peekcart` 레이블 추가, `release: kube-prometheus-stack` 레이블 추가 (minikube 검증) |
-| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | ✅ | `k8s/base/monitoring/dashboards/api-jvm-dashboard.json`, ConfigMap sidecar 자동 로드 |
-| Kafka Lag 모니터링 대시보드 | ✅ | `k8s/base/monitoring/dashboards/kafka-lag-dashboard.json`, Micrometer consumer lag 메트릭 |
-| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | ✅ | `k8s/base/monitoring/dashboards/pod-resources-dashboard.json`, HPA 패널 사전 구성, CPU 단위 `percentunit` 수정 (코드리뷰 P2) |
-| Grafana Alert 설정 (에러율/응답시간 임계치) | ✅ | `k8s/base/monitoring/alerts/grafana-alerts.yml`, 5xx>5% / p95>2s (2분 지속) |
+| kube-prometheus-stack Helm 설치 | ✅ | `k8s/monitoring/minikube/values-prometheus.yml` + `install.sh`(`helm upgrade --install` 멱등성), minikube 경량 설정 (~1.2GB), subchart 키 수정, `serviceMonitorNamespaceSelector: {}` 전체 네임스페이스 허용 (minikube 검증). 경로는 ADR-0006 구현으로 `base/monitoring/` → `k8s/monitoring/minikube/` 이동 |
+| ServiceMonitor 설정 (PeekCart 메트릭 수집) | ✅ | `k8s/base/services/peekcart/servicemonitor.yml` (ADR-0006 으로 `base/monitoring/` → `base/services/peekcart/` 이동), Service 포트 `name: http` + `app: peekcart` 레이블 추가, `release: kube-prometheus-stack` 레이블 추가 (minikube 검증) |
+| Grafana 대시보드 구성 (API 응답시간, 에러율, JVM 힙 메모리) | ✅ | `k8s/monitoring/shared/api-jvm-dashboard.json`, ConfigMap sidecar 자동 로드 |
+| Kafka Lag 모니터링 대시보드 | ✅ | `k8s/monitoring/shared/kafka-lag-dashboard.json`, Micrometer consumer lag 메트릭 |
+| Pod CPU/메모리 + HPA 스케일 이벤트 대시보드 | ✅ | `k8s/monitoring/shared/pod-resources-dashboard.json`, HPA 패널 사전 구성, CPU 단위 `percentunit` 수정 (코드리뷰 P2) |
+| Grafana Alert 설정 (에러율/응답시간 임계치) | ✅ | `k8s/monitoring/shared/grafana-alerts.yml`, 5xx>5% / p95>2s (2분 지속) |
 
 **완료 기준**: Grafana에서 API 응답시간/에러율/Kafka Lag/Pod 리소스 실시간 모니터링 + Alert 동작 확인
 
@@ -381,6 +381,8 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
+| **Step 0-a**: GKE 클러스터 프로비저닝 (StorageClass `standard-rwo`, Internal LB, Artifact Registry) | 🔲 | `k8s/overlays/gke/` 패치 작성 (ADR-0005 §Consequences) |
+| **Step 0-b**: GKE monitoring values 작성 (`k8s/monitoring/gke/values-prometheus.yml` + `install.sh`) | 🔲 | ADR-0006 불변식 6 — 현재는 placeholder/exit 1. retention/limits/Service type 결정 |
 | nGrinder 설치 + 설정 | 🔲 | 상품 조회 TPS 측정용 (`docs/03-requirements.md` 7-1) |
 | JMeter 설치 + 설정 | 🔲 | 동시 주문 정합성 시나리오용 (`docs/03-requirements.md` 7-1) |
 | Baseline TPS 측정 (캐싱 비활성화 상태) | 🔲 | 목표 수치 확정 기준 (`docs/03-requirements.md` 7-1) |

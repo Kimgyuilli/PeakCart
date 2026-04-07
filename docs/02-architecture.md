@@ -30,11 +30,11 @@
 - **Phase 3 (Task 3-1 ~ 3-3)**: 로컬 minikube K8s 로 매니페스트/관측성 스택 초기 구축
 - **Phase 3 (Task 3-4 ~ ) · Phase 4**: GCP / GKE 로 전환. 부하 테스트/HPA/MSA 운영
 - **매니페스트 구조**: Kustomize `base/` + `overlays/{minikube, gke}/` (ADR-0005)
-- **관측성 스택**: kube-prometheus-stack Helm 차트 (base/monitoring/ 하위, install.sh 로 멱등 설치)
+- **관측성 스택**: kube-prometheus-stack Helm 차트. base/ 와 분리된 `k8s/monitoring/` 트리에서 환경별로 관리 (ADR-0006). install.sh 로 멱등 설치
 - HPA 로 Order Service Pod 자동 수평 확장 검증
 - Liveness / Readiness / Startup Probe 설정으로 비정상 Pod 자동 재시작
 
-> 환경 진화와 선택 근거의 상세: `docs/01-project-overview.md` §4 (SSOT), ADR-0004 (§Context 가 Phase 3 초기 minikube 근거 포함), ADR-0005, ADR-0006 (monitoring 스택 환경 분리, Proposed).
+> 환경 진화와 선택 근거의 상세: `docs/01-project-overview.md` §4 (SSOT), ADR-0004 (§Context 가 Phase 3 초기 minikube 근거 포함), ADR-0005, ADR-0006 (monitoring 스택 환경 분리).
 
 ### 4-4. 레포 전략: 모노레포 (Gradle 멀티모듈)
 
@@ -352,39 +352,48 @@ peekcart/
 ├── docker-compose.yml                # 로컬 개발용 (Phase 1·2 이후에도 유지)
 │
 └── k8s/
-    ├── base/                         # 환경 무관 공통 매니페스트
-    │   ├── namespace.yml
+    ├── base/                         # 환경 무관 공통 매니페스트 (ADR-0005, ADR-0006)
+    │   ├── namespace.yml             # peekcart NS 만 (monitoring NS 는 k8s/monitoring/ 소관)
     │   ├── infra/                    # Phase 3 단순화: 디렉토리당 단일 통합 파일
     │   │   ├── mysql/mysql.yml       # Deployment + Service + PVC
     │   │   ├── redis/redis.yml
     │   │   └── kafka/kafka.yml
-    │   ├── monitoring/               # kube-prometheus-stack (Helm) + 부속 리소스
-    │   │   ├── values-prometheus.yml # Helm values (install.sh 가 소비)
-    │   │   ├── servicemonitor.yml
-    │   │   ├── dashboards/configmap.yml
-    │   │   ├── alerts/grafana-alerts.yml
-    │   │   └── install.sh            # helm upgrade --install (멱등)
     │   ├── services/
     │   │   └── peekcart/             # Phase 3: 모놀리스 단일 서비스
     │   │       ├── deployment.yml    # Deployment + Service 통합 (환경 비종속)
     │   │       ├── configmap.yml
-    │   │       └── secret.yml
+    │   │       ├── secret.yml
+    │   │       └── servicemonitor.yml  # 앱이 자기 메트릭을 노출하는 방법 (peekcart NS, ADR-0006 불변식 2)
     │   └── kustomization.yml         # base 전체를 한 곳에서 집계
-    └── overlays/
-        ├── minikube/                 # Phase 3 Task 3-1~3-3 로컬 검증 (ADR-0004 §Context)
-        │   ├── kustomization.yml
-        │   └── patches/              # imagePullPolicy: Never, Service type: NodePort 등
-        └── gke/                      # 부하 테스트 / 운영 (ADR-0004)
-            └── kustomization.yml     # 현재 placeholder, Task 3-4 Step 0 에서 patches 추가
+    ├── overlays/
+    │   ├── minikube/                 # Phase 3 Task 3-1~3-3 로컬 검증 (ADR-0004 §Context)
+    │   │   ├── kustomization.yml
+    │   │   └── patches/              # imagePullPolicy: Never, Service type: NodePort 등
+    │   └── gke/                      # 부하 테스트 / 운영 (ADR-0004)
+    │       └── kustomization.yml     # 현재 placeholder, Task 3-4 Step 0 에서 patches 추가
+    └── monitoring/                   # base/ 분리된 관측성 스택 (ADR-0006)
+        ├── namespace.yml             # monitoring NS SSOT (불변식 5)
+        ├── shared/                   # 환경 무관 자원
+        │   ├── dashboards-configmap.yml  # Grafana 대시보드 ConfigMap (3개 인라인 JSON)
+        │   ├── grafana-alerts.yml        # Alert ConfigMap
+        │   └── *.json                    # 대시보드 원본 (configmap 에 인라인되어 있는 사본, 가독성용)
+        ├── minikube/
+        │   ├── values-prometheus.yml     # NodePort 30030, retention 6h, 경량 limits
+        │   └── install.sh                # helm upgrade --install (멱등)
+        └── gke/                          # ADR-0006 불변식 6: 명시적 TODO
+            ├── values-prometheus.yml     # 헤더에 작성 가이드, 비어 있음
+            └── install.sh                # exit 1 (Task 3-4 Step 0 에서 활성화)
 ```
 
-- **최초 배포 순서 (fresh 클러스터)**:
-  1. `bash k8s/base/monitoring/install.sh` — `helm upgrade --install --create-namespace` 로 `monitoring` 네임스페이스와 kube-prometheus-stack 을 먼저 생성 (base 의 Grafana ConfigMap/Alert 가 이 네임스페이스를 전제로 함)
-  2. `kubectl apply -k k8s/overlays/minikube/` (또는 `gke/`) — 순서를 바꾸면 `namespace "monitoring" not found` 로 실패
-- **재배포 (idempotent)**: 동일 두 명령을 순서대로 재실행. install.sh 는 멱등
-- **GKE overlay 는 현재 placeholder**: `k8s/overlays/gke/` 는 Task 3-4 Step 0 완료 전까지 deploy-ready 가 아님. 적용 금지 (ADR-0005 §Consequences 참고)
-- **관측성 스택**: Kustomize 대상이 아님. `install.sh` 가 `helm upgrade --install` 로 소비
-- **Phase 4 서비스 추가 시**: `k8s/base/services/` 하위에 형제 디렉토리 추가 + `base/kustomization.yml` 에 한 줄 참조. 기존 파일 수정 없음
+- **최초 배포 순서 (fresh 클러스터, minikube 기준)**:
+  1. `kubectl apply -f k8s/monitoring/namespace.yml` — monitoring NS 단일 생성 주체 (ADR-0006 불변식 5)
+  2. `bash k8s/monitoring/minikube/install.sh` — kube-prometheus-stack Helm 설치. **이 단계가 ServiceMonitor CRD 를 등록**하므로 다음 단계 전에 반드시 선행
+  3. `kubectl apply -f k8s/monitoring/shared/dashboards-configmap.yml -f k8s/monitoring/shared/grafana-alerts.yml` — 환경 무관 대시보드/Alert ConfigMap (Grafana sidecar 자동 로드)
+  4. `kubectl apply -k k8s/overlays/minikube/` — app/infra + ServiceMonitor 적용. 2번이 등록한 CRD 가 충족되어야 성공
+- **"self-contained overlay" 의 운영 해석 (ADR-0006 불변식 4)**: `apply -k overlays/minikube/` 가 단독으로 fresh 클러스터에 성공한다는 뜻이 **아니다**. ServiceMonitor 는 CRD 의존성을 가지며, K8s 생태계의 표준 패턴(cert-manager, Istio 등)과 동일하게 CRD 선행 설치가 문서화된 순서로 보장된다. overlay 가 self-contained 라는 것은 "monitoring NS 리소스를 포함하지 않으며, 외부 상태를 만들거나 변형하지 않는다" 는 의미이다.
+- **재배포 (idempotent)**: 동일 4개 명령을 순서대로 재실행. install.sh 는 `helm upgrade --install` 멱등
+- **GKE overlay 는 현재 placeholder**: `k8s/overlays/gke/` 와 `k8s/monitoring/gke/` 모두 Task 3-4 Step 0 완료 전까지 deploy-ready 가 아님. 적용 금지 (ADR-0005, ADR-0006 §Consequences 참고)
+- **Phase 4 서비스 추가 시**: `k8s/base/services/` 하위에 형제 디렉토리 추가 + 각 서비스의 `servicemonitor.yml` 동봉 + `base/kustomization.yml` 에 참조 추가. 기존 파일 수정 없음 (ADR-0006 §긍정적 영향)
 
 ### Phase 4 — MSA (Gradle 멀티모듈)
 
@@ -398,7 +407,6 @@ peekcart/
 │   ├── base/
 │   │   ├── namespace.yml
 │   │   ├── infra/{mysql,redis,kafka}/    # Phase 3 와 동일 (공통 인프라)
-│   │   ├── monitoring/                    # Phase 3 와 동일 (kube-prometheus-stack)
 │   │   ├── services/                      # Phase 3 의 peekcart/ 를 서비스별로 분리
 │   │   │   ├── api-gateway/
 │   │   │   │   ├── deployment.yml
@@ -413,9 +421,13 @@ peekcart/
 │   │   │   ├── product-service/
 │   │   │   └── notification-service/
 │   │   └── kustomization.yml
-│   └── overlays/
-│       ├── minikube/                      # 로컬 개발/검증 (ADR-0004 §Context)
-│       └── gke/                           # 운영 (ADR-0004)
+│   ├── overlays/
+│   │   ├── minikube/                      # 로컬 개발/검증 (ADR-0004 §Context)
+│   │   └── gke/                           # 운영 (ADR-0004)
+│   └── monitoring/                        # Phase 3 와 동일 — base/ 와 분리 (ADR-0006)
+│       ├── namespace.yml
+│       ├── shared/{dashboards-configmap,grafana-alerts}.yml
+│       └── {minikube,gke}/{values-prometheus.yml,install.sh}
 │
 ├── common/
 │   └── src/main/java/com/peekcart/common/

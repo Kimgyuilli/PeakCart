@@ -257,3 +257,50 @@
 **이슈 / 후속 작업**:
 - 차기 브랜치 `refactor/phase3-monitoring-split` 에서 ADR-0006 구현. 완료 시 ADR-0006 Status 를 Proposed → Accepted 로 전환
 - Task 3-4 Step 0 체크리스트에 "GKE monitoring values 작성" 항목 추가 필요
+
+---
+
+## 2026-04-07 (2) — ADR-0006 구현 (monitoring 스택 base 분리)
+
+**배경**: 직전 작업(`refactor/phase3-adr-kustomize-prep`)에서 ADR-0006 을 Proposed 로 신설하고 설계만 확정. 본 브랜치는 그 설계를 매니페스트와 스크립트에 반영하여 ADR-0006 을 Accepted 로 전환.
+
+**작업 브랜치**: `refactor/phase3-monitoring-split`
+
+### 사전 결정 (구현 시작 전 확정)
+
+ADR-0006 §"본 ADR 이 결정하지 않는 것" 에 위임된 4개 항목을 다음과 같이 결론.
+
+| 결정 | 채택 | 근거 |
+|---|---|---|
+| 디렉토리 배치 | `k8s/monitoring/` 최상위 트리 (Kustomize 밖). `shared/` (환경 무관) + `{minikube,gke}/` (환경별 Helm values + install.sh) | 대시보드/Alert 는 진짜 환경 무관이라 overlay 사본을 만들지 않음. Helm 과 Kustomize 의 도구 경계를 디렉토리 수준에서 정직하게 분리. ADR-0006 Alternative C 의 "Phase 4 ServiceMonitor 위치 재결정" 단점은 결정 2 와 결합해 해소 (ServiceMonitor 만 `base/services/<svc>/` 로 이동) |
+| install.sh 분기 | 환경별 별도 진입점 (`{minikube,gke}/install.sh`). GKE 는 `exit 1` placeholder | ENV 인자 파싱보다 호출자 입장에서 직관적이며, GKE 의 미작성 상태가 호출 시점에 강제됨 (불변식 6) |
+| monitoring NS SSOT | `k8s/monitoring/namespace.yml` 단일 생성 주체. install.sh 의 `--create-namespace` 제거 | "Helm 이 NS 생성 → Kustomize 가 재사용" 순환 의존 해소 (불변식 5) |
+| ServiceMonitor CRD 선후 의존 해석 | "self-contained = app/infra 만, monitoring 스택 (CRD 포함) 선행 설치는 문서화" | ServiceMonitor 는 `monitoring.coreos.com/v1` CRD 의존. K8s 생태계 표준 패턴 (cert-manager, Istio, ArgoCD) 과 동일하게 CRD 선행 설치를 02-architecture.md §12 에 명시 |
+
+### 완료 항목
+
+| 항목 | 변경 |
+|---|---|
+| `k8s/monitoring/` 신규 트리 생성 | `namespace.yml`, `shared/{dashboards-configmap.yml, grafana-alerts.yml, *.json}`, `minikube/{values-prometheus.yml, install.sh}`, `gke/{values-prometheus.yml, install.sh}` |
+| `git mv` 로 이력 보존 이동 | `base/monitoring/values-prometheus.yml` → `monitoring/minikube/`, `base/monitoring/install.sh` → `monitoring/minikube/`, `base/monitoring/dashboards/configmap.yml` → `monitoring/shared/dashboards-configmap.yml`, `base/monitoring/alerts/grafana-alerts.yml` → `monitoring/shared/`, 대시보드 JSON 3종 → `monitoring/shared/` |
+| ServiceMonitor 이동 (불변식 2) | `base/monitoring/servicemonitor.yml` → `base/services/peekcart/servicemonitor.yml`. `base/monitoring/` 디렉토리 삭제 |
+| install.sh 정리 (불변식 5) | `--create-namespace` 제거. 사전 조건(`kubectl apply -f .../namespace.yml`) 헤더 코멘트로 명시 |
+| `base/kustomization.yml` 갱신 | `monitoring/*` 3개 라인 제거, `services/peekcart/servicemonitor.yml` 추가. 헤더 코멘트에 ADR-0006 참조 추가 |
+| GKE placeholder (불변식 6) | `monitoring/gke/values-prometheus.yml` 헤더에 작성 가이드(retention, resources, Service type), `install.sh` 는 `exit 1` 로 호출 시 명시적 실패 |
+| `02-architecture.md` §4-3 / §12 갱신 | 새 디렉토리 트리(Phase 3 + Phase 4 양쪽), 4단계 배포 순서, "self-contained overlay 의 운영 해석" 노트 (CRD 선행 의존) |
+| `TASKS.md` Task 3-4 Step 0 체크리스트 | "Step 0-a GKE 클러스터 프로비저닝" + "Step 0-b GKE monitoring values 작성" 항목 추가 |
+| `TASKS.md` 완료 항목 표 갱신 | Task 3-3 의 monitoring 파일 경로를 새 위치로 이동, 마이그레이션 노트 동봉 |
+| `ADR-0006` Status | `Proposed` → `Accepted` (인덱스 README 동기화) |
+
+### 검증
+
+- `kubectl kustomize k8s/overlays/minikube/` → 19→17 리소스. `kind` 분포: Namespace, ConfigMap, Secret, PVC, Deployment, Service, ServiceMonitor. **monitoring NS 리소스 0건 확인** (불변식 1)
+- ServiceMonitor 1건이 peekcart NS 에 렌더링 (불변식 2)
+- `bash docs/consistency-hints.sh` → exit 0 (ADR 참조 무결성)
+- `kubectl kustomize k8s/overlays/gke/` → base 그대로 출력 (overlay placeholder 유지). monitoring 누락이 의도된 TODO 임은 `monitoring/gke/values-prometheus.yml` 헤더와 ADR-0006 §Decision 양쪽에 명시
+- **검증 수준**: kustomize 머지 + 정적 분석까지. 실제 minikube fresh 클러스터에서 4단계 순서 apply 검증은 본 브랜치에 포함하지 않음 (Task 3-4 Step 0 GKE 환경 구성과 함께 한 번에 수행하는 편이 비용 효율적). 2026-04-06 §검증 노트 와 동일한 정직성 정책
+
+### 미해결 / 후속
+
+- Task 3-4 Step 0-b 에서 `monitoring/gke/values-prometheus.yml` 실제 작성. 작성 시 헤더의 (TODO) 표기 제거 + `install.sh` 의 `exit 1` 해제
+- `apply -k overlays/minikube/` 단독 실행 self-contained 검증은 minikube 가용 시점에 1회 수행 권장

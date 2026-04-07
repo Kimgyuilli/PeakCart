@@ -499,7 +499,7 @@ Redis 장애 시:
 
 성능 수치는 측정 환경의 특성과 함께 해석되어야 합니다. PeekCart 는 Phase 진행에 따라 측정 환경이 진화하므로, 환경별 측정 방침을 구분하여 기술합니다.
 
-> 환경 SSOT: `docs/01-project-overview.md` §4. 환경 선택 근거: ADR-0003, ADR-0004.
+> 환경 SSOT: `docs/01-project-overview.md` §4. 환경 선택 근거: ADR-0004 (§Context 가 Phase 3 초기 minikube 선택 근거를 포함. ADR-0003 은 Deprecated).
 
 #### 측정 방침의 공통 원칙
 
@@ -519,7 +519,7 @@ Redis 장애 시:
 - **목적**: CI, K8s 매니페스트 작성, kube-prometheus-stack 구축의 반복 사이클 확보
 - **환경**: 로컬 minikube, CPU 4 / Memory 8GB (macOS)
 - **수치 기록**: 기능 검증 중심. 본격적인 부하 측정은 Task 3-4 에서 GKE 로 수행
-- **선택 근거**: ADR-0003
+- **선택 근거**: ADR-0004 §Context (Phase 3 Task 3-1~3-3 minikube 선택 근거 포함. 구 ADR-0003 은 Deprecated 처리되어 내용이 ADR-0004 로 흡수됨)
 
 #### Phase 3 — 부하 테스트 단계 (GCP / GKE)
 

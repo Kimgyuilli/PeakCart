@@ -328,7 +328,7 @@
 
 ### Task 3-2: K8s 배포 (minikube 초기 / GKE 운영 전환)
 **상태**: ✅ 완료 (minikube 범위) · 🔄 GKE 마이그레이션은 Task 3-4 Step 0 에서 수행
-**목표**: K8s 매니페스트 작성. Phase 3 초기 검증은 로컬 minikube, 부하 테스트부터는 GKE 로 운영 전환 (ADR-0003, ADR-0004).
+**목표**: K8s 매니페스트 작성. Phase 3 초기 검증은 로컬 minikube, 부하 테스트부터는 GKE 로 운영 전환 (ADR-0004 §Context 가 minikube 선택 근거 포함, 본격 전환은 ADR-0004 본문).
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
@@ -454,4 +454,4 @@
 | 2026-04-05 | Task 3-3 완료 | kube-prometheus-stack 모니터링 구축: Micrometer Prometheus + LogstashEncoder 의존성, Actuator prometheus 엔드포인트 노출, MdcFilter(traceId/userId), logback-spring.xml(k8s=JSON/local=plain), Helm values + install.sh, ServiceMonitor, Grafana 대시보드 3개(API&JVM/Kafka Lag/Pod Resources) + Alert 2개(에러율 5%/응답시간 2s). 전체 235건 테스트 통과 |
 | 2026-04-05 | Task 3-3 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 7건 개선: `metrics.tags.application` 추가(P0 PromQL 전체 불일치), orderId MDC 추가(P1 설계 문서 불일치), Grafana datasource uid 프로비저닝(P1), Helm subchart 리소스 키 수정(P2), retention 2h→6h(P2), Pod CPU 단위 수정(P2), install.sh 멱등성(P2). 전체 235건 테스트 통과 |
 | 2026-04-05 | Task 3-3 minikube 검증 | 매니페스트 수정 3건: Service `app: peekcart` 레이블 누락, ServiceMonitor `release` 레이블 누락, `serviceMonitorNamespaceSelector` 전체 허용. Prometheus 16개 타겟 active, Grafana 대시보드 JVM/Kafka Lag 데이터 확인. API 메트릭은 트래픽 발생 후, Pod CPU/Memory는 cAdvisor 지연 해소 후 확인 필요 |
-| 2026-04-06 | Phase 3 GCP/GKE 재설계 | 6개 세션 순차 실행: ① ADR 인프라(`docs/adr/`, template, README, `check-consistency.sh`) ② ADR 0001~0005 작성(레이어드+DDD/MSA 진화/Phase3 초기 minikube/Phase3 GKE 전환/Kustomize base+overlays) ③ Layer 1 핵심 문서(01 §4 운영 환경 SSOT 신설, 04 §10-7 환경 맥락, 07 환경 전환 노트) ④ Layer 1 파생(02 §4-3/§12, 03 §7-1, TASKS, CLAUDE.md) + ADR-0003 사후 정정(Phase 1·2 → Phase 3 초기) ⑤ k8s 매니페스트 Kustomize 재배치(`k8s/base/` + `overlays/{minikube,gke}/`, minikube 패치 분리) ⑥ PHASE3.md 작업 이력 + 정합성 검증. 브랜치 `refactor/phase3-gcp-redesign`, 8개 커밋, `check-consistency.sh` exit 0 |
+| 2026-04-06 | Phase 3 GCP 전환 준비 (ADR/구조) | 6개 세션 순차 실행: ① ADR 인프라(`docs/adr/`, template, README, `check-consistency.sh`) ② ADR 0001~0005 작성(레이어드+DDD/MSA 진화/Phase3 초기 minikube/Phase3 GKE 전환/Kustomize base+overlays) ③ Layer 1 핵심 문서(01 §4 운영 환경 SSOT 신설, 04 §10-7 환경 맥락, 07 환경 전환 노트) ④ Layer 1 파생(02 §4-3/§12, 03 §7-1, TASKS, CLAUDE.md) + ADR-0003 사후 정정(Phase 1·2 → Phase 3 초기) ⑤ k8s 매니페스트 Kustomize 재배치(`k8s/base/` + `overlays/{minikube,gke}/`, minikube 패치 분리) ⑥ PHASE3.md 작업 이력 + 힌트 스크립트 실행. 브랜치 `refactor/phase3-adr-kustomize-prep`, 8개 커밋. **본 작업은 ADR/구조 설계만 포함**하며 monitoring 스택의 환경 분리(ADR-0006)와 GKE overlay 실제 매니페스트 작성은 별도 브랜치(`refactor/phase3-monitoring-split` 예정)에서 수행 |

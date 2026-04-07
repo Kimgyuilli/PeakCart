@@ -34,7 +34,7 @@
 - HPA 로 Order Service Pod 자동 수평 확장 검증
 - Liveness / Readiness / Startup Probe 설정으로 비정상 Pod 자동 재시작
 
-> 환경 진화와 선택 근거의 상세: `docs/01-project-overview.md` §4 (SSOT), ADR-0003, ADR-0004, ADR-0005.
+> 환경 진화와 선택 근거의 상세: `docs/01-project-overview.md` §4 (SSOT), ADR-0004 (§Context 가 Phase 3 초기 minikube 근거 포함), ADR-0005, ADR-0006 (monitoring 스택 환경 분리, Proposed).
 
 ### 4-4. 레포 전략: 모노레포 (Gradle 멀티모듈)
 
@@ -371,7 +371,7 @@ peekcart/
     │   │       └── secret.yml
     │   └── kustomization.yml         # base 전체를 한 곳에서 집계
     └── overlays/
-        ├── minikube/                 # Phase 3 Task 3-1~3-3 로컬 검증 (ADR-0003)
+        ├── minikube/                 # Phase 3 Task 3-1~3-3 로컬 검증 (ADR-0004 §Context)
         │   ├── kustomization.yml
         │   └── patches/              # imagePullPolicy: Never, Service type: NodePort 등
         └── gke/                      # 부하 테스트 / 운영 (ADR-0004)
@@ -414,7 +414,7 @@ peekcart/
 │   │   │   └── notification-service/
 │   │   └── kustomization.yml
 │   └── overlays/
-│       ├── minikube/                      # 로컬 개발/검증 (ADR-0003)
+│       ├── minikube/                      # 로컬 개발/검증 (ADR-0004 §Context)
 │       └── gke/                           # 운영 (ADR-0004)
 │
 ├── common/

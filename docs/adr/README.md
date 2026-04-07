@@ -7,7 +7,7 @@
 
 - ADR은 **immutable**. 한 번 작성된 본문은 수정하지 않습니다.
 - 결정이 바뀌면 **새 ADR을 작성**하고 기존 ADR의 Status를 변경합니다. Status 변경은 항상 허용됩니다.
-- 결정의 일부만 무효화될 경우 `Partially Superseded by ADR-XXXX`를 사용하고, Status 줄 바로 아래에 **무효화된 범위**를 명시합니다 (예: ADR-0003).
+- 결정의 일부만 무효화될 경우 `Partially Superseded by ADR-XXXX`를 사용하고, Status 줄 바로 아래에 **무효화된 범위**를 명시합니다 (예: ADR-0005 의 monitoring 범위가 ADR-0006 으로 전환).
 - **본문 정정 예외 (Update Log)**: 사실 오류(파일명, Phase 귀속, 수치 등) 가 발견된 경우 본문을 직접 수정할 수 있습니다. 단 다음 두 조건을 모두 충족해야 합니다.
   - ADR 말미에 `## Update Log` 절을 추가하여 변경 일자, 커밋 해시, 변경 사유를 기록한다
   - 커밋 메시지에 `fix(adr):` 접두사를 사용하여 일반 ADR 작성/Status 변경 커밋과 구분한다
@@ -25,7 +25,8 @@
 |---|------|--------|-------|-------------------|
 | [0001](./0001-layered-ddd-architecture.md) | 4-Layered + DDD 아키텍처 채택 | Accepted | 전체 | 02, 04 |
 | [0002](./0002-monolith-to-msa-evolution.md) | 모놀리식 → MSA 단계적 진화 전략 | Accepted | 전체 | 02, 07 |
-| [0003](./0003-phase3-initial-minikube.md) | Phase 3 초기 K8s 환경 — 로컬 minikube 채택 | Partially Superseded | Phase 3 Task 3-1~3-3 | 02, 04 |
+| [0003](./0003-phase3-initial-minikube.md) | Phase 3 초기 K8s 환경 — 로컬 minikube 채택 | Deprecated | Phase 3 Task 3-1~3-3 | (ADR-0004 흡수) |
 | [0004](./0004-phase3-gcp-gke-migration.md) | Phase 3 GCP/GKE 환경 전환 | Accepted | Phase 3+ | 01, 04, 07 |
-| [0005](./0005-kustomize-base-overlays-structure.md) | Kustomize base/overlays 매니페스트 구조 | Accepted | Phase 3+ | 02 |
+| [0005](./0005-kustomize-base-overlays-structure.md) | Kustomize base/overlays 매니페스트 구조 | Partially Superseded | Phase 3+ | 02 |
+| [0006](./0006-monitoring-stack-environment-separation.md) | Monitoring 스택 환경 분리 (base 에서 제외) | Proposed | Phase 3 Task 3-4+ | 02 |
 <!-- INDEX:END -->

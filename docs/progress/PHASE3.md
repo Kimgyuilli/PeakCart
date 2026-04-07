@@ -203,12 +203,57 @@
 - `12a5213` 세션 5 — Kustomize base/overlays 재배치
 - (본 커밋) 세션 6 — PHASE3 기록
 
-**검증**:
-- `kubectl kustomize k8s/overlays/minikube/` → 19 리소스 정상 렌더링, NodePort 30080 + imagePullPolicy: Never 패치 적용 확인
-- `kubectl kustomize k8s/overlays/gke/` → 19 리소스 정상 렌더링 (base 그대로)
-- `bash docs/check-consistency.sh` → exit 0 (ADR 참조 모두 유효, Layer 1 환경 단어 위치 ADR 근접)
+**검증** (수준 명시):
+- `kubectl kustomize k8s/overlays/minikube/` → 19 리소스 정상 렌더링, NodePort 30080 + imagePullPolicy: Never 패치 적용 확인 (= "YAML 파싱 + Kustomize 머지 성공" 수준. 실제 클러스터 apply 검증 아님)
+- `kubectl kustomize k8s/overlays/gke/` → 19 리소스 렌더링되지만 base 가 그대로 출력될 뿐 (overlay 가 placeholder). **GKE 배포 가능성을 보장하지 않음**. ADR-0005 §Consequences 참고
+- `bash docs/check-consistency.sh` → exit 0. 단 자동 판정은 항목 2(ADR 파일 존재) 한 가지뿐이며 항목 1·3·4 는 grep/find 출력만 함. exit 0 은 "ADR 참조 깨짐 없음" 만 보장하고 Layer 1 의미적 일관성을 보장하지 않음 (3차 리뷰 후속으로 `docs/consistency-hints.sh` 로 rename 및 메시징 강등)
 
 **이슈 / 후속 작업**:
 - Task 3-4 Step 0 에서 GKE overlay 에 실제 패치 추가 필요 (StorageClass `standard-rwo`, Service Internal LB, Artifact Registry 이미지, resources 상향)
 - Task 3-4 부하 테스트 결과로 `docs/03-requirements.md` §7-1 의 초기 목표값을 baseline 측정값으로 확정
 - 환경 전환 후 첫 운영 시 비용 모니터링 (예산 알람 + 사용량 대시보드)
+
+---
+
+## 2026-04-07 — 3차 외부 리뷰 후속 (ADR/구조 보정)
+
+**배경**: 2026-04-06 재설계 작업에 대해 3차 외부 리뷰(`review1.md`, `review2.md`)를 수행한 결과, 다음 세 가지 구조적 문제가 추가로 식별됨.
+
+1. **`check-consistency.sh` 가 사실상 검증하지 않음** — 항목 2(ADR 파일 존재) 외에는 grep/find 출력만 함. 그럼에도 PHASE3 §6 에서 "exit 0 = 검증 통과" 로 서술해 false positive 내러티브.
+2. **base/ 의 환경 무관 가정이 monitoring 영역에서 깨짐** — `k8s/base/monitoring/values-prometheus.yml:1` 이 "minikube 경량 설정" 으로 하드코딩, ServiceMonitor 의 NS(`peekcart`) 가 디렉토리(`base/monitoring/`) 와 불일치, install.sh 의 `--create-namespace` 가 fresh 클러스터 self-contained 를 깨뜨림.
+3. **ADR-0003 의 타임라인 내적 모순** — `Decided: Phase 0` vs 본문 "K8s 는 Phase 3 부터 도입할 계획". Phase 0 시점에는 K8s 도입 자체가 결정되기 전이므로 minikube 선택을 "결정" 한다는 명제가 성립하지 않음.
+
+**작업 브랜치**: `refactor/phase3-adr-kustomize-prep` (이전 `refactor/phase3-gcp-redesign` 에서 rename — 본 브랜치에 GKE 매니페스트 실체가 없어 제목이 산출물과 불일치했던 점 반영)
+
+**완료 항목** (설계 변경만, 구현은 별도 브랜치):
+
+| 항목 | 변경 |
+|---|---|
+| ADR-0006 신설 (Proposed) | `0006-monitoring-stack-environment-separation.md` — monitoring 스택을 base 에서 완전 분리하는 결정 + 6개 불변식. 실제 파일 이동/스크립트 수정은 `refactor/phase3-monitoring-split` (예정) 에서 수행 |
+| ADR-0005 → Partially Superseded by ADR-0006 | monitoring 범위만 ADR-0006 으로 전환, app/infra 결정은 유지. Update Log 절 추가 (`check-consistency.sh` → `consistency-hints.sh` rename 정정) |
+| ADR-0003 → Deprecated | 회고적 재구성의 타임라인 모순 인정. 본문은 이력 보존을 위해 유지하되 상단 Deprecation Note 추가, Decided 필드는 N/A 로 변경 |
+| ADR-0004 §Context 확장 | ADR-0003 의 Phase 3 초기 minikube 선택 근거(비용/반복/오프라인) 를 흡수. 새 참조는 ADR-0004 §Context 사용 |
+| `docs/check-consistency.sh` → `docs/consistency-hints.sh` rename | PASS/FAIL 메시징을 HINT/CHECK 로 강등. 자동 판정 항목과 수동 점검 항목을 라벨로 명시 분리. ADR 참조 무결성만 종료 코드에 반영 |
+| Layer 1 ADR 참조 동기화 | `01 §4-1`/`01 §4-3`, `02 §4-3`/`02 §12`, `04 §10-7`, `TASKS Task 3-2` 의 ADR-0003 참조를 ADR-0004 §Context 로 변경. 02 의 환경 SSOT 참조에 ADR-0006 추가 |
+| `TASKS.md` 완료 항목 보정 | 2026-04-06 행의 제목을 "Phase 3 GCP 전환 준비 (ADR/구조)" 로 완화, monitoring 구현이 별도 브랜치에서 수행됨을 명시 |
+
+**구현이 본 브랜치에 포함되지 않는 항목** (다음 브랜치 `refactor/phase3-monitoring-split` 에서 수행):
+- `k8s/base/monitoring/values-prometheus.yml` 환경별 분리 (minikube / gke 각 1개)
+- `k8s/base/monitoring/servicemonitor.yml` → `k8s/base/services/peekcart/servicemonitor.yml` 이동
+- `install.sh` 파라미터화 또는 환경별 진입점 분리, `--create-namespace` 위치 결정
+- `k8s/base/namespace.yml` 에 `monitoring` Namespace 추가 여부 결정 (ADR-0006 불변식 5)
+- `kubectl apply -k overlays/minikube/` 단독 실행 self-contained 검증
+
+**주요 결정**:
+- **설계와 구현 분리**: 본 브랜치는 ADR/문서/governance 만 다루고 매니페스트 변경은 별도 브랜치로 분리. 리뷰 단위와 롤백 단위를 일치시키기 위함.
+- **ADR-0003 폐기 vs 유지**: 폐기 후 본문 흡수(option B) 를 채택. 1개 회고적 ADR + 1개 실제 ADR 구조보다 1개 통합 ADR 이 정직함. 본문은 이력 보존 차원에서 그대로 유지하고 Deprecation Note 만 추가.
+- **`consistency-hints.sh` 로 강등**: 실제 검증 로직 추가(option A) 대신 메시징 정직성 우선(option B). Phase 3 규모에서 `kubectl kustomize` dry-run + Layer 1 근접성 검증 로직을 작성하는 비용이 가치를 넘어섬. Phase 4 진입 시 재평가.
+
+**검증**:
+- `bash docs/consistency-hints.sh` → exit 0 (ADR 참조 무결성만, 다른 항목은 사람 확인 필요라고 명시)
+- ADR-0003 → ADR-0004 §Context 흡수 관계가 README 인덱스/Layer 1 문서 양쪽에 일관 반영됨
+- `git grep -n "ADR-0003"` → 잔존 참조는 ADR 본문(0002, 0003, 0004, 0005) 과 progress 이력에만 존재. Layer 1(01~07/CLAUDE.md/TASKS) 활성 참조는 모두 ADR-0004 §Context 로 갱신됨
+
+**이슈 / 후속 작업**:
+- 차기 브랜치 `refactor/phase3-monitoring-split` 에서 ADR-0006 구현. 완료 시 ADR-0006 Status 를 Proposed → Accepted 로 전환
+- Task 3-4 Step 0 체크리스트에 "GKE monitoring values 작성" 항목 추가 필요

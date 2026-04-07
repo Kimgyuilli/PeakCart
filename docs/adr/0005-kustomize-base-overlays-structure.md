@@ -1,6 +1,8 @@
 # ADR-0005: Kustomize base/overlays 매니페스트 구조
 
-- **Status**: Accepted
+- **Status**: Partially Superseded by ADR-0006
+  - app/infra 리소스의 base/overlays 구조 결정: 본 ADR 유지
+  - monitoring 스택(Helm values + Grafana ConfigMap/Alert + ServiceMonitor) 관련 결정: ADR-0006 으로 전환
 - **Date**: 2026-04-06
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: Phase 3 (부하 테스트 이후) · Phase 4
@@ -98,7 +100,7 @@ k8s/
 - GKE 배포: **현재 `k8s/overlays/gke/` 는 placeholder 이며 deploy-ready 가 아니다.** Task 3-4 Step 0 에서 Artifact Registry 이미지 경로, Service 노출 방식(Internal LB), StorageClass(`standard-rwo`), resources requests/limits 상향, secret 분리 전략을 추가한 후에만 적용 가능. 그 전에 `kubectl apply -k k8s/overlays/gke/` 를 실행하면 base 의 GHCR 이미지/ClusterIP/minikube 튜닝이 그대로 적용되어 imagePullBackoff 등으로 실패한다
 - 환경 차이가 `overlays/*/patches/` 에 국소화되어 리뷰/롤백 단위 명확
 - Phase 4 서비스 추가가 **파일 추가**로 완료 (기존 파일 수정 없음) → PR 리뷰 단순
-- `kubectl kustomize` 로 dry-run 검증 가능 → check-consistency.sh 에 통합 가능
+- `kubectl kustomize` 로 dry-run 검증 가능 → consistency-hints.sh 에 통합 가능
 
 ### 부정적 영향 / 트레이드오프
 - Kustomize 학습 필요 (단, Helm 대비 훨씬 낮음)
@@ -109,9 +111,18 @@ k8s/
 
 ### 후속 결정에 미치는 영향
 - Phase 4 MSA 전환 시 본 구조가 **서비스별 디렉토리 추가 패턴**의 기반이 됨
-- check-consistency.sh 에 `kubectl kustomize ... --dry-run` 검증 단계 추가 고려 (선택)
+- consistency-hints.sh 에 `kubectl kustomize ... --dry-run` 검증 단계 추가 고려 (선택)
 
 ## References
 - `docs/02-architecture.md` — k8s 디렉토리 구조 (본 ADR 반영 후 갱신 예정)
 - Kustomize 공식: https://kubectl.docs.kubernetes.io/guides/introduction/kustomize/
 - 선행: ADR-0003, ADR-0004
+- 부분 supersede: ADR-0006 (monitoring 스택 환경 분리)
+
+## Update Log
+
+본 ADR 은 `docs/adr/README.md` "본문 정정 예외 (Update Log)" 규칙에 따른 본문 직접 수정 이력을 기록합니다. 의사결정 자체는 변경되지 않았으며, 사실/파일명 정정만 수행되었습니다.
+
+| Date | Commit | 변경 내용 | 사유 |
+|------|--------|-----------|------|
+| 2026-04-07 | (본 브랜치) | 본문의 `check-consistency.sh` 참조를 `consistency-hints.sh` 로 일괄 갱신 | 동일 브랜치에서 스크립트가 rename 되어 깨진 참조 정정 (3차 외부 리뷰 후속) |

@@ -1,9 +1,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# minikube overlay — 로컬 개발/검증 환경 (ADR-0003 / ADR-0005)
+# minikube overlay — 로컬 개발/검증 환경 (ADR-0004 §Context, ADR-0005, ADR-0006)
 # - 이미지: 로컬 빌드 사용 (imagePullPolicy: Never)
 # - 외부 노출: NodePort 30080
+# - monitoring 스택은 본 overlay 에 포함되지 않습니다 (ADR-0006).
+#   k8s/monitoring/minikube/ 에서 별도 설치. 배포 순서는 docs/02-architecture.md §12.
 
 resources:
   - ../../base

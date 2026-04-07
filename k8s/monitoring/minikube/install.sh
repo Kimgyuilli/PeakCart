@@ -1,12 +1,17 @@
 #!/bin/bash
 # kube-prometheus-stack 설치 스크립트 (minikube 환경)
+#
+# 사전 조건: monitoring 네임스페이스가 이미 존재해야 합니다.
+#   kubectl apply -f k8s/monitoring/namespace.yml
+#
+# 배포 순서는 docs/02-architecture.md §12 참고.
 set -euo pipefail
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
 helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-  --namespace monitoring --create-namespace \
+  --namespace monitoring \
   -f "$(dirname "$0")/values-prometheus.yml"
 
 echo ""

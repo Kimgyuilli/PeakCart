@@ -88,7 +88,7 @@ Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes
 | Phase | 환경 | 용도 | 근거 ADR |
 |---|---|---|---|
 | Phase 1 · Phase 2 | **로컬 Docker Compose** (MySQL/Redis/Kafka 컨테이너) | 구현 및 통합 테스트 | — (기본 로컬 개발 환경) |
-| Phase 3 (Task 3-1 ~ 3-3) | **로컬 minikube** (CPU 4 / Memory 8GB) | CI, K8s 매니페스트 초기 작성, 관측성 스택 초기 검증 | ADR-0003 |
+| Phase 3 (Task 3-1 ~ 3-3) | **로컬 minikube** (CPU 4 / Memory 8GB) | CI, K8s 매니페스트 초기 작성, 관측성 스택 초기 검증 | ADR-0004 §Context |
 | Phase 3 (Task 3-4 ~ ) · Phase 4 | **GCP / GKE** (asia-northeast3-a, e2-standard-4) | 부하 테스트, HPA 검증, MSA 운영 | ADR-0004 |
 
 ### 4-2. 로컬 개발 환경 (상시)
@@ -98,4 +98,4 @@ Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes
 
 ### 4-3. 환경 진화의 의도
 
-Phase 1·2 에서는 Docker Compose 로 MySQL/Redis/Kafka 만 컨테이너화하고 앱은 로컬에서 직접 실행하여 빠른 반복에 집중했습니다. Phase 3 에서 K8s 관측성·HPA 검증이 필요해지면서 로컬 minikube 를 도입(Task 3-1 ~ 3-3)하였고, 부하 테스트 단계(Task 3-4)에서 minikube 의 메모리 한계가 측정 정확도를 제약하는 것이 명시적으로 드러나 GCP/GKE 로 전환했습니다. 결정 과정과 대안 검토는 ADR-0003, ADR-0004 에 상세히 기록되어 있습니다.
+Phase 1·2 에서는 Docker Compose 로 MySQL/Redis/Kafka 만 컨테이너화하고 앱은 로컬에서 직접 실행하여 빠른 반복에 집중했습니다. Phase 3 에서 K8s 관측성·HPA 검증이 필요해지면서 로컬 minikube 를 도입(Task 3-1 ~ 3-3)하였고, 부하 테스트 단계(Task 3-4)에서 minikube 의 메모리 한계가 측정 정확도를 제약하는 것이 명시적으로 드러나 GCP/GKE 로 전환했습니다. 결정 과정과 대안 검토는 ADR-0004 에 상세히 기록되어 있습니다 (구 ADR-0003 의 Phase 3 초기 minikube 선택 근거는 ADR-0004 §Context 로 흡수).

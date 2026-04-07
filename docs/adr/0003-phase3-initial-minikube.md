@@ -1,10 +1,17 @@
 # ADR-0003: Phase 3 초기 K8s 환경 — 로컬 minikube 채택
 
-- **Status**: Partially superseded by ADR-0004
-  - Task 3-1 ~ 3-3 (CI, K8s 최초 배포, 관측성 스택 초기 검증): 본 ADR 유지, 완료됨
-  - Task 3-4 ~ (부하 테스트, HPA, Phase 4 운영): ADR-0004 로 전환
-- **Decided**: 2026-01-15 (Phase 0 초기 설계 시점)
+> **⚠ Deprecation Note (2026-04-07)**
+>
+> 본 ADR 은 **Deprecated** 입니다. 본문은 이력 보존을 위해 그대로 남겨두나, **새로운 참조는 ADR-0004 §Context 를 사용**하십시오.
+>
+> **Deprecation 사유**: 3차 외부 리뷰에서 본 ADR 의 `Decided: 2026-01-15 (Phase 0)` 와 본문의 "K8s 는 Phase 3 부터 도입할 계획이었고" 서술 간 내적 모순이 지적되었습니다. Phase 0 시점에는 K8s 도입 자체가 결정되기 전이므로 minikube 선택을 "결정" 한다는 명제가 성립하지 않습니다. 본 ADR 은 ADR-0004 작성 시점에 소급 기록된 회고적 재구성이며, 실제 회의록이 존재하지 않습니다.
+>
+> **대체**: ADR-0004 §Context 가 Phase 3 Task 3-1~3-3 의 minikube 선택 근거(비용/반복 사이클/오프라인 가능성) 를 흡수했습니다. Phase 3 초기 환경 선택의 근거가 필요하면 ADR-0004 를 보십시오.
+
+- **Status**: Deprecated — 내용 ADR-0004 §Context 로 흡수 (2026-04-07)
+- **Decided**: N/A (본 ADR 은 회고적 재구성으로, 실제 결정 시점은 별도 회의록 없음)
 - **Documented**: 2026-04-06 (retroactive — ADR 인프라 도입 시점에 소급 기록)
+- **Deprecated**: 2026-04-07 (3차 외부 리뷰에서 타임라인 내적 모순 확인)
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: Phase 3 (Task 3-1 ~ 3-3)
 

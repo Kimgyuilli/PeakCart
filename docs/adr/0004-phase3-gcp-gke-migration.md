@@ -7,7 +7,22 @@
 
 ## Context
 
-Phase 3 Task 3-1~3-3 (CI, minikube 배포, kube-prometheus-stack) 까지는 ADR-0003의 로컬 minikube 환경에서 정상 완료되었습니다. 그러나 Task 3-4 (부하 테스트) 와 Task 3-5 (HPA 검증) 를 준비하면서 minikube 환경의 한계가 명시적으로 드러났습니다.
+> 본 §Context 는 2026-04-07 Deprecated 처리된 ADR-0003 의 내용을 흡수합니다. ADR-0003 은 회고적 재구성이었고 `Decided: Phase 0` 와 본문의 "K8s 는 Phase 3 부터 도입할 계획" 서술 간 내적 모순이 지적되어 폐기되었습니다. Phase 3 초기 minikube 선택의 근거를 본 절에 통합 기록합니다.
+
+### Phase 3 Task 3-1~3-3 (minikube) 의 선택 근거
+
+Phase 1·2 는 Docker Compose 로 MySQL/Redis/Kafka 를 띄우고 Spring Boot 를 로컬 실행하는 구조였습니다(`docker-compose.yml`). K8s 는 Phase 3 부터 도입할 계획이었고, **Phase 3 에서 K8s 를 처음 도입할 때의 초기 환경**은 다음 제약 하에 선택되었습니다.
+
+- **비용 최소화** — Phase 3 초기 시점에 클라우드 크레딧 미확보
+- **빠른 반복 사이클** — K8s 매니페스트 시행착오는 rebuild → apply → describe 왕복이 필수. 클라우드 왕복은 생산성 저하
+- **오프라인 개발 가능성** — 외부 의존 없이 재현 가능한 환경
+- **정확한 측정 요구의 지연** — Task 3-1~3-3 (CI, 매니페스트, 관측성 스택) 은 "측정 정확도" 보다 "반복 속도" 가 중요
+
+이 제약들 하에서 **로컬 minikube (CPU 4 / Memory 8GB)** 가 선택되었습니다. kind 는 Addon 생태계에서 minikube 대비 열세, 클라우드 K8s 는 반복 비용 문제로 각각 기각되었습니다. `k8s/overlays/minikube/` 는 Phase 3 이후에도 **로컬 개발용 검증 환경**으로 계속 유효합니다 (ADR-0005).
+
+### Phase 3 Task 3-4 (부하 테스트) 진입 시 드러난 한계
+
+Phase 3 Task 3-1~3-3 (CI, minikube 배포, kube-prometheus-stack) 까지는 위 minikube 환경에서 정상 완료되었습니다. 그러나 Task 3-4 (부하 테스트) 와 Task 3-5 (HPA 검증) 를 준비하면서 minikube 환경의 한계가 명시적으로 드러났습니다.
 
 **드러난 한계**:
 1. **메모리 예산** — minikube 8GB 안에 앱(1.2GB) + MySQL/Redis/Kafka(~2GB) + kube-prometheus-stack(~1.2GB) + 시스템(~1GB) 이 공존. 여유 1.5~2GB. HPA max=3 발동 시 추가 1~2GB 필요 → eviction 위험

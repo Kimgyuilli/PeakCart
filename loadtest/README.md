@@ -1,0 +1,122 @@
+# PeekCart 부하 테스트 (Phase 3 Task 3-4)
+
+> 측정 환경·방침: `docs/04-design-deep-dive.md` §10-7 · `docs/03-requirements.md` §7-1 · ADR-0004
+
+본 디렉토리는 부하 테스트 시나리오·시드 데이터·리포트 템플릿·정리 스크립트를 포함합니다. 애플리케이션 코드·Flyway migration 과는 독립적으로 유지됩니다.
+
+## 디렉토리 구조
+
+```
+loadtest/
+├── README.md                          (이 문서)
+├── cleanup.sh                         GCP 정리 (ADR-0004 운영 체크리스트)
+├── sql/
+│   ├── seed.sql                       시드 데이터 (users 1101, products 1010, 경합재고 1000)
+│   └── verify-concurrency.sql         시나리오 2 정합성 검증 쿼리
+├── scripts/
+│   ├── ngrinder-product-query.groovy  시나리오 1 (상품 조회 TPS)
+│   ├── order-concurrency.jmx          시나리오 2 (1,000 VUser 동시 주문)
+│   ├── users.csv                      JMeter 입력 (샘플 5건)
+│   └── generate-users-csv.sh          users.csv 재생성 (기본 1,100건)
+└── reports/
+    └── TEMPLATE.md                    측정 세션별 리포트 템플릿
+```
+
+## 전제 조건 (측정 세션 진입 전)
+
+1. GKE 클러스터 `peekcart-loadtest` 기동 (asia-northeast3-a, e2-standard-4 × 1)
+2. peekcart 이미지가 Artifact Registry 에 push 되어 있음
+3. `kustomize edit set image` 로 `PROJECT_ID_PLACEHOLDER` 가 실제 프로젝트 ID 로 치환됨 (**커밋 금지**, `k8s/overlays/gke/README.md` 참고)
+4. 4단계 apply 완료 (namespace → infra → services → monitoring, `docs/02-architecture.md` §12)
+5. 부하 발생기 VM `loadgen` 에 JDK 17, nGrinder, JMeter 설치 완료
+6. billing alert ₩50,000 설정 확인
+
+## 절차
+
+### A. 시드 적용
+
+```bash
+# 1) JMeter 입력 CSV 재생성 (기본 1,100 users)
+bash loadtest/scripts/generate-users-csv.sh
+
+# 2) 클러스터의 MySQL Pod 로 seed.sql 실행
+kubectl -n peekcart exec -i <mysql-pod> -- \
+  mysql -upeekcart -p<password> peekcart < loadtest/sql/seed.sql
+
+# 검증
+kubectl -n peekcart exec <mysql-pod> -- \
+  mysql -upeekcart -p<password> peekcart -e \
+  "SELECT COUNT(*) users FROM users; SELECT COUNT(*) products FROM products; SELECT SUM(stock) contention_stock FROM inventories WHERE product_id > 1000;"
+# users=1101 products=1010 contention_stock=1000
+```
+
+### B. 시나리오 1 — 상품 조회 TPS (캐싱 전/후)
+
+```bash
+# Baseline (캐시 OFF)
+kubectl -n peekcart set env deployment/peekcart PEEKCART_CACHE_ENABLED=false
+kubectl -n peekcart rollout status deployment/peekcart
+
+# nGrinder controller UI:
+#   script = loadtest/scripts/ngrinder-product-query.groovy
+#   property: grinder.peekcart.baseUrl = http://<gke-internal-lb-or-cluster-ip>:8080
+#   warm-up: 1분 / 10 VUser
+#   run:     5분 / 50 VUser
+# 실행 후 TPS · MTT · p95 · p99 · 에러율 기록
+
+# 개선 후 (캐시 ON) — 동일 스크립트 재실행
+kubectl -n peekcart set env deployment/peekcart PEEKCART_CACHE_ENABLED=true
+kubectl -n peekcart rollout status deployment/peekcart
+# 동일 warm-up + run 반복
+```
+
+### C. 시나리오 2 — 1,000 VUser 동시 주문
+
+```bash
+# 시드 재적용 (시나리오 1 잔여물 제거)
+kubectl -n peekcart exec -i <mysql-pod> -- \
+  mysql -upeekcart -p<password> peekcart < loadtest/sql/seed.sql
+
+# loadgen VM 에서 (users.csv 와 .jmx 는 같은 디렉토리에)
+cd loadtest/scripts
+jmeter -n -t order-concurrency.jmx \
+  -Jbaseurl=http://<app-endpoint>:8080 \
+  -Jvusers=1000 -JrampUp=30 \
+  -l results.jtl \
+  -e -o ../reports/YYYY-MM-DD/jmeter-html/
+
+# 정합성 검증
+kubectl -n peekcart exec -i <mysql-pod> -- \
+  mysql -upeekcart -p<password> peekcart < loadtest/sql/verify-concurrency.sql \
+  | tee ../reports/YYYY-MM-DD/sql/verify-concurrency-output.txt
+```
+
+### D. 시나리오 3 — Kafka Consumer Lag
+
+시나리오 2 실행 구간 동안 Grafana "Kafka Lag" 대시보드를 관찰하며 PNG 캡처. 별도 부하 발생 없음.
+
+### E. 리포트 작성
+
+1. `loadtest/reports/TEMPLATE.md` 를 `loadtest/reports/YYYY-MM-DD/REPORT.md` 로 복사
+2. (a)~(f) 항목을 채움
+3. Grafana 스크린샷을 `loadtest/reports/YYYY-MM-DD/grafana/` 에 저장
+4. jmeter-html · results.jtl · verify-concurrency-output.txt 첨부
+
+### F. 정리 (절대 스킵 금지)
+
+```bash
+bash loadtest/cleanup.sh --dry-run    # 먼저 확인
+bash loadtest/cleanup.sh              # 실제 삭제
+```
+
+종료 후 billing 콘솔에서 당일·익일 과금 확인.
+
+## 캐시 토글 동작 확인
+
+`peekcart.cache.enabled=false` 시 `NoOpCacheManager` 가 주입되어 `@Cacheable` 이 pass-through. 기본값은 `true`. 구현은 `src/main/java/com/peekcart/global/config/CacheConfig.java` 의 `@ConditionalOnProperty` 참고.
+
+## 비고
+
+- 절대값이 아닌 **개선 비율** 에 초점 (§10-7 공통 원칙)
+- 환경·도구·시나리오 파라미터를 리포트에 반드시 함께 기록하여 재현 가능성 확보
+- Task 3-5 (HPA 검증) 는 본 디렉토리 범위 외 — 별도 Task 로 수행

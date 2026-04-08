@@ -1,0 +1,10 @@
+# GKE: Internal LoadBalancer 로 노출 (VPC 내부에서만 접근)
+# - 부하 발생기 VM 을 같은 VPC/zone 에 두어 네트워크 병목 제거 (ADR-0004)
+# - 외부 공개가 필요하면 Ingress + IAP 로 별도 구성. 본 overlay 는 Internal 고정
+- op: replace
+  path: /spec/type
+  value: LoadBalancer
+- op: add
+  path: /metadata/annotations
+  value:
+    networking.gke.io/load-balancer-type: "Internal"

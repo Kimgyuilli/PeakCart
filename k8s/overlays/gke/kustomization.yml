@@ -3,16 +3,38 @@ kind: Kustomization
 
 # GKE overlay — Phase 3 Task 3-4 부하 테스트 / Phase 4 운영 환경 (ADR-0004, ADR-0005, ADR-0006)
 #
-# Task 3-4 Step 0 에서 다음 패치를 추가할 예정:
-#   - StorageClass 명시 (standard-rwo)
-#   - 이미지 태그를 Artifact Registry 경로로 교체
-#   - peekcart Service 를 LoadBalancer (Internal LB) 로 변경
-#   - resources requests/limits 를 GKE 노드 크기에 맞게 상향
+# 본 overlay 는 base 에 다음 환경 차이를 적용합니다:
+#   - peekcart Service: ClusterIP → LoadBalancer (Internal, GKE annotation)
+#   - peekcart Deployment: resources requests/limits 상향 (e2-standard-4 기준)
+#   - infra PVC (mysql/redis/kafka): storageClassName = standard-rwo 명시
+#   - 이미지: GHCR → Artifact Registry 경로 (PROJECT_ID_PLACEHOLDER 치환 필요)
 #
-# monitoring 스택은 본 overlay 에 포함되지 않습니다 (ADR-0006).
-# Task 3-4 Step 0-b 에서 k8s/monitoring/gke/ 의 values + install.sh 작성 필요.
+# PROJECT_ID 치환 방법 (README 참고):
+#   cd k8s/overlays/gke
+#   kustomize edit set image \
+#     ghcr.io/kimgyuilli/peakcart=asia-northeast3-docker.pkg.dev/<YOUR_PROJECT>/peekcart/peekcart:latest
+#   (편집 결과는 커밋하지 않는다 — operator 로컬 상태)
 #
-# 현재는 base 를 그대로 참조하는 placeholder 입니다.
+# monitoring 스택은 본 overlay 에 포함되지 않습니다 (ADR-0006 불변식 1).
+# k8s/monitoring/gke/ 에서 별도 설치. 배포 순서는 docs/02-architecture.md §12.
 
 resources:
   - ../../base
+
+patches:
+  - path: patches/peekcart-deployment.yml
+    target:
+      kind: Deployment
+      name: peekcart
+  - path: patches/peekcart-service.yml
+    target:
+      kind: Service
+      name: peekcart
+  - path: patches/pvc-storageclass.yml
+    target:
+      kind: PersistentVolumeClaim
+
+images:
+  - name: ghcr.io/kimgyuilli/peakcart
+    newName: asia-northeast3-docker.pkg.dev/PROJECT_ID_PLACEHOLDER/peekcart/peekcart
+    newTag: latest

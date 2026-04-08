@@ -22,14 +22,10 @@ resources:
   - ../../base
 
 patches:
+  # Deployment / Service 는 strategic merge (gvk + name 기반 자동 매칭, target 불필요)
   - path: patches/peekcart-deployment.yml
-    target:
-      kind: Deployment
-      name: peekcart
   - path: patches/peekcart-service.yml
-    target:
-      kind: Service
-      name: peekcart
+  # PVC 는 JSON6902 — base 의 mysql/redis/kafka PVC 3 건에 동일 storageClassName 일괄 적용
   - path: patches/pvc-storageclass.yml
     target:
       kind: PersistentVolumeClaim

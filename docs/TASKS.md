@@ -327,7 +327,7 @@
 ---
 
 ### Task 3-2: K8s 배포 (minikube 초기 / GKE 운영 전환)
-**상태**: ✅ 완료 (minikube 범위) · 🔄 GKE 마이그레이션은 Task 3-4 Step 0 에서 수행
+**상태**: ✅ 완료 (minikube 범위) · GKE overlay/매니페스트 작성 완료 (Task 3-4 Step 0). 실 클러스터 apply 는 측정 직전 수동 수행
 **목표**: K8s 매니페스트 작성. Phase 3 초기 검증은 로컬 minikube, 부하 테스트부터는 GKE 로 운영 전환 (ADR-0004 §Context 가 minikube 선택 근거 포함, 본격 전환은 ADR-0004 본문).
 
 | 항목 | 상태 | 비고 |
@@ -381,8 +381,8 @@
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
-| **Step 0-a**: GKE 클러스터 프로비저닝 (StorageClass `standard-rwo`, Internal LB, Artifact Registry) | 🔲 | `k8s/overlays/gke/` 패치 작성 (ADR-0005 §Consequences) |
-| **Step 0-b**: GKE monitoring values 작성 (`k8s/monitoring/gke/values-prometheus.yml` + `install.sh`) | 🔲 | ADR-0006 불변식 6 — 현재는 placeholder/exit 1. retention/limits/Service type 결정 |
+| **Step 0-a**: GKE overlay 패치 작성 (StorageClass `standard-rwo`, Internal LB, Artifact Registry, 리소스 상향) | ✅ | `k8s/overlays/gke/{kustomization.yml,README.md,patches/}`. 클러스터 프로비저닝/이미지 운반은 측정 직전 사용자 수동 (ADR-0004 운영 체크리스트) |
+| **Step 0-b**: GKE monitoring values 작성 (`k8s/monitoring/gke/values-prometheus.yml` + `install.sh`) | ✅ | retention 24h, PVC standard-rwo 5Gi, Grafana Internal LB, 리소스 상향. ADR-0006 불변식 6 충족 |
 | nGrinder 설치 + 설정 | 🔲 | 상품 조회 TPS 측정용 (`docs/03-requirements.md` 7-1) |
 | JMeter 설치 + 설정 | 🔲 | 동시 주문 정합성 시나리오용 (`docs/03-requirements.md` 7-1) |
 | Baseline TPS 측정 (캐싱 비활성화 상태) | 🔲 | 목표 수치 확정 기준 (`docs/03-requirements.md` 7-1) |
@@ -457,4 +457,5 @@
 | 2026-04-05 | Task 3-3 코드 리뷰 | 설계 문서 대조 + 코드 리뷰 7건 개선: `metrics.tags.application` 추가(P0 PromQL 전체 불일치), orderId MDC 추가(P1 설계 문서 불일치), Grafana datasource uid 프로비저닝(P1), Helm subchart 리소스 키 수정(P2), retention 2h→6h(P2), Pod CPU 단위 수정(P2), install.sh 멱등성(P2). 전체 235건 테스트 통과 |
 | 2026-04-05 | Task 3-3 minikube 검증 | 매니페스트 수정 3건: Service `app: peekcart` 레이블 누락, ServiceMonitor `release` 레이블 누락, `serviceMonitorNamespaceSelector` 전체 허용. Prometheus 16개 타겟 active, Grafana 대시보드 JVM/Kafka Lag 데이터 확인. API 메트릭은 트래픽 발생 후, Pod CPU/Memory는 cAdvisor 지연 해소 후 확인 필요 |
 | 2026-04-06 | Phase 3 GCP 전환 준비 (ADR/구조) | 6개 세션 순차 실행: ① ADR 인프라(`docs/adr/`, template, README, `check-consistency.sh`) ② ADR 0001~0005 작성(레이어드+DDD/MSA 진화/Phase3 초기 minikube/Phase3 GKE 전환/Kustomize base+overlays) ③ Layer 1 핵심 문서(01 §4 운영 환경 SSOT 신설, 04 §10-7 환경 맥락, 07 환경 전환 노트) ④ Layer 1 파생(02 §4-3/§12, 03 §7-1, TASKS, CLAUDE.md) + ADR-0003 사후 정정(Phase 1·2 → Phase 3 초기) ⑤ k8s 매니페스트 Kustomize 재배치(`k8s/base/` + `overlays/{minikube,gke}/`, minikube 패치 분리) ⑥ PHASE3.md 작업 이력 + 힌트 스크립트 실행. 브랜치 `refactor/phase3-adr-kustomize-prep`, 8개 커밋. **본 작업은 ADR/구조 설계만 포함**하며 monitoring 스택의 환경 분리(ADR-0006)와 GKE overlay 실제 매니페스트 작성은 별도 브랜치(`refactor/phase3-monitoring-split` 예정)에서 수행 |
+| 2026-04-08 | Task 3-4 Step 0 완료 (GKE overlay + monitoring values) | `k8s/overlays/gke/` patches 3개(peekcart Service Internal LB, Deployment 리소스 상향 500m/1Gi~2000m/2Gi, infra PVC standard-rwo) + images 치환(GHCR → Artifact Registry, `PROJECT_ID_PLACEHOLDER`) + README(이미지 수동 운반 / `kustomize edit set image` 절차 / ADR-0004 정리 명령). `k8s/monitoring/gke/values-prometheus.yml` 본문 작성(retention 24h, PVC standard-rwo 5Gi, Grafana Internal LB annotation, 리소스 상향) + `install.sh` 활성화. `02-architecture.md §12` 에 GKE 4단계 배포 순서 추가. 검증: `kubectl kustomize` 양 overlay 통과, `helm template` 통과(load-balancer-type Internal/retention 24h/standard-rwo 확인), `consistency-hints.sh` exit 0. 실 GKE 클러스터 apply 는 측정 직전 별도 작업. 브랜치 `feat/phase3-gke-overlay`, 1개 커밋 |
 | 2026-04-07 | ADR-0006 구현 (monitoring 스택 base 분리) | `k8s/monitoring/{namespace.yml, shared/, minikube/, gke/}` 신규 트리. ServiceMonitor 를 `base/services/peekcart/` 로 이동(불변식 2). monitoring NS SSOT 단일화 + `install.sh --create-namespace` 제거(불변식 5). GKE monitoring 은 명시적 TODO(values 헤더 + `install.sh exit 1`, 불변식 6). `02-architecture §4-3/§12` 갱신 — 4단계 배포 순서 + "self-contained overlay" 운영 해석 노트(ServiceMonitor CRD 선행 의존). TASKS Task 3-4 Step 0 에 GKE monitoring values 작성 항목 추가. **ADR-0006 Status `Proposed → Accepted`**. 검증: `kubectl kustomize` 양 overlay 통과(monitoring NS 0건, ServiceMonitor 1건 peekcart NS), `consistency-hints.sh` exit 0. 실 클러스터 apply 검증은 Task 3-4 Step 0 GKE 환경 구성과 함께 수행. 브랜치 `refactor/phase3-monitoring-split`, 1개 커밋(`c28ba26`) |

@@ -1,10 +1,23 @@
 #!/bin/bash
 # kube-prometheus-stack 설치 스크립트 (GKE 환경)
 #
-# ADR-0006 불변식 6 에 따른 명시적 TODO. Task 3-4 Step 0 에서 작성합니다.
-# values-prometheus.yml 작성 + 본 exit 해제 + 사전 조건 정리 후 활성화.
+# 사전 조건: monitoring 네임스페이스가 이미 존재해야 합니다 (ADR-0006 불변식 5).
+#   kubectl apply -f k8s/monitoring/namespace.yml
+#
+# 배포 순서는 docs/02-architecture.md §12 참고.
 set -euo pipefail
 
-echo "ERROR: GKE monitoring install 은 아직 작성되지 않았습니다." >&2
-echo "       Task 3-4 Step 0 (ADR-0006 불변식 6) 참고." >&2
-exit 1
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  -f "$(dirname "$0")/values-prometheus.yml"
+
+echo ""
+echo "=== 설치 완료 ==="
+echo "Grafana (Internal LB IP):"
+echo "  kubectl get svc kube-prometheus-stack-grafana -n monitoring"
+echo "Prometheus (port-forward):"
+echo "  kubectl port-forward svc/kube-prometheus-stack-prometheus -n monitoring 9090:9090"
+echo "ID/PW: admin / admin"

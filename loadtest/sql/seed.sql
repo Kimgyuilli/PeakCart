@@ -95,20 +95,23 @@ SELECT
     @now
 FROM seq;
 
--- 경합 타깃 10건 (id 1001~1010 로 연속 삽입)
-INSERT INTO products (category_id, name, description, price, image_url, status, created_at)
-WITH RECURSIVE seq AS (
-    SELECT 1 AS n UNION ALL SELECT n + 1 FROM seq WHERE n < 10
-)
-SELECT
-    1,
-    CONCAT('Contention Target ', n),
-    'Scarcity item for concurrent order scenario',
-    5000,
-    CONCAT('https://example.test/img/contention-', n, '.jpg'),
-    'ON_SALE',
-    @now
-FROM seq;
+-- 경합 타깃 10건 — 명시 ID (id 1001~1010) 로 삽입.
+-- 이유: innodb_autoinc_lock_mode=2 (MySQL 8 기본) 에서 INSERT...SELECT 는
+--       auto_increment 를 블록 단위로 할당하여 ID 간극이 발생. JMeter 시나리오가
+--       고정 범위 [1001..1010] 을 참조하므로 ID 안정성이 필수.
+ALTER TABLE products AUTO_INCREMENT = 1001;
+
+INSERT INTO products (id, category_id, name, description, price, image_url, status, created_at) VALUES
+    (1001, 1, 'Contention Target 1',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-1.jpg',  'ON_SALE', @now),
+    (1002, 1, 'Contention Target 2',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-2.jpg',  'ON_SALE', @now),
+    (1003, 1, 'Contention Target 3',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-3.jpg',  'ON_SALE', @now),
+    (1004, 1, 'Contention Target 4',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-4.jpg',  'ON_SALE', @now),
+    (1005, 1, 'Contention Target 5',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-5.jpg',  'ON_SALE', @now),
+    (1006, 1, 'Contention Target 6',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-6.jpg',  'ON_SALE', @now),
+    (1007, 1, 'Contention Target 7',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-7.jpg',  'ON_SALE', @now),
+    (1008, 1, 'Contention Target 8',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-8.jpg',  'ON_SALE', @now),
+    (1009, 1, 'Contention Target 9',  'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-9.jpg',  'ON_SALE', @now),
+    (1010, 1, 'Contention Target 10', 'Scarcity item for concurrent order scenario', 5000, 'https://example.test/img/contention-10.jpg', 'ON_SALE', @now);
 
 -- ------------------------------------------------------------
 -- 5. 재고

@@ -50,6 +50,10 @@ crane copy \
 `docs/02-architecture.md §12` 의 GKE 배포 순서를 따릅니다.
 ServiceMonitor CRD 선행 의존이 있으므로 monitoring 스택을 먼저 설치해야 합니다.
 
+> **중요**: 아래 4단계는 **모두** 실행해야 부하 테스트 환경이 완성됩니다.
+> `kubectl apply -k overlays/gke/` 단독 실행은 monitoring 스택을 포함하지 않습니다 (ADR-0006 불변식 1·4).
+> 3단계(shared 대시보드/Alert) 를 건너뛰면 Grafana 가 비어 있는 상태로 뜨니 주의.
+
 ```bash
 # 1. monitoring NS
 kubectl apply -f k8s/monitoring/namespace.yml

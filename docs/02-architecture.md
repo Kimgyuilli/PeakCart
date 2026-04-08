@@ -370,7 +370,9 @@ peekcart/
     │   │   ├── kustomization.yml
     │   │   └── patches/              # imagePullPolicy: Never, Service type: NodePort 등
     │   └── gke/                      # 부하 테스트 / 운영 (ADR-0004)
-    │       └── kustomization.yml     # 현재 placeholder, Task 3-4 Step 0 에서 patches 추가
+    │       ├── kustomization.yml     # patches + images (PROJECT_ID placeholder)
+    │       ├── README.md             # 이미지 운반 / PROJECT_ID 치환 / 정리 절차
+    │       └── patches/              # peekcart Service LB(Internal), Deployment 리소스 상향, PVC standard-rwo
     └── monitoring/                   # base/ 분리된 관측성 스택 (ADR-0006)
         ├── namespace.yml             # monitoring NS SSOT (불변식 5)
         ├── shared/                   # 환경 무관 자원
@@ -380,9 +382,9 @@ peekcart/
         ├── minikube/
         │   ├── values-prometheus.yml     # NodePort 30030, retention 6h, 경량 limits
         │   └── install.sh                # helm upgrade --install (멱등)
-        └── gke/                          # ADR-0006 불변식 6: 명시적 TODO
-            ├── values-prometheus.yml     # 헤더에 작성 가이드, 비어 있음
-            └── install.sh                # exit 1 (Task 3-4 Step 0 에서 활성화)
+        └── gke/
+            ├── values-prometheus.yml     # Internal LB, retention 24h, PVC standard-rwo 5Gi
+            └── install.sh                # helm upgrade --install (멱등)
 ```
 
 - **최초 배포 순서 (fresh 클러스터, minikube 기준)**:
@@ -392,7 +394,12 @@ peekcart/
   4. `kubectl apply -k k8s/overlays/minikube/` — app/infra + ServiceMonitor 적용. 2번이 등록한 CRD 가 충족되어야 성공
 - **"self-contained overlay" 의 운영 해석 (ADR-0006 불변식 4)**: `apply -k overlays/minikube/` 가 단독으로 fresh 클러스터에 성공한다는 뜻이 **아니다**. ServiceMonitor 는 CRD 의존성을 가지며, K8s 생태계의 표준 패턴(cert-manager, Istio 등)과 동일하게 CRD 선행 설치가 문서화된 순서로 보장된다. overlay 가 self-contained 라는 것은 "monitoring NS 리소스를 포함하지 않으며, 외부 상태를 만들거나 변형하지 않는다" 는 의미이다.
 - **재배포 (idempotent)**: 동일 4개 명령을 순서대로 재실행. install.sh 는 `helm upgrade --install` 멱등
-- **GKE overlay 는 현재 placeholder**: `k8s/overlays/gke/` 와 `k8s/monitoring/gke/` 모두 Task 3-4 Step 0 완료 전까지 deploy-ready 가 아님. 적용 금지 (ADR-0005, ADR-0006 §Consequences 참고)
+- **최초 배포 순서 (fresh 클러스터, GKE)**: minikube 와 동일한 4단계. install 진입점만 환경별로 분리:
+  1. `kubectl apply -f k8s/monitoring/namespace.yml`
+  2. `bash k8s/monitoring/gke/install.sh` — Internal LB Grafana, retention 24h, PVC standard-rwo
+  3. `kubectl apply -f k8s/monitoring/shared/dashboards-configmap.yml -f k8s/monitoring/shared/grafana-alerts.yml`
+  4. `kubectl apply -k k8s/overlays/gke/` — apply 전 `kustomize edit set image` 로 PROJECT_ID 치환 (`k8s/overlays/gke/README.md` 참고). 편집 결과는 커밋하지 않음
+- **GKE 운영 체크리스트** (ADR-0004): 측정 종료 시 클러스터/VM/PD/예약 IP 정리. 상세 명령은 `k8s/overlays/gke/README.md` 또는 ADR-0004 §운영 체크리스트
 - **Phase 4 서비스 추가 시**: `k8s/base/services/` 하위에 형제 디렉토리 추가 + 각 서비스의 `servicemonitor.yml` 동봉 + `base/kustomization.yml` 에 참조 추가. 기존 파일 수정 없음 (ADR-0006 §긍정적 영향)
 
 ### Phase 4 — MSA (Gradle 멀티모듈)

@@ -359,3 +359,64 @@ ADR-0006 구현 직후 GKE overlay 와 GKE monitoring values 가 명시적 TODO 
 
 - Task 3-4 본체: 클러스터 프로비저닝 → 이미지 수동 push → 4단계 apply → nGrinder/JMeter 시나리오 3건
 - Task 3-5: HPA 매니페스트 작성 (Step 0 범위 외, 의도적으로 분리)
+
+---
+
+## 2026-04-08 — Task 3-4 Step 0-c (세션 A: 로컬 준비 + 리허설)
+
+### 배경
+
+Step 0-a/0-b 로 매니페스트는 오프라인 렌더링까지 통과했으나, Task 3-4 본체에 바로 GKE 로 진입할 경우 (a) 시드·시나리오 스크립트의 오동작, (b) JMeter plan 의 JSONPath/페이로드 오류, (c) 캐시 토글 메커니즘 부재 등이 **과금 세션 안에서 발견되어 재측정을 유발**할 리스크가 있었다.
+
+본 작업은 이러한 리스크를 로컬(과금 0) 에서 사전 소진하고, Task 3-4 를 3 세션으로 안전 분할하기 위한 **세션 A** 를 수행한다.
+
+### 결정 수치 · 전략 (본 작업에서 확정)
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 3-세션 분할 | A 로컬 준비 / B 시나리오 1 만 (GKE) / C 시나리오 2+3 (GKE) | 과금 시간 최소화, 정리 누락 방지, 실패 시 롤백 지점 명확. 본 작업은 A 범위 |
+| 캐시 토글 메커니즘 | `@ConditionalOnProperty(peekcart.cache.enabled, matchIfMissing=true)` + `NoOpCacheManager` | 이미지 2개 빌드 회피, ConfigMap 환경변수 1개로 재배포만으로 전환. 기본값 유지로 기존 테스트 영향 0 (대안: profile 분기 / 이미지 2개 → 모두 운영 복잡도 높음) |
+| 시드 데이터 배치 | `loadtest/sql/seed.sql` (Flyway 독립) | 본 앱 migration 을 오염시키지 않음. 롤백은 재시드 또는 클러스터 재생성 |
+| 시드 규모 | users 1,101 (admin 1 + loaduser 1100) · products 1,010 · 경합재고 1,000 | JMeter 1,000 VUser + 여유분, 경합 상품 10개 × 재고 100 = 오버셀링 검증용 총합 1,000 |
+| 경합 상품 ID 고정 방식 | 명시 `VALUES` + `ALTER TABLE AUTO_INCREMENT=1001` | `innodb_autoinc_lock_mode=2` 로 `INSERT...SELECT` 가 블록 할당하여 ID 간극 발생 (리허설 중 실측: 1024..1033). JMeter `__Random(1001,1010)` 이 고정 범위를 참조하므로 ID 안정성 필수 |
+| 비밀번호 해시 생성 | `htpasswd -bnBC 10 "" "LoadTest123!"` → `$2a$10$...` | 별도 헬퍼 스크립트/Java 실행 없이 표준 도구로 재생성 가능. `$2y$` → `$2a$` 치환으로 Spring Security 호환 |
+| 리허설 범위 | docker-compose + 앱 로컬 실행 + curl 스모크 (JMeter/nGrinder 로컬 설치 없음) | 목적은 "수치 수집" 아닌 "파이프라인 동작 증명". JMeter/nGrinder 는 세션 B/C 에서 loadgen VM 에 설치 (일회성 VM) |
+
+### 완료 항목
+
+| 항목 | 변경 |
+|---|---|
+| `src/main/java/com/peekcart/global/config/CacheConfig.java` | `@ConditionalOnProperty(peekcart.cache.enabled)` 추가. true (기본) → `RedisCacheManager`, false → `NoOpCacheManager`. `@EnableCaching` 유지로 `@Cacheable` 어노테이션 pass-through |
+| `k8s/base/services/peekcart/configmap.yml` | `PEEKCART_CACHE_ENABLED: "true"` 기본값 추가 (주석으로 토글 목적 명시) |
+| `loadtest/sql/seed.sql` | 신규 — 1,101 users (BCrypt) + 5 categories + 1,010 products (일반 1000 + 경합 10) + inventories. 경합 상품은 명시 `VALUES` + `ALTER TABLE AUTO_INCREMENT` |
+| `loadtest/sql/verify-concurrency.sql` | 신규 — 시나리오 2 정합성 검증 쿼리 3건 (상품별 consistency / 총 판매량 oversell_check / 주문 상태 분포) |
+| `loadtest/scripts/ngrinder-product-query.groovy` | 신규 — 시나리오 1 (목록 80% / 상세 20%, `grinder.peekcart.baseUrl` 프로퍼티화) |
+| `loadtest/scripts/order-concurrency.jmx` | 신규 — 시나리오 2 JMeter plan (로그인 → JSONPath accessToken 추출 → 장바구니 → 주문, 1000 VUser/30s ramp) |
+| `loadtest/scripts/users.csv` + `generate-users-csv.sh` | JMeter CSVDataSet 입력 (기본 1,100 users 재생성) |
+| `loadtest/cleanup.sh` | ADR-0004 운영 체크리스트 스크립트화 (dry-run 지원, cluster/vm/disks/addresses 4 단계) |
+| `loadtest/reports/TEMPLATE.md` | §10-7 (a)~(f) 기록 스켈레톤 |
+| `loadtest/README.md` | 절차 / 사전조건 / A..F 단계별 가이드 |
+| `docs/TASKS.md` Task 3-4 | Step 0-c 행 추가(✅), nGrinder/JMeter 항목 비고에 "스크립트 준비 완료, 세션 B/C 에서 VM 설치" 명시. 완료 작업 표에 2026-04-08 행 |
+
+### 검증
+
+docker-compose (MySQL/Redis/Kafka) + `SPRING_PROFILES_ACTIVE=local` 앱 구동 후:
+
+- `ProductCacheIntegrationTest` 5건 통과 (`tests=5 failures=0`) — 캐시 토글 후 기본 동작 보존
+- `seed.sql` 적용 → `users=1101, products=1010, inventories=1010, contention_stock=1000` (카운트 일치)
+- **버그 1건 발견·수정**: 첫 적용 시 경합 상품 ID 가 1024..1033 으로 생성 (MySQL 8 기본 `innodb_autoinc_lock_mode=2` 블록 할당). 명시 `VALUES` 로 수정 후 재적용 → 1001..1010 연속 생성 확인
+- curl 플로우: `POST /api/v1/auth/login` 200 → `$.data.accessToken` 추출 → `POST /api/v1/cart/items {productId:1001}` 201 → `POST /api/v1/orders` 201 → DB `orders.status=PENDING`, `inventories.stock 100→99` 차감 확인
+- `verify-concurrency.sql`: 1건 주문 후 `consistency=OK`, `oversell_check=OK`, 주문 상태 분포 `PENDING: 1` 출력
+- `cleanup.sh --dry-run`: 4 단계 명령 정상 표시
+
+### 검증 수준
+
+- 파이프라인 동작 증명까지. **수치 수집 아님**.
+- JMeter/nGrinder 는 로컬 설치 없이 `.jmx` / `.groovy` 파일 작성만 수행. 실제 도구 실행은 세션 B/C 에서 loadgen VM 위에서.
+- 캐시 OFF 실측은 세션 B 에서 GKE 환경에 `PEEKCART_CACHE_ENABLED=false` 로 재배포하여 측정.
+
+### 미해결 / 후속
+
+- **사전 확인 3 (GCP 환경)**: 프로젝트 ID, Artifact Registry 레포 존재 여부, `gcloud auth configure-docker` 상태, billing alert ₩50,000 설정 — **세션 B 착수 직전 확인 필요**
+- 세션 B: GKE 클러스터 + loadgen VM 생성 → 4단계 apply → 스모크 → 시나리오 1 만 측정 → `cleanup.sh` 실행
+- 세션 C: 재프로비저닝 → 시나리오 2+3 측정 → 리포트 최종화 → `cleanup.sh`

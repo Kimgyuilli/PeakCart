@@ -376,7 +376,7 @@
 ---
 
 ### Task 3-4: 부하 테스트
-**상태**: 🔲 대기
+**상태**: 🔄 진행 중 (세션 B 완료, 세션 C 대기)
 **목표**: 부하 테스트 시나리오 실행, 캐싱 전/후 TPS 비교 + 동시 주문 정합성 + Kafka Lag 측정
 
 | 항목 | 상태 | 비고 |
@@ -384,13 +384,13 @@
 | **Step 0-a**: GKE overlay 패치 작성 (StorageClass `standard-rwo`, Internal LB, Artifact Registry, 리소스 상향) | ✅ | `k8s/overlays/gke/{kustomization.yml,README.md,patches/}`. 클러스터 프로비저닝/이미지 운반은 측정 직전 사용자 수동 (ADR-0004 운영 체크리스트) |
 | **Step 0-b**: GKE monitoring values 작성 (`k8s/monitoring/gke/values-prometheus.yml` + `install.sh`) | ✅ | retention 24h, PVC standard-rwo 5Gi, Grafana Internal LB, 리소스 상향. ADR-0006 불변식 6 충족 |
 | **Step 0-c**: 세션 A — 로컬 준비 (캐시 토글, 시드, 시나리오 스크립트, cleanup, docker-compose 리허설) | ✅ | `loadtest/` 트리 + `CacheConfig @ConditionalOnProperty`. 3-세션 실행 전략 (A 로컬 → B 시나리오 1 → C 시나리오 2+3) 으로 비용·정리 리스크 최소화 |
-| nGrinder 설치 + 설정 (loadgen VM) | 🔲 | 스크립트 준비 완료 (`loadtest/scripts/ngrinder-product-query.groovy`). 세션 B 에서 VM 에 설치 후 실행 |
+| nGrinder 설치 + 설정 (loadgen VM) | ✅ | nGrinder 3.5.9-p1 controller + agent. JDK 11 필수 (`update-java-alternatives`), JDK 17 미지원 |
 | JMeter 설치 + 설정 (loadgen VM) | 🔲 | 시나리오 준비 완료 (`loadtest/scripts/order-concurrency.jmx` + `users.csv`). 세션 C 에서 VM 에 설치 후 실행 |
-| Baseline TPS 측정 (캐싱 비활성화 상태) | 🔲 | 목표 수치 확정 기준 (`docs/03-requirements.md` 7-1) |
-| 시나리오 1: 상품 조회 TPS (캐싱 전/후 비교) | 🔲 | 목표: p99 ≤ 100ms, 캐시 미적용 대비 TPS 3배 이상 |
-| 시나리오 2: 동시 주문 정합성 (1,000 VUser) | 🔲 | 목표: 정합성 100%, 오버셀링 0건 |
-| 시나리오 3: Kafka Consumer Lag 모니터링 | 🔲 | 목표: 정상 구간 Lag 0 유지 (Prometheus 대시보드 연계) |
-| 테스트 리포트 작성 (전/후 비교 수치) | 🔲 | |
+| Baseline TPS 측정 (캐싱 비활성화 상태) | ✅ | 265.0 TPS / 188.38 ms MTT / 에러 0 (50 VUser, 5분) |
+| 시나리오 1: 상품 조회 TPS (캐싱 전/후 비교) | ✅ | 캐시 ON 612.7 TPS / 81.87 ms MTT / 에러 0 → **×2.31** (목표 3× 미달, 유효 결과로 기록). 리포트: `loadtest/reports/2026-04-09/REPORT.md` |
+| 시나리오 2: 동시 주문 정합성 (1,000 VUser) | 🔲 | 목표: 정합성 100%, 오버셀링 0건. 세션 C 범위 |
+| 시나리오 3: Kafka Consumer Lag 모니터링 | 🔲 | 목표: 정상 구간 Lag 0 유지 (Prometheus 대시보드 연계). 세션 C 범위 |
+| 테스트 리포트 작성 (전/후 비교 수치) | 🔄 | 세션 B 리포트 완료 (`loadtest/reports/2026-04-09/REPORT.md`). 세션 C 결과 추가 후 최종 완성 |
 
 > **측정 환경** (`docs/04-design-deep-dive.md` §10-7, `docs/01-project-overview.md` §4): GCP GKE Standard (asia-northeast3-a, e2-standard-4 × 1). 부하 발생기는 같은 zone 의 별도 Compute Engine VM (e2-standard-2). 수치는 절대값보다 **개선 비율**(캐싱 전/후 TPS 비교, HPA 적용 전/후 처리량 변화)에 초점. 목표 수치는 baseline 측정 후 확정. 환경 전환 근거는 ADR-0004.
 

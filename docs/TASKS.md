@@ -5,7 +5,7 @@
 
 ---
 
-## 현재 Phase: Phase 1 — 모놀리식 구현
+## Phase 1 — 모놀리식 구현
 
 **Phase 1 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
 - [x] 모든 도메인 CRUD API 정상 동작 (Swagger UI 기준)
@@ -298,7 +298,7 @@
 
 ---
 
-## 현재 Phase: Phase 3 — 인프라 / 테스트
+## 현재 Phase: Phase 3 — 인프라 / 테스트 🔄
 
 **Phase 3 Exit Criteria** (`docs/07-roadmap-portfolio.md` 참고):
 - [x] K8s에 모든 서비스 정상 배포 확인
@@ -376,7 +376,7 @@
 ---
 
 ### Task 3-4: 부하 테스트
-**상태**: 🔄 진행 중 (세션 B 완료, 세션 C 대기)
+**상태**: 🔄 진행 중 (세션 B 완료 → 리뷰 개선 → 세션 C)
 **목표**: 부하 테스트 시나리오 실행, 캐싱 전/후 TPS 비교 + 동시 주문 정합성 + Kafka Lag 측정
 
 | 항목 | 상태 | 비고 |
@@ -385,9 +385,14 @@
 | **Step 0-b**: GKE monitoring values 작성 (`k8s/monitoring/gke/values-prometheus.yml` + `install.sh`) | ✅ | retention 24h, PVC standard-rwo 5Gi, Grafana Internal LB, 리소스 상향. ADR-0006 불변식 6 충족 |
 | **Step 0-c**: 세션 A — 로컬 준비 (캐시 토글, 시드, 시나리오 스크립트, cleanup, docker-compose 리허설) | ✅ | `loadtest/` 트리 + `CacheConfig @ConditionalOnProperty`. 3-세션 실행 전략 (A 로컬 → B 시나리오 1 → C 시나리오 2+3) 으로 비용·정리 리스크 최소화 |
 | nGrinder 설치 + 설정 (loadgen VM) | ✅ | nGrinder 3.5.9-p1 controller + agent. JDK 11 필수 (`update-java-alternatives`), JDK 17 미지원 |
-| JMeter 설치 + 설정 (loadgen VM) | 🔲 | 시나리오 준비 완료 (`loadtest/scripts/order-concurrency.jmx` + `users.csv`). 세션 C 에서 VM 에 설치 후 실행 |
 | Baseline TPS 측정 (캐싱 비활성화 상태) | ✅ | 265.0 TPS / 188.38 ms MTT / 에러 0 (50 VUser, 5분) |
 | 시나리오 1: 상품 조회 TPS (캐싱 전/후 비교) | ✅ | 캐시 ON 612.7 TPS / 81.87 ms MTT / 에러 0 → **×2.31** (목표 3× 미달, 유효 결과로 기록). 리포트: `loadtest/reports/2026-04-09/REPORT.md` |
+| **리뷰 개선 P0-A**: Outbox 실패 경로 Slack 예외 격리 | 🔲 | `OutboxPollingService.java:39-41` `slackPort.send()` try/catch 감싸기. DLQ 경로(`KafkaConfig.java:88-91`)와 처리 철학 통일. 근거: `docs/review/final-report.md` |
+| **리뷰 개선 P0-B**: management 설정 공통화 | 🔲 | `management.endpoints.web.exposure.include` + `management.metrics.tags.application` → `application.yml` 이동. k8s 전용(`probes.enabled`, `show-details`)만 잔류. 로컬 메트릭 사전 검증 가능 |
+| **리뷰 개선 P1-D**: 관측성 회귀 테스트 추가 | 🔲 | `@SpringBootTest` — `GET /api/v1/products` 호출 후 `/actuator/prometheus` 응답에서 비즈니스 URI histogram bucket + `application="peekcart"` 태그 검증. D-001 재발 방지 |
+| **리뷰 개선 P1-E**: Error Rate PromQL NaN 가드 | 🔲 | `api-jvm-dashboard.json` 분모 `> 0` 가드 + `grafana-alerts.yml` `($B > 0) and (...)` 조건. `dashboards-configmap.yml` 동기화 |
+| **리뷰 개선 P1-F**: 대시보드 JSON SSOT 단일화 | 🔲 | standalone JSON을 SSOT로 확정, ConfigMap은 파일 참조 구조로 전환. 또는 standalone 제거 후 ConfigMap 단일 유지 |
+| JMeter 설치 + 설정 (loadgen VM) | 🔲 | 시나리오 준비 완료 (`loadtest/scripts/order-concurrency.jmx` + `users.csv`). 세션 C 에서 VM 에 설치 후 실행 |
 | 시나리오 2: 동시 주문 정합성 (1,000 VUser) | 🔲 | 목표: 정합성 100%, 오버셀링 0건. 세션 C 범위 |
 | 시나리오 3: Kafka Consumer Lag 모니터링 | 🔲 | 목표: 정상 구간 Lag 0 유지 (Prometheus 대시보드 연계). 세션 C 범위 |
 | 테스트 리포트 작성 (전/후 비교 수치) | 🔄 | 세션 B 리포트 완료 (`loadtest/reports/2026-04-09/REPORT.md`). 세션 C 결과 추가 후 최종 완성 |
@@ -419,10 +424,14 @@
 
 | # | 발견 시점 | 영역 | 설명 | 영향 | 우선순위 |
 |---|---|---|---|---|---|
-| D-001 | 세션 B (2026-04-09) | Monitoring | **Grafana API Response Time p95/p99 · Error Rate 패널 "No data"**. `http_server_requests_seconds` histogram metric 미활성화 또는 대시보드 PromQL label 불일치 추정. 요구사항 §7-1 "p99 ≤ 100 ms" 목표를 Prometheus 기반으로 검증 불가 | 세션 C 에서도 동일 이슈 재현될 가능성 높음. 로컬에서 minikube + Prometheus 로 재현 후 수정 필요 | 높음 — 세션 C 전 해결 권장 |
+| D-001 | 세션 B (2026-04-09) | Monitoring | **Grafana API Response Time p95/p99 · Error Rate 패널 "No data"**. YAML 프로파일 병합으로 `management.metrics.distribution` 설정이 가려짐 → MetricsConfig.java로 histogram 활성화 이동하여 해결 | 브랜치 `fix/d001-metrics-histogram` (커밋 `715bcfa`)에서 수정 완료. 근본 원인 분석: `docs/progress/d001-metrics-histogram-fix.md` | ~~높음~~ **해결됨** |
 | D-002 | 세션 B (2026-04-09) | Performance | **캐시 TPS ×2.31, 목표 ×3 미달**. 단일 Pod (2 vCPU) 환경에서 50 VUser 부하 시 CPU ~175% 도달 — 캐시 히트에도 CPU 가 병목. 가능한 원인: Redis 직렬화 비용, 커넥션 풀 크기, JSON 응답 직렬화 부하 | 포트폴리오 요구사항 미충족. HPA (Task 3-5) 로 Pod 증설 시 자연 해소 가능성 있으나 단일 Pod 성능 자체도 분석 가치 있음 | 중간 — Task 3-5 HPA 결과 확인 후 판단 |
 | D-003 | 세션 B (2026-04-09) | Monitoring | **Grafana K8s Pod 대시보드 기본 pod selector 이슈**. `Kubernetes / Compute Resources / Pod` 대시보드 진입 시 pod 변수 기본값이 peekcart 가 아닌 첫 번째 pod (kafka) 로 선택됨. 커스텀 대시보드에서 peekcart 필터 프리셋 추가 또는 variable 기본값 조정 필요 | 운영 편의성. 측정 시 수동 선택으로 우회 가능 | 낮음 |
 | D-004 | 세션 B (2026-04-09) | Infra / Tooling | **nGrinder 3.5.9-p1 JDK 17 미지원**. Worker process 가 system default Java 로 fork 하므로 loadgen VM 에서 `update-java-alternatives` 로 JDK 11 전환 필수. 세션 C 에서도 동일 설정 반복 필요 | 세션 C loadgen VM 프로비저닝 시 JDK 11 설치 + default 전환을 자동화 스크립트에 포함 권장 | 낮음 — 운영 지식으로 충분 |
+| D-005 | 리뷰 종합 (2026-04-10) | Observability | **관측성 계약 5파일 분산**. MetricsConfig.java(histogram), application.yml(tags/actuator — P0-B로 공통화 예정), SecurityConfig.java(보안 허용), servicemonitor.yml(scrape), grafana-alerts.yml(PromQL 전제). 개별 파일 정확해도 전체 계약 일관성 자동 미보장 | 1차 봉합: P0-B(management 공통화) + P1-D(회귀 테스트). 완전 해결은 Phase 4 전 관측성 단일 설계 축 정리 | 중간 — 1차 봉합 후 잔여 리스크 |
+| D-006 | 리뷰 종합 (2026-04-10) | Config | **YAML 프로파일 병합 원칙 미명문화**. `spring.kafka`가 base와 프로파일에 분산. 현재 `bootstrap-servers`만 override하여 안전하나, 향후 프로파일에 하위 키 추가 시 D-001 재발 가능 | CLAUDE.md 또는 ADR에 원칙 명문화 필요: "환경별 YAML은 연결 정보만 override, 동작 정책은 base/Java Config" | 중간 |
+| D-007 | 리뷰 종합 (2026-04-10) | Observability | **Kafka Consumer MDC 불완전**. logback-spring.xml이 traceId/userId/orderId 기대. MdcFilter는 HTTP 경로만(traceId+userId). Kafka Consumer는 orderId만 수동 설정. Kafka 경로에서 traceId/userId 부재 → 로그 추적성 제한 | 운영 장애 아님(필드 누락만). Phase 4 전 Kafka Consumer helper/decorator 도입 권장 | 중간 |
+| D-008 | 리뷰 종합 (2026-04-10) | Monitoring | **Grafana datasource UID 하드코딩**. 모든 대시보드/알림에서 `"uid": "prometheus"`. Helm 기본값과 일치하는 한 문제 없으나 Helm 업그레이드 시 변경 가능성 | 현재 동작. Helm 업그레이드 시 확인 | 낮음 |
 
 ## 다음 Phase 예정
 
@@ -473,3 +482,4 @@
 | 2026-04-07 | ADR-0006 구현 (monitoring 스택 base 분리) | `k8s/monitoring/{namespace.yml, shared/, minikube/, gke/}` 신규 트리. ServiceMonitor 를 `base/services/peekcart/` 로 이동(불변식 2). monitoring NS SSOT 단일화 + `install.sh --create-namespace` 제거(불변식 5). GKE monitoring 은 명시적 TODO(values 헤더 + `install.sh exit 1`, 불변식 6). `02-architecture §4-3/§12` 갱신 — 4단계 배포 순서 + "self-contained overlay" 운영 해석 노트(ServiceMonitor CRD 선행 의존). TASKS Task 3-4 Step 0 에 GKE monitoring values 작성 항목 추가. **ADR-0006 Status `Proposed → Accepted`**. 검증: `kubectl kustomize` 양 overlay 통과(monitoring NS 0건, ServiceMonitor 1건 peekcart NS), `consistency-hints.sh` exit 0. 실 클러스터 apply 검증은 Task 3-4 Step 0 GKE 환경 구성과 함께 수행. 브랜치 `refactor/phase3-monitoring-split`, 1개 커밋(`c28ba26`) |
 | 2026-04-09 | Task 3-4 세션 B 준비 (GCP 환경 · 이미지 운반) | 과금 0 구간에서 세션 B 전제조건 선제 해결: GCP 프로젝트 `peekcart-loadtest` 생성 + billing 연결, ₩50,000 예산 50/90/100% 알림, API 활성화(container/compute/artifactregistry), Artifact Registry `peekcart` 레포(`asia-northeast3`), docker credHelper, peekcart 이미지 buildx `--platform linux/amd64` 이중 태그(`:3352c14` + `:latest`) AR push (digest `sha256:f86eb82c...`, 193MB). **실 GKE 프로비저닝·측정은 세션 B 에서 수행**. 현재 과금 ~30원/month (AR 스토리지, 프리 티어 흡수). 후속: helm v4 호환성을 세션 B monitoring 설치 전 `helm template` 으로 확인 |
 | 2026-04-08 | Task 3-4 Step 0-c — 세션 A 로컬 준비 | 부하 테스트 실행을 3 세션(A 로컬 / B 시나리오 1 / C 시나리오 2+3) 으로 분할하여 안정성 확보. **캐시 토글**: `CacheConfig @ConditionalOnProperty(peekcart.cache.enabled, matchIfMissing=true)` + `NoOpCacheManager` fallback, ConfigMap `PEEKCART_CACHE_ENABLED`. **시드**: `loadtest/sql/seed.sql` (Flyway 독립) — users 1101 + products 1010 + 경합재고 1000 (id 1001..1010), BCrypt `LoadTest123!`. **시나리오**: nGrinder Groovy (목록 80% / 상세 20%), JMeter `.jmx` (1000 VUser ramp 30s, 경합타깃 `__Random(1001,1010)`) + `users.csv` 생성 스크립트. **검증 쿼리**: `verify-concurrency.sql` (오버셀링 체크). **리포트/정리**: `reports/TEMPLATE.md` (§10-7 a~f 스켈레톤), `cleanup.sh` (ADR-0004 운영 체크리스트 스크립트화). **docker-compose 리허설**: 앱 로컬 실행 → seed 적용 → 카운트 검증 → curl 로 login → cart → order 성공, 재고 100→99 차감, `verify-concurrency.sql` consistency=OK 확인. **발견된 버그 1건**: MySQL 8 `innodb_autoinc_lock_mode=2` 에서 `INSERT...SELECT` 가 auto_increment 를 블록 할당하여 경합 상품 ID가 1024..1033 으로 생성됨 → 명시 `VALUES` + `ALTER TABLE AUTO_INCREMENT=1001` 로 수정. `ProductCacheIntegrationTest` 5건 통과. 브랜치 `feat/phase3-loadtest-prep`, 3개 커밋 |
+| 2026-04-10 | 전반적 리뷰 종합 | 3건 독립 리뷰 + Codex 토론 2회차 교차 검증 → 최종 보고서(`docs/review/final-report.md`). 세션 C 전 수정 5건(P0-A Outbox Slack 격리, P0-B management 공통화, P1-D 관측성 회귀 테스트, P1-E PromQL NaN 가드, P1-F 대시보드 SSOT) + 기술 부채 4건(D-005~D-008) 확정. TASKS.md Phase 표기 수정 + D-001 해결 상태 갱신. 실행 순서: 리뷰 개선 → 세션 C → Task 3-5 |

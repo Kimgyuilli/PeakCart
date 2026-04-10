@@ -413,6 +413,17 @@
 
 ---
 
+## 개발 부채 (Tech Debt)
+
+> 작업 중 발견되었으나 해당 Task 범위 외인 항목. 후속 Task 생성 시 참고.
+
+| # | 발견 시점 | 영역 | 설명 | 영향 | 우선순위 |
+|---|---|---|---|---|---|
+| D-001 | 세션 B (2026-04-09) | Monitoring | **Grafana API Response Time p95/p99 · Error Rate 패널 "No data"**. `http_server_requests_seconds` histogram metric 미활성화 또는 대시보드 PromQL label 불일치 추정. 요구사항 §7-1 "p99 ≤ 100 ms" 목표를 Prometheus 기반으로 검증 불가 | 세션 C 에서도 동일 이슈 재현될 가능성 높음. 로컬에서 minikube + Prometheus 로 재현 후 수정 필요 | 높음 — 세션 C 전 해결 권장 |
+| D-002 | 세션 B (2026-04-09) | Performance | **캐시 TPS ×2.31, 목표 ×3 미달**. 단일 Pod (2 vCPU) 환경에서 50 VUser 부하 시 CPU ~175% 도달 — 캐시 히트에도 CPU 가 병목. 가능한 원인: Redis 직렬화 비용, 커넥션 풀 크기, JSON 응답 직렬화 부하 | 포트폴리오 요구사항 미충족. HPA (Task 3-5) 로 Pod 증설 시 자연 해소 가능성 있으나 단일 Pod 성능 자체도 분석 가치 있음 | 중간 — Task 3-5 HPA 결과 확인 후 판단 |
+| D-003 | 세션 B (2026-04-09) | Monitoring | **Grafana K8s Pod 대시보드 기본 pod selector 이슈**. `Kubernetes / Compute Resources / Pod` 대시보드 진입 시 pod 변수 기본값이 peekcart 가 아닌 첫 번째 pod (kafka) 로 선택됨. 커스텀 대시보드에서 peekcart 필터 프리셋 추가 또는 variable 기본값 조정 필요 | 운영 편의성. 측정 시 수동 선택으로 우회 가능 | 낮음 |
+| D-004 | 세션 B (2026-04-09) | Infra / Tooling | **nGrinder 3.5.9-p1 JDK 17 미지원**. Worker process 가 system default Java 로 fork 하므로 loadgen VM 에서 `update-java-alternatives` 로 JDK 11 전환 필수. 세션 C 에서도 동일 설정 반복 필요 | 세션 C loadgen VM 프로비저닝 시 JDK 11 설치 + default 전환을 자동화 스크립트에 포함 권장 | 낮음 — 운영 지식으로 충분 |
+
 ## 다음 Phase 예정
 
 - **Phase 4**: Gradle 멀티모듈, Spring Cloud Gateway, Choreography Saga, CQRS

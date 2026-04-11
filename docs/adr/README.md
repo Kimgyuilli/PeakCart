@@ -29,4 +29,5 @@
 | [0004](./0004-phase3-gcp-gke-migration.md) | Phase 3 GCP/GKE 환경 전환 | Accepted | Phase 3+ | 01, 04, 07 |
 | [0005](./0005-kustomize-base-overlays-structure.md) | Kustomize base/overlays 매니페스트 구조 | Partially Superseded | Phase 3+ | 02 |
 | [0006](./0006-monitoring-stack-environment-separation.md) | Monitoring 스택 환경 분리 (base 에서 제외) | Accepted | Phase 3 Task 3-4+ | 02 |
+| [0007](./0007-yaml-profile-merge-principle.md) | YAML 프로파일 병합 원칙 — 연결 정보 vs 동작 정책 | Accepted | 전체 | CLAUDE.md |
 <!-- INDEX:END -->

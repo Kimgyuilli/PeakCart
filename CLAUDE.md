@@ -129,6 +129,15 @@ com.peekcart.global.{config|exception|jwt|response}
 - 마이그레이션 파일 위치: `src/main/resources/db/migration/`
 - 파일명 규칙: `V{번호}__{설명}.sql` (예: `V1__init_schema.sql`)
 
+### 설정 / YAML 프로파일 규칙 (see ADR-0007)
+
+- **원칙**: `application-{profile}.yml` 은 "환경마다 달라지는 연결 정보·자격증명"만 선언한다. 런타임 동작을 바꾸는 정책은 `application.yml` (base) 또는 `@Configuration` Java Config 로 관리한다.
+- **판단 기준**: "환경마다 달라야 하는 값인가(→ 프로파일), 아니면 동작 규약인가(→ base/Java Config)?"
+- **허용**(프로파일): `spring.datasource.*`, `spring.data.redis.host/port`, `spring.kafka.bootstrap-servers`, 환경변수 참조 자격증명
+- **금지**(프로파일): `management.metrics.*` (식별자/분포 설정), `management.endpoints.web.exposure.include` (최소 노출은 base), `spring.kafka.producer/consumer.properties.*`, `spring.jpa.hibernate.ddl-auto`, `spring.application.name`
+- **회색지대 예외**: `logging.level.*`, `spring.jpa.show-sql`, 테스트 전용 타임아웃 등 관용적 환경 차이는 허용하되 YAML 상단에 `# [ADR-0007 exception] ...` 주석으로 의도 명시
+- **Java Config 우선 케이스**: 최상위 키 트리(예: `management.*`)가 base/프로파일 간 병합 충돌 위험이 있거나, 조건부 활성화/타입 안전성이 필요한 경우 `@Configuration` 클래스로 선언 (D-001 재발 방지, 예시: `MetricsConfig.java`)
+
 ### 테스트 규칙 (`docs/06-testing-strategy.md` 참고)
 
 - Domain 레이어: 단위 테스트 (JUnit 5), 목표 커버리지 90%+

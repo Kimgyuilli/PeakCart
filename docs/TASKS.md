@@ -387,7 +387,7 @@
 | nGrinder 설치 + 설정 (loadgen VM) | ✅ | nGrinder 3.5.9-p1 controller + agent. JDK 11 필수 (`update-java-alternatives`), JDK 17 미지원 |
 | Baseline TPS 측정 (캐싱 비활성화 상태) | ✅ | 265.0 TPS / 188.38 ms MTT / 에러 0 (50 VUser, 5분) |
 | 시나리오 1: 상품 조회 TPS (캐싱 전/후 비교) | ✅ | 캐시 ON 612.7 TPS / 81.87 ms MTT / 에러 0 → **×2.31** (목표 3× 미달, 유효 결과로 기록). 리포트: `loadtest/reports/2026-04-09/REPORT.md` |
-| **리뷰 개선 P0-A**: Outbox 실패 경로 Slack 예외 격리 | 🔲 | `OutboxPollingService.java:39-41` `slackPort.send()` try/catch 감싸기. DLQ 경로(`KafkaConfig.java:88-91`)와 처리 철학 통일. 근거: `docs/review/final-report.md` |
+| **리뷰 개선 P0-A**: Outbox 실패 경로 Slack 예외 격리 | ✅ | `OutboxPollingService.java:37-46` `slackPort.send()` try/catch + `log.warn` 감쌈. DLQ 경로(`KafkaConfig.java:88-91`)와 처리 철학 통일. 단위 테스트 2건 (`OutboxPollingServiceTest`) — Slack 실패 격리 + MAX_RETRY 정상 경로 검증 |
 | **리뷰 개선 P0-B**: management 설정 공통화 | ✅ | `management.endpoints.web.exposure.include` + `management.metrics.tags.application` → `application.yml` 이동. k8s 전용(`probes.enabled`, `show-details`)만 잔류. 로컬 메트릭 사전 검증 가능. **ADR-0007 감사표 기준** (D-006 해결로 이동 범위 확정) |
 | **리뷰 개선 P1-D**: 관측성 회귀 테스트 추가 | ✅ | `@SpringBootTest` + `@AutoConfigureObservability` — `GET /api/v1/products` 호출 후 `/actuator/prometheus` 응답에서 비즈니스 URI histogram bucket + `application="peekcart"` 태그 검증. D-001 재발 방지 |
 | **리뷰 개선 P1-E**: Error Rate PromQL NaN 가드 | 🔲 | `api-jvm-dashboard.json` 분모 `> 0` 가드 + `grafana-alerts.yml` `($B > 0) and (...)` 조건. `dashboards-configmap.yml` 동기화 |

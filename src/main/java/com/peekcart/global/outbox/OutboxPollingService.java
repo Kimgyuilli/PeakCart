@@ -36,9 +36,14 @@ public class OutboxPollingService {
 
                 if (event.getRetryCount() >= MAX_RETRY) {
                     event.markFailed();
-                    slackPort.send(String.format(
-                            "[Outbox FAILED] eventId=%s, eventType=%s, retryCount=%d",
-                            event.getEventId(), event.getEventType(), event.getRetryCount()));
+                    try {
+                        slackPort.send(String.format(
+                                "[Outbox FAILED] eventId=%s, eventType=%s, retryCount=%d",
+                                event.getEventId(), event.getEventType(), event.getRetryCount()));
+                    } catch (Exception slackEx) {
+                        log.warn("Outbox FAILED Slack 알림 발송 실패 — eventId={}",
+                                event.getEventId(), slackEx);
+                    }
                 }
 
                 outboxEventRepository.save(event);

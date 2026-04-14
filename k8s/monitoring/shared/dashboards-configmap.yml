@@ -132,6 +132,39 @@ data:
             "defaults": { "unit": "s" },
             "overrides": []
           }
+        },
+        {
+          "title": "Service Up (Scrape Health)",
+          "description": "target 의 up 메트릭. 0 이면 스크랩 실패/서비스 다운 — Error Rate 패널의 강제 0% 표시와 구분하기 위한 신호",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 24, "x": 0, "y": 24 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "min(up{namespace=\"peekcart\", service=\"peekcart\"}) or vector(0)",
+              "legendFormat": "up"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "green", "value": 1 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "reduceOptions": { "calcs": ["lastNotNull"] }
+          }
         }
       ],
       "schemaVersion": 39,

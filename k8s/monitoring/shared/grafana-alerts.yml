@@ -81,6 +81,33 @@ data:
             annotations:
               summary: "PeekCart API p95 응답시간 2초 초과"
               description: "최근 5분간 API p95 응답시간이 2초를 초과했습니다."
+          - uid: peekcart-target-down
+            title: "Peekcart Target Down (up == 0)"
+            condition: B
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: prometheus
+                model:
+                  expr: "max(up{namespace=\"peekcart\", service=\"peekcart\"} == 0)"
+                  instant: false
+                  range: true
+              - refId: B
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  type: math
+                  expression: "$A > 0"
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "PeekCart 타겟 스크랩 실패 (up == 0)"
+              description: "Prometheus 가 peekcart 엔드포인트를 스크랩 시도했으나 실패 (네트워크, 인증, /actuator/prometheus 500 등). up 시계열은 존재하되 0. Error Rate 패널의 강제 0% 표시와 구분하는 신호."
           - uid: peekcart-scrape-absent
             title: "Peekcart Metrics Scrape Absent"
             condition: B
@@ -106,5 +133,5 @@ data:
             labels:
               severity: critical
             annotations:
-              summary: "PeekCart 메트릭 스크랩 부재 (target down / service absent)"
-              description: "최근 5분간 peekcart 타겟의 up 메트릭이 부재합니다. Error Rate 패널은 idle UX 를 위해 0% 로 고정되므로, 실제 스크랩 실패/서비스 다운은 이 알림으로 구분합니다."
+              summary: "PeekCart up 시계열 부재 (ServiceMonitor 미매칭 / 네임스페이스·서비스 삭제)"
+              description: "up 메트릭 series 자체가 존재하지 않음. ServiceMonitor selector 미스매치, 네임스페이스·서비스 삭제, Prometheus 설정 문제 등 구조적 부재를 의미. 스크랩 실패(up == 0) 는 `peekcart-target-down` 에서 별도 감지."

@@ -376,9 +376,9 @@ peekcart/
     └── monitoring/                   # base/ 분리된 관측성 스택 (ADR-0006)
         ├── namespace.yml             # monitoring NS SSOT (불변식 5)
         ├── shared/                   # 환경 무관 자원
-        │   ├── dashboards-configmap.yml  # Grafana 대시보드 ConfigMap (3개 인라인 JSON)
-        │   ├── grafana-alerts.yml        # Alert ConfigMap
-        │   └── *.json                    # 대시보드 원본 (configmap 에 인라인되어 있는 사본, 가독성용)
+        │   ├── kustomization.yml        # `kubectl apply -k` 진입점. configMapGenerator 가 *.json → ConfigMap 생성 (SSOT=JSON)
+        │   ├── grafana-alerts.yml       # Grafana alert provisioning ConfigMap
+        │   └── *.json                   # 대시보드 SSOT (standalone 편집 원본, ConfigMap 은 kustomize 산출물)
         ├── minikube/
         │   ├── values-prometheus.yml     # NodePort 30030, retention 6h, 경량 limits
         │   └── install.sh                # helm upgrade --install (멱등)
@@ -390,14 +390,14 @@ peekcart/
 - **최초 배포 순서 (fresh 클러스터, minikube 기준)**:
   1. `kubectl apply -f k8s/monitoring/namespace.yml` — monitoring NS 단일 생성 주체 (ADR-0006 불변식 5)
   2. `bash k8s/monitoring/minikube/install.sh` — kube-prometheus-stack Helm 설치. **이 단계가 ServiceMonitor CRD 를 등록**하므로 다음 단계 전에 반드시 선행
-  3. `kubectl apply -f k8s/monitoring/shared/dashboards-configmap.yml -f k8s/monitoring/shared/grafana-alerts.yml` — 환경 무관 대시보드/Alert ConfigMap (Grafana sidecar 자동 로드)
+  3. `kubectl apply -k k8s/monitoring/shared/` — 환경 무관 대시보드/Alert ConfigMap (kustomize 가 *.json → ConfigMap 생성, Grafana sidecar 자동 로드)
   4. `kubectl apply -k k8s/overlays/minikube/` — app/infra + ServiceMonitor 적용. 2번이 등록한 CRD 가 충족되어야 성공
 - **"self-contained overlay" 의 운영 해석 (ADR-0006 불변식 4)**: `apply -k overlays/minikube/` 가 단독으로 fresh 클러스터에 성공한다는 뜻이 **아니다**. ServiceMonitor 는 CRD 의존성을 가지며, K8s 생태계의 표준 패턴(cert-manager, Istio 등)과 동일하게 CRD 선행 설치가 문서화된 순서로 보장된다. overlay 가 self-contained 라는 것은 "monitoring NS 리소스를 포함하지 않으며, 외부 상태를 만들거나 변형하지 않는다" 는 의미이다.
 - **재배포 (idempotent)**: 동일 4개 명령을 순서대로 재실행. install.sh 는 `helm upgrade --install` 멱등
 - **최초 배포 순서 (fresh 클러스터, GKE)**: minikube 와 동일한 4단계. install 진입점만 환경별로 분리:
   1. `kubectl apply -f k8s/monitoring/namespace.yml`
   2. `bash k8s/monitoring/gke/install.sh` — Internal LB Grafana, retention 24h, PVC standard-rwo
-  3. `kubectl apply -f k8s/monitoring/shared/dashboards-configmap.yml -f k8s/monitoring/shared/grafana-alerts.yml`
+  3. `kubectl apply -k k8s/monitoring/shared/`
   4. `kubectl apply -k k8s/overlays/gke/` — apply 전 `kustomize edit set image` 로 PROJECT_ID 치환 (`k8s/overlays/gke/README.md` 참고). 편집 결과는 커밋하지 않음
 - **GKE 운영 체크리스트** (ADR-0004): 측정 종료 시 클러스터/VM/PD/예약 IP 정리. 상세 명령은 `k8s/overlays/gke/README.md` 또는 ADR-0004 §운영 체크리스트
 - **Phase 4 서비스 추가 시**: `k8s/base/services/` 하위에 형제 디렉토리 추가 + 각 서비스의 `servicemonitor.yml` 동봉 + `base/kustomization.yml` 에 참조 추가. 기존 파일 수정 없음 (ADR-0006 §긍정적 영향)
@@ -433,7 +433,7 @@ peekcart/
 │   │   └── gke/                           # 운영 (ADR-0004)
 │   └── monitoring/                        # Phase 3 와 동일 — base/ 와 분리 (ADR-0006)
 │       ├── namespace.yml
-│       ├── shared/{dashboards-configmap,grafana-alerts}.yml
+│       ├── shared/{kustomization.yml,grafana-alerts.yml,*.json}
 │       └── {minikube,gke}/{values-prometheus.yml,install.sh}
 │
 ├── common/

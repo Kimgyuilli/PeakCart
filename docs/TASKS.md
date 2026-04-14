@@ -432,6 +432,7 @@
 | D-006 | 리뷰 종합 (2026-04-10) | Config | **YAML 프로파일 병합 원칙 미명문화**. `spring.kafka`가 base와 프로파일에 분산. 현재 `bootstrap-servers`만 override하여 안전하나, 향후 프로파일에 하위 키 추가 시 D-001 재발 가능 | `docs/d006-yaml-profile-principle` 브랜치에서 해결 — ADR-0007 작성 + CLAUDE.md §설정/YAML 프로파일 규칙 추가. YAML 전수 감사 결과 P0-B 이동 대상 2건 확정(`management.metrics.tags.application`, `management.endpoints.web.exposure.include`) | ~~중간~~ **해결됨** |
 | D-007 | 리뷰 종합 (2026-04-10) | Observability | **Kafka Consumer MDC 불완전**. logback-spring.xml이 traceId/userId/orderId 기대. MdcFilter는 HTTP 경로만(traceId+userId). Kafka Consumer는 orderId만 수동 설정. Kafka 경로에서 traceId/userId 부재 → 로그 추적성 제한 | 운영 장애 아님(필드 누락만). Phase 4 전 Kafka Consumer helper/decorator 도입 권장 | 중간 |
 | D-008 | 리뷰 종합 (2026-04-10) | Monitoring | **Grafana datasource UID 하드코딩**. 모든 대시보드/알림에서 `"uid": "prometheus"`. Helm 기본값과 일치하는 한 문제 없으나 Helm 업그레이드 시 변경 가능성 | 현재 동작. Helm 업그레이드 시 확인 | 낮음 |
+| D-009 | CI 분석 (2026-04-14) | CI / Test Infra | **통합 테스트 인프라 분산**. 통합 테스트 7개가 각자 `@Testcontainers` + `static @Container` 로 MySQL/Redis/Kafka 를 클래스별 중복 기동. 공통 `AbstractIntegrationTest` 베이스 없음. 개별 `@Import(TestConfig)` / `@TestPropertySource` 사용으로 Spring 컨텍스트 캐시 적중 불가. 통합 테스트 증가 시 CI 시간·유지보수 비용 동반 악화 예상 | 분석 리포트: `docs/review/ci-optimization-analysis.md`. 핵심 가치는 속도보다 **테스트 인프라 표준화**. Phase 3 마무리 단계에서 정비 작업으로 수행 권장. Kafka 상태 누수 (특히 `DlqIntegrationTest` 의 production DLQ topic 파생 구조) 가 최대 리스크 | 중간 — Phase 3 마무리 시점 |
 
 ## 다음 Phase 예정
 

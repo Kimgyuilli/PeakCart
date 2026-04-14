@@ -390,7 +390,7 @@
 | **리뷰 개선 P0-A**: Outbox 실패 경로 Slack 예외 격리 | ✅ | `OutboxPollingService.java:37-46` `slackPort.send()` try/catch + `log.warn` 감쌈. DLQ 경로(`KafkaConfig.java:88-91`)와 처리 철학 통일. 단위 테스트 2건 (`OutboxPollingServiceTest`) — Slack 실패 격리 + MAX_RETRY 정상 경로 검증 |
 | **리뷰 개선 P0-B**: management 설정 공통화 | ✅ | `management.endpoints.web.exposure.include` + `management.metrics.tags.application` → `application.yml` 이동. k8s 전용(`probes.enabled`, `show-details`)만 잔류. 로컬 메트릭 사전 검증 가능. **ADR-0007 감사표 기준** (D-006 해결로 이동 범위 확정) |
 | **리뷰 개선 P1-D**: 관측성 회귀 테스트 추가 | ✅ | `@SpringBootTest` + `@AutoConfigureObservability` — `GET /api/v1/products` 호출 후 `/actuator/prometheus` 응답에서 비즈니스 URI histogram bucket + `application="peekcart"` 태그 검증. D-001 재발 방지 |
-| **리뷰 개선 P1-E**: Error Rate PromQL NaN 가드 | 🔲 | `api-jvm-dashboard.json` 분모 `> 0` 가드 + `grafana-alerts.yml` `($B > 0) and (...)` 조건. `dashboards-configmap.yml` 동기화 |
+| **리뷰 개선 P1-E**: Error Rate PromQL NaN 가드 | ✅ | `api-jvm-dashboard.json` / `dashboards-configmap.yml` 동기: `(A / (B > 0) * 100) or vector(0)` (idle 구간 0% 강제). `grafana-alerts.yml`: `($B > 0) && (($A / $B) * 100 > 5)` (Grafana math `&&` 문법). idle NoData → Normal 유지 |
 | **리뷰 개선 P1-F**: 대시보드 JSON SSOT 단일화 | 🔲 | standalone JSON을 SSOT로 확정, ConfigMap은 파일 참조 구조로 전환. 또는 standalone 제거 후 ConfigMap 단일 유지 |
 | JMeter 설치 + 설정 (loadgen VM) | 🔲 | 시나리오 준비 완료 (`loadtest/scripts/order-concurrency.jmx` + `users.csv`). 세션 C 에서 VM 에 설치 후 실행 |
 | 시나리오 2: 동시 주문 정합성 (1,000 VUser) | 🔲 | 목표: 정합성 100%, 오버셀링 0건. 세션 C 범위 |

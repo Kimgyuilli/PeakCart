@@ -61,10 +61,8 @@ kubectl apply -f k8s/monitoring/namespace.yml
 # 2. kube-prometheus-stack (ServiceMonitor CRD 등록)
 bash k8s/monitoring/gke/install.sh
 
-# 3. 환경 무관 대시보드/Alert
-kubectl apply \
-  -f k8s/monitoring/shared/dashboards-configmap.yml \
-  -f k8s/monitoring/shared/grafana-alerts.yml
+# 3. 환경 무관 대시보드/Alert (configMapGenerator 가 *.json → ConfigMap 생성)
+kubectl apply -k k8s/monitoring/shared/
 
 # 4. app/infra + ServiceMonitor
 kubectl apply -k k8s/overlays/gke/

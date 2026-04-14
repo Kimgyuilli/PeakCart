@@ -816,6 +816,15 @@ Task 3-4 리뷰 개선 P1-E. Error Rate 대시보드 패널과 Grafana 알림이
 3. Grafana sidecar 자동 reload → `PeekCart / API & JVM` 대시보드에서 idle 0% 표시 확인
 4. Alerting → `peekcart-high-error-rate` Preview 로 idle Normal 상태 확인
 
+### 런타임 검증 (2026-04-14, minikube)
+
+- **PromQL live 질의 (Prometheus 9090)**: Service Up=1, Error Rate=0 (idle), target-down=empty, scrape-absent=empty, 분모=0.166 (헬스체크) — 모두 기대값
+- **알림 rule 로드**: 4건 (`high-error-rate`, `slow-response`, `target-down`, `scrape-absent`) 모두 Grafana provisioning API 확인
+- **런타임 이슈 2건 발견 및 수정** (커밋 `7e472e4`):
+  - Grafana math 가 `range:true` + 단일변수 조합을 time-series 로 인식 → `health=error`. `instant:true, range:false` 로 전환. 기존 high-error-rate 는 `$A/$B` 두 변수 조합이라 암묵적 reduce 적용돼 영향 없었음
+  - 쿼리 empty vector 반환 시 NoData → pending 오탐. `or on() vector(0)` fallback 으로 항상 값 반환. `count(up{...}==0) or on() vector(0)` / `absent(up{...}) or on() vector(0)` 로 갱신
+- **Firing 실증**: `kubectl scale deploy peekcart --replicas=0` 후 3분 → scrape-absent `state=firing`, target-down `state=inactive`. 배타적 분리 확인. 복원 후 전체 inactive 회귀 (90초 내)
+
 ### 다음 작업
 
 - P1-F: 대시보드 JSON SSOT 단일화 (standalone vs ConfigMap inline 이중 정의 해소)

@@ -91,9 +91,9 @@ data:
                   to: 0
                 datasourceUid: prometheus
                 model:
-                  expr: "max(up{namespace=\"peekcart\", service=\"peekcart\"} == 0)"
-                  instant: false
-                  range: true
+                  expr: "count(up{namespace=\"peekcart\", service=\"peekcart\"} == 0) or on() vector(0)"
+                  instant: true
+                  range: false
               - refId: B
                 relativeTimeRange:
                   from: 300
@@ -118,9 +118,9 @@ data:
                   to: 0
                 datasourceUid: prometheus
                 model:
-                  expr: "absent(up{namespace=\"peekcart\", service=\"peekcart\"})"
-                  instant: false
-                  range: true
+                  expr: "absent(up{namespace=\"peekcart\", service=\"peekcart\"}) or on() vector(0)"
+                  instant: true
+                  range: false
               - refId: B
                 relativeTimeRange:
                   from: 300

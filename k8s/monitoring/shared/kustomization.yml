@@ -1,0 +1,33 @@
+# 이 디렉토리는 `kubectl apply -k` 진입점.
+# configMapGenerator 가 *.json 을 SSOT 로 삼아 Grafana 대시보드 ConfigMap 을 생성한다.
+# standalone JSON = 편집 원본, ConfigMap = 빌드 산출물 (편집 금지).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+resources:
+  - grafana-alerts.yml
+
+configMapGenerator:
+  - name: grafana-dashboard-api-jvm
+    files:
+      - api-jvm-dashboard.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+  - name: grafana-dashboard-kafka-lag
+    files:
+      - kafka-lag-dashboard.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+  - name: grafana-dashboard-pod-resources
+    files:
+      - pod-resources-dashboard.json
+    options:
+      labels:
+        grafana_dashboard: "1"
+
+generatorOptions:
+  disableNameSuffixHash: true

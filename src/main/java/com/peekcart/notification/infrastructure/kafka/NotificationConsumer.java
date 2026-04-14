@@ -7,7 +7,6 @@ import com.peekcart.notification.application.NotificationCommandService;
 import com.peekcart.notification.domain.model.NotificationType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.MDC;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,20 +55,15 @@ public class NotificationConsumer {
         String eventId = root.get("eventId").asText();
         JsonNode payload = root.get("payload");
 
-        try {
-            idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_COMPLETED, () -> {
-                Long userId = payload.get("userId").asLong();
-                Long orderId = payload.get("orderId").asLong();
-                MDC.put("orderId", orderId.toString());
-                long amount = payload.get("amount").asLong();
-                String method = payload.get("method").asText();
-                String msg = String.format("결제가 완료되었습니다. [주문 ID: %d, 금액: %,d원, 결제수단: %s]",
-                        orderId, amount, method);
-                notificationCommandService.createNotification(userId, NotificationType.PAYMENT_COMPLETED, msg);
-            });
-        } finally {
-            MDC.remove("orderId");
-        }
+        idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_COMPLETED, () -> {
+            Long userId = payload.get("userId").asLong();
+            Long orderId = payload.get("orderId").asLong();
+            long amount = payload.get("amount").asLong();
+            String method = payload.get("method").asText();
+            String msg = String.format("결제가 완료되었습니다. [주문 ID: %d, 금액: %,d원, 결제수단: %s]",
+                    orderId, amount, method);
+            notificationCommandService.createNotification(userId, NotificationType.PAYMENT_COMPLETED, msg);
+        });
     }
 
     /** 결제 실패 알림을 발송한다. */
@@ -80,18 +74,13 @@ public class NotificationConsumer {
         String eventId = root.get("eventId").asText();
         JsonNode payload = root.get("payload");
 
-        try {
-            idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_FAILED, () -> {
-                Long userId = payload.get("userId").asLong();
-                Long orderId = payload.get("orderId").asLong();
-                MDC.put("orderId", orderId.toString());
-                long amount = payload.get("amount").asLong();
-                String msg = String.format("결제에 실패했습니다. [주문 ID: %d, 금액: %,d원]", orderId, amount);
-                notificationCommandService.createNotification(userId, NotificationType.PAYMENT_FAILED, msg);
-            });
-        } finally {
-            MDC.remove("orderId");
-        }
+        idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_FAILED, () -> {
+            Long userId = payload.get("userId").asLong();
+            Long orderId = payload.get("orderId").asLong();
+            long amount = payload.get("amount").asLong();
+            String msg = String.format("결제에 실패했습니다. [주문 ID: %d, 금액: %,d원]", orderId, amount);
+            notificationCommandService.createNotification(userId, NotificationType.PAYMENT_FAILED, msg);
+        });
     }
 
     /** 주문 취소 알림을 발송한다. */

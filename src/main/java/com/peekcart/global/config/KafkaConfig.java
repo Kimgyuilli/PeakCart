@@ -1,6 +1,8 @@
 package com.peekcart.global.config;
 
 import com.peekcart.global.kafka.FixedSequenceBackOff;
+import com.peekcart.global.kafka.MdcPayloadExtractor;
+import com.peekcart.global.kafka.MdcRecordInterceptor;
 import com.peekcart.global.port.SlackPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -96,12 +98,14 @@ public class KafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
             ConsumerFactory<String, String> consumerFactory,
-            CommonErrorHandler kafkaErrorHandler) {
+            CommonErrorHandler kafkaErrorHandler,
+            MdcPayloadExtractor mdcPayloadExtractor) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         factory.setCommonErrorHandler(kafkaErrorHandler);
+        factory.setRecordInterceptor(new MdcRecordInterceptor(mdcPayloadExtractor));
         return factory;
     }
 }

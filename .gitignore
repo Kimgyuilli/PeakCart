@@ -1,5 +1,6 @@
 # Gradle
 .gradle/
+.gradle-work/
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
@@ -32,7 +33,6 @@ logs/
 # Java
 *.class
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
 .sdkmanrc
 
 # Environment

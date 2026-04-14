@@ -791,7 +791,9 @@ Task 3-4 리뷰 개선 P1-E. Error Rate 대시보드 패널과 Grafana 알림이
 - `or vector(0)` 는 세 상태를 모두 0% 로 표시: ① 트래픽 없음 (정상) ② 스크랩 실패 (target down, relabel 오류) ③ 서비스 다운. Error Rate 패널 단독으로는 ②③ 를 식별 불가 → information loss.
 - **보완 설계 (동일 브랜치 후속 커밋)**: 관심사 분리로 해결.
   - `Service Up (Scrape Health)` stat 패널 추가 — `min(up{namespace="peekcart", service="peekcart"}) or vector(0)`. UP=1(green) / DOWN=0(red) 로 스크랩 건강성 독립 표시
-  - `peekcart-scrape-absent` 알림 추가 — `absent(up{namespace="peekcart", service="peekcart"})`, severity=critical. 스크랩/서비스 부재 자동 감지
+  - `peekcart-target-down` 알림 — `max(up{...} == 0) > 0`, severity=critical. 스크랩 시도 후 실패 (네트워크/인증/5xx) 감지
+  - `peekcart-scrape-absent` 알림 — `absent(up{...})`, severity=critical. ServiceMonitor 미매칭 / 네임스페이스·서비스 삭제 등 series 구조적 부재 감지
+  - 두 알림 분리 근거: `up == 0` (series 존재, 값 0) 과 `absent(up)` (series 자체 부재) 는 Prometheus 데이터 모델상 배타적 메커니즘. 단일 알림으로는 둘 다 커버하지 못함 (`absent()` 는 전자 무감, 그 반대도 성립)
 - 결과: Error Rate 는 시각적 연속성(0%), 스크랩 건강성은 별도 채널에서 확인. 원칙상 "대시보드 한 패널이 두 신호를 겸하지 않음".
 
 ### 변경 파일

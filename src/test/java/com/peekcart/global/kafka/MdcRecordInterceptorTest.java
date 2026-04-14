@@ -78,25 +78,44 @@ class MdcRecordInterceptorTest {
     }
 
     @Test
-    @DisplayName("success / failure / afterRecord 어느 hook 에서도 MDC 가 비워진다")
+    @DisplayName("afterRecord 호출 후에 MDC 가 비워진다")
     void mdc_cleared_after_record() {
         ConsumerRecord<String, String> record = recordWith(
                 "{\"eventId\":\"evt-3\",\"payload\":{\"userId\":1,\"orderId\":2}}");
         interceptor.intercept(record, null);
-        assertThat(MDC.get("traceId")).isNotNull();
+        assertThat(MDC.get("traceId")).isEqualTo("evt-3");
+        assertThat(MDC.get("userId")).isEqualTo("1");
+        assertThat(MDC.get("orderId")).isEqualTo("2");
 
-        interceptor.success(record, null);
+        interceptor.afterRecord(record, null);
         assertThat(MDC.get("traceId")).isNull();
         assertThat(MDC.get("userId")).isNull();
         assertThat(MDC.get("orderId")).isNull();
+    }
 
+    @Test
+    @DisplayName("listener 예외 후 error handler 실행 시점(=afterRecord 직전)까지 MDC 가 살아있다")
+    void mdc_survives_until_after_record_in_failure_path() {
+        // Spring Kafka 호출 순서: intercept → listener throw → failure → CommonErrorHandler → afterRecord
+        // CommonErrorHandler 의 DLQ 발행/Slack 알림 로그(KafkaConfig.kafkaErrorHandler) 가
+        // MDC 컨텍스트를 누리도록, failure() 시점에서는 MDC 를 지우면 안 된다.
+        ConsumerRecord<String, String> record = recordWith(
+                "{\"eventId\":\"evt-fail\",\"payload\":{\"userId\":7,\"orderId\":11}}");
         interceptor.intercept(record, null);
+
+        // failure() 는 default no-op — MDC 그대로 유지되어야 함
         interceptor.failure(record, new RuntimeException("boom"), null);
-        assertThat(MDC.get("traceId")).isNull();
+        assertThat(MDC.get("traceId"))
+                .as("error handler 가 traceId 를 로그에 남길 수 있어야 함")
+                .isEqualTo("evt-fail");
+        assertThat(MDC.get("userId")).isEqualTo("7");
+        assertThat(MDC.get("orderId")).isEqualTo("11");
 
-        interceptor.intercept(record, null);
+        // afterRecord() 시점에야 정리
         interceptor.afterRecord(record, null);
         assertThat(MDC.get("traceId")).isNull();
+        assertThat(MDC.get("userId")).isNull();
+        assertThat(MDC.get("orderId")).isNull();
     }
 
     private static ConsumerRecord<String, String> recordWith(String value) {

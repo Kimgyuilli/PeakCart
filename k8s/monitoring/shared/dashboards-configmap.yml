@@ -63,7 +63,7 @@ data:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum(rate(http_server_requests_seconds_count{application=\"peekcart\", status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{application=\"peekcart\"}[5m])) * 100",
+              "expr": "(sum(rate(http_server_requests_seconds_count{application=\"peekcart\", status=~\"5..\"}[5m])) / (sum(rate(http_server_requests_seconds_count{application=\"peekcart\"}[5m])) > 0) * 100) or vector(0)",
               "legendFormat": "5xx error rate %"
             }
           ],

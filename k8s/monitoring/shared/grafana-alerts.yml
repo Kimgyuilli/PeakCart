@@ -43,7 +43,7 @@ data:
                 datasourceUid: __expr__
                 model:
                   type: math
-                  expression: "($A / $B) * 100 > 5"
+                  expression: "($B > 0) && (($A / $B) * 100 > 5)"
             for: 2m
             labels:
               severity: critical

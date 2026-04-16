@@ -1,6 +1,5 @@
 package com.peekcart.global.outbox;
 
-import com.peekcart.global.port.SlackPort;
 import com.peekcart.notification.domain.model.Notification;
 import com.peekcart.notification.domain.model.NotificationType;
 import com.peekcart.notification.infrastructure.NotificationJpaRepository;
@@ -15,17 +14,16 @@ import com.peekcart.product.domain.model.Category;
 import com.peekcart.product.domain.model.Inventory;
 import com.peekcart.product.domain.model.Product;
 import com.peekcart.product.domain.repository.InventoryRepository;
+import com.peekcart.support.AbstractIntegrationTest;
+import com.peekcart.support.IntegrationTestConfig;
 import com.peekcart.user.domain.model.User;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.TestPropertySource;
@@ -45,9 +43,9 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @Testcontainers
 @TestPropertySource(properties = "spring.task.scheduling.pool.size=1")
-@Import(OutboxKafkaIntegrationTest.TestConfig.class)
+@Import(IntegrationTestConfig.class)
 @DisplayName("Outbox → Kafka E2E 통합 테스트")
-class OutboxKafkaIntegrationTest {
+class OutboxKafkaIntegrationTest extends AbstractIntegrationTest {
 
     private Long userId;
 
@@ -65,7 +63,6 @@ class OutboxKafkaIntegrationTest {
     @ServiceConnection
     static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.1");
 
-    @Autowired EntityManagerFactory emf;
     @Autowired OrderOutboxEventPublisher orderOutboxEventPublisher;
     @Autowired PaymentOutboxEventPublisher paymentOutboxEventPublisher;
     @Autowired OutboxPollingService outboxPollingService;
@@ -76,34 +73,12 @@ class OutboxKafkaIntegrationTest {
 
     private Long productId;
 
-    @TestConfiguration
-    static class TestConfig {
-        @Bean
-        SlackPort slackPort() {
-            return message -> {};
-        }
-    }
-
     @BeforeEach
     void setUp() {
+        cleanDatabase();
+
         EntityManager em = emf.createEntityManager();
         em.getTransaction().begin();
-
-        em.createNativeQuery("DELETE FROM outbox_events").executeUpdate();
-        em.createNativeQuery("DELETE FROM processed_events").executeUpdate();
-        em.createNativeQuery("DELETE FROM notifications").executeUpdate();
-        em.createNativeQuery("DELETE FROM webhook_logs").executeUpdate();
-        em.createNativeQuery("DELETE FROM payments").executeUpdate();
-        em.createNativeQuery("DELETE FROM order_items").executeUpdate();
-        em.createNativeQuery("DELETE FROM orders").executeUpdate();
-        em.createNativeQuery("DELETE FROM cart_items").executeUpdate();
-        em.createNativeQuery("DELETE FROM carts").executeUpdate();
-        em.createNativeQuery("DELETE FROM inventories").executeUpdate();
-        em.createNativeQuery("DELETE FROM products").executeUpdate();
-        em.createNativeQuery("DELETE FROM categories").executeUpdate();
-        em.createNativeQuery("DELETE FROM refresh_tokens").executeUpdate();
-        em.createNativeQuery("DELETE FROM addresses").executeUpdate();
-        em.createNativeQuery("DELETE FROM users").executeUpdate();
 
         User user = User.create("test@peekcart.com", "hashed-pw", "테스트유저");
         em.persist(user);

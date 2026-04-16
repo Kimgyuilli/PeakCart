@@ -1,5 +1,6 @@
 package com.peekcart.global.config;
 
+import com.peekcart.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +26,7 @@ import java.time.Duration;
         "toss.payments.secret-key=test_sk_fake"
 })
 @DisplayName("ShedLock 통합 테스트")
-class ShedLockIntegrationTest {
+class ShedLockIntegrationTest extends AbstractIntegrationTest {
 
     @Container
     @ServiceConnection

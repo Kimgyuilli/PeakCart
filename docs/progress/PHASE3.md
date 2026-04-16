@@ -884,3 +884,47 @@ Task 3-4 리뷰 개선 마지막 항목. `k8s/monitoring/shared/` 에 standalone
 - 세션 C: 시나리오 2 (동시 주문 1,000 VUser), 시나리오 3 (Kafka Lag) — TASKS.md L395-397
 - D-010 (Outbox trace context): Phase 4 전 ADR 작성 후 진행
 
+---
+
+## 2026-04-16 — D-009 통합 테스트 인프라 표준화 (1차 목표)
+
+### 배경
+
+통합 테스트 7개가 각각 독립적으로 MySQL/Redis/Kafka 컨테이너를 선언하고, cleanup 전략과 TestConfig가 분산되어 있었음. 공통 베이스 클래스가 없어 신규 테스트 작성 방식이 불명확하고, cleanup·SlackPort mock이 반복됨. Phase 3 마무리 시점에 1차 목표(cleanup 규약 표준화 + SlackPort mock 공통화 + 베이스 클래스 도입)를 수행.
+
+### 완료 항목
+
+| 항목 | 변경 |
+|---|---|
+| `src/test/java/com/peekcart/support/AbstractIntegrationTest.java` | 신규 — `cleanDatabase()` (FK 역순 DELETE, try/catch/finally 예외 안전) + `cleanCaches(CacheManager)` (Spring CacheManager 범위만 정리). 컨테이너 선언 없음, cleanup 유틸리티만 제공 |
+| `src/test/java/com/peekcart/support/IntegrationTestConfig.java` | 신규 — no-op `SlackPort` mock `@TestConfiguration`. Outbox/Idempotency 테스트가 `@Import`로 재사용 |
+| `ProductCacheIntegrationTest` | extends base, cleanup → `cleanDatabase()` + `cleanCaches()`, Kafka 컨테이너 추가 |
+| `InventoryConcurrencyTest` | extends base, 명시적 `cleanDatabase()` 추가 (기존 fresh-container 묵시적 가정 제거), Kafka 컨테이너 추가 |
+| `ShedLockIntegrationTest` | extends base만 (cleanup 불필요 — shedlock 레코드 존재 검증) |
+| `ObservabilityMetricsIntegrationTest` | extends base만 (cleanup 불필요 — 메트릭 노출만 검증) |
+| `OutboxKafkaIntegrationTest` | extends base, inner TestConfig 제거 → `@Import(IntegrationTestConfig)`, cleanup → `cleanDatabase()` |
+| `IdempotencyIntegrationTest` | extends base, inner TestConfig 제거 → `@Import(IntegrationTestConfig)`, cleanup → `cleanDatabase()` |
+| `DlqIntegrationTest` | extends base만 (자체 TestConfig 유지 — 커스텀 SlackPort 카운터 + error handler) |
+| `docs/TASKS.md` | D-009 상태 **해결됨 (1차 목표)** 갱신, 완료 작업 표에 2026-04-16 행 추가 |
+
+### 주요 결정 사항
+
+| 결정 | 선택 | 이유 |
+|---|---|---|
+| 컨테이너 수명 모델 | per-class 유지 (각 자식이 `static @Container` 선언) | Java static 필드는 상속 시 클래스별 복제되지 않아, base에 두면 모든 자식이 같은 인스턴스 공유 → per-class 전제 깨짐. 선언 중복은 수명 모델 안전성과의 의도적 트레이드오프 |
+| `cleanDatabase()` 자동 실행 여부 | `@BeforeEach` 미사용, 자식이 명시 호출 | ShedLock/Observability 테스트는 DB cleanup 불필요. 규약은 javadoc에 명시 |
+| ProductCache/InventoryConcurrency에 Kafka 추가 | 추가 | `@SpringBootTest` full context에서 Kafka auto-config 정합성 확보 |
+
+### 달성/미달성
+
+**달성**: DB cleanup 규약 단일화, Spring Cache cleanup 규약 추가, SlackPort mock 3중 중복 → 1곳 집약, InventoryConcurrencyTest 묵시적 fresh-state 가정 → 명시적 cleanup 전환, 신규 테스트 작성 규약 확립
+
+**달성하지 않음 (의도적)**: 컨테이너 선언 중복 제거, Spring context 캐시 적중률 개선, CI 시간 단축 — 2차 목표로 분리
+
+### 검증
+
+- `./gradlew test` 전체 244건 통과 (기존 235건 + 테스트 추가 분)
+- DlqIntegrationTest DLQ 라우팅 + Slack 카운트 검증 기존과 동일
+- InventoryConcurrencyTest cleanDatabase() 추가 후 동시성 테스트 결과 불변
+- ProductCacheIntegrationTest Kafka 추가 + cleanCaches() 전환 후 캐시 동작 불변
+

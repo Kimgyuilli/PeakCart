@@ -1,6 +1,7 @@
 package com.peekcart.global.kafka;
 
 import com.peekcart.global.port.SlackPort;
+import com.peekcart.support.AbstractIntegrationTest;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,7 +39,7 @@ import static org.awaitility.Awaitility.await;
 @TestPropertySource(properties = "spring.task.scheduling.pool.size=1")
 @Import(DlqIntegrationTest.TestConfig.class)
 @DisplayName("DLQ 통합 테스트")
-class DlqIntegrationTest {
+class DlqIntegrationTest extends AbstractIntegrationTest {
 
     @Container
     @ServiceConnection

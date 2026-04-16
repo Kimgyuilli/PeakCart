@@ -1,5 +1,6 @@
 package com.peekcart.global.observability;
 
+import com.peekcart.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
@@ -21,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @AutoConfigureObservability
 @Testcontainers
 @DisplayName("관측성 계약 회귀 테스트 (D-001/D-005 재발 방지)")
-class ObservabilityMetricsIntegrationTest {
+class ObservabilityMetricsIntegrationTest extends AbstractIntegrationTest {
 
     @Container
     @ServiceConnection

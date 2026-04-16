@@ -4,8 +4,8 @@ import com.peekcart.product.application.InventoryLockFacade;
 import com.peekcart.product.domain.model.Category;
 import com.peekcart.product.domain.model.Inventory;
 import com.peekcart.product.domain.model.Product;
+import com.peekcart.support.AbstractIntegrationTest;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +16,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @Testcontainers
 @DisplayName("Inventory 동시성 테스트")
-class InventoryConcurrencyTest {
+class InventoryConcurrencyTest extends AbstractIntegrationTest {
 
     @Container
     @ServiceConnection
@@ -40,8 +41,9 @@ class InventoryConcurrencyTest {
     static GenericContainer<?> redis = new GenericContainer<>("redis:7")
             .withExposedPorts(6379);
 
-    @Autowired
-    EntityManagerFactory emf;
+    @Container
+    @ServiceConnection
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.1");
 
     @Autowired
     InventoryLockFacade inventoryLockFacade;
@@ -51,6 +53,8 @@ class InventoryConcurrencyTest {
 
     @BeforeEach
     void setUp() {
+        cleanDatabase();
+
         EntityManager em = emf.createEntityManager();
         em.getTransaction().begin();
 

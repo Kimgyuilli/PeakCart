@@ -5,10 +5,9 @@ import com.peekcart.product.application.ProductQueryService;
 import com.peekcart.product.application.dto.CreateProductCommand;
 import com.peekcart.product.application.dto.ProductDetailDto;
 import com.peekcart.product.application.dto.ProductListDto;
-import com.peekcart.product.application.dto.UpdateProductCommand;
 import com.peekcart.product.domain.model.Category;
+import com.peekcart.support.AbstractIntegrationTest;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,13 +21,16 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
+
+import com.peekcart.product.application.dto.UpdateProductCommand;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Testcontainers
 @DisplayName("상품 캐싱 통합 테스트 (Testcontainers Redis)")
-class ProductCacheIntegrationTest {
+class ProductCacheIntegrationTest extends AbstractIntegrationTest {
 
     private static final PageRequest DEFAULT_PAGE = PageRequest.of(0, 10);
     private static final String LIST_CACHE_KEY = "list:null:0:10";
@@ -43,30 +45,28 @@ class ProductCacheIntegrationTest {
     static GenericContainer<?> redis = new GenericContainer<>("redis:7")
             .withExposedPorts(6379);
 
+    @Container
+    @ServiceConnection
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.1");
+
     @Autowired ProductQueryService queryService;
     @Autowired ProductCommandService commandService;
     @Autowired CacheManager cacheManager;
-    @Autowired EntityManagerFactory emf;
 
     private Long categoryId;
     private Long productId;
 
     @BeforeEach
     void setUp() {
-        cacheManager.getCache("product").clear();
-        cacheManager.getCache("products").clear();
+        cleanDatabase();
+        cleanCaches(cacheManager);
 
         EntityManager em = emf.createEntityManager();
         em.getTransaction().begin();
-        em.createQuery("DELETE FROM Inventory").executeUpdate();
-        em.createQuery("DELETE FROM Product").executeUpdate();
-        em.createQuery("DELETE FROM Category").executeUpdate();
-
         Category category = Category.create("전자기기", null);
         em.persist(category);
         em.flush();
         categoryId = category.getId();
-
         em.getTransaction().commit();
         em.close();
 
@@ -75,8 +75,7 @@ class ProductCacheIntegrationTest {
         productId = created.id();
 
         // create가 목록 캐시를 evict하므로, 테스트 시작 전 캐시 상태를 초기화
-        cacheManager.getCache("product").clear();
-        cacheManager.getCache("products").clear();
+        cleanCaches(cacheManager);
     }
 
     @Test

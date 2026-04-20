@@ -69,6 +69,23 @@ hpx_timeout_prefix() {
   fi
 }
 
+# hpx_codex_timeout_seconds <command>
+# command 별 Codex 호출 timeout 기본값. env override 허용.
+hpx_codex_timeout_seconds() {
+  local command="${1:-}"
+  case "$command" in
+    plan)
+      printf '%s\n' "${HPX_TIMEOUT_PLAN_SECONDS:-180}"
+      ;;
+    work)
+      printf '%s\n' "${HPX_TIMEOUT_WORK_SECONDS:-180}"
+      ;;
+    *)
+      printf '%s\n' "${HPX_TIMEOUT_DEFAULT_SECONDS:-180}"
+      ;;
+  esac
+}
+
 # ---------- Lock (mkdir 원자성) ----------
 
 # hpx_lock_dir <task_id>

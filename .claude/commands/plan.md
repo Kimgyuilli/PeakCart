@@ -100,7 +100,7 @@ set -euo pipefail
 source .claude/scripts/shared-logic.sh
 
 TS=$(hpx_epoch_ts)
-TIMEOUT_PREFIX=$(hpx_timeout_prefix 60)
+TIMEOUT_PREFIX=$(hpx_timeout_prefix "$(hpx_codex_timeout_seconds plan)")
 RAW=".cache/codex-reviews/plan-${TASK_ID}-${TS}.json"
 ERR=".cache/codex-reviews/plan-${TASK_ID}-${TS}.stderr"
 mkdir -p .cache/codex-reviews

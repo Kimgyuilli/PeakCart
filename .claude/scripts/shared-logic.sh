@@ -273,3 +273,173 @@ hpx_extract_tokens_used() {
 hpx_json_validate() {
   python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1" 2>/dev/null
 }
+
+# ---------- /work: base branch / diff capture / split / risk ----------
+
+# hpx_base_branch_discover
+# origin/HEAD -> git config peakcart.baseBranch -> $PEAKCART_BASE_BRANCH -> 'main'
+# stdout: resolved base ref (merge-base 계산까지 반영)
+hpx_base_branch_discover() {
+  local base_branch base
+  base_branch="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
+  base_branch="${base_branch:-$(git config --get peakcart.baseBranch 2>/dev/null)}"
+  base_branch="${base_branch:-${PEAKCART_BASE_BRANCH:-main}}"
+  base="$(git merge-base HEAD "origin/${base_branch}" 2>/dev/null \
+         || git merge-base HEAD "${base_branch}" 2>/dev/null \
+         || printf '%s' "${base_branch}")"
+  printf '%s\n' "${base}"
+}
+
+# hpx_diff_capture <task_id> <ts>
+# git diff <BASE> > .cache/diffs/diff-<task>-<ts>.patch, 경로 echo
+# 주의: `git diff` 는 untracked 파일을 포함하지 않으므로, .gitignore 에 걸리지 않은
+# untracked 파일을 `git add -N` (intent-to-add) 으로 먼저 등록해 diff 에 포함시킨다.
+# 이는 working tree 외 부작용이 없는 안전한 연산이다 (staging 은 하지 않음).
+hpx_diff_capture() {
+  local task_id="$1"
+  local ts="$2"
+  local base path
+  base="$(hpx_base_branch_discover)"
+  path=".cache/diffs/diff-${task_id}-${ts}.patch"
+  mkdir -p .cache/diffs >/dev/null 2>&1 || true
+
+  # untracked (non-ignored) 파일을 intent-to-add 으로 마킹
+  local untracked
+  untracked="$(git ls-files --others --exclude-standard -z 2>/dev/null || true)"
+  if [ -n "$untracked" ]; then
+    printf '%s' "$untracked" | xargs -0 git add -N -- 2>/dev/null || true
+  fi
+
+  git diff "${base}" >"${path}"
+  printf '%s\n' "${path}"
+}
+
+# hpx_diff_lines <patch_path>
+hpx_diff_lines() {
+  local p="$1"
+  if [ ! -f "$p" ]; then printf '0\n'; return; fi
+  wc -l <"$p" | tr -d ' '
+}
+
+# hpx_diff_files <patch_path>
+# diff --git a/<f> b/<f> 로부터 b 측 파일 목록 추출 (중복 제거)
+hpx_diff_files() {
+  local p="$1"
+  [ -f "$p" ] || return 0
+  awk '/^diff --git / { sub(/^b\//,"",$4); print $4 }' "$p" | awk '!seen[$0]++'
+}
+
+# hpx_risk_classify <patch_path>
+# stdout: 두 줄 — line1: risk_level (low|medium|high), line2: CSV signals
+hpx_risk_classify() {
+  local p="$1"
+  local lines signals=() files
+  lines="$(hpx_diff_lines "$p")"
+  files="$(hpx_diff_files "$p" || true)"
+
+  if [ "${lines:-0}" -ge 800 ]; then signals+=("diff_large_800"); fi
+  if [ "${lines:-0}" -ge 500 ]; then signals+=("split_review_candidate"); fi
+
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      *auth*|*Auth*|*security*|*Security*|*oauth*|*OAuth*|*jwt*|*Jwt*|*JWT*)
+        signals+=("auth_touch"); break;;
+    esac
+  done <<<"$files"
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      *payment*|*Payment*|*billing*|*Billing*|*order*|*Order*)
+        signals+=("payment_touch"); break;;
+    esac
+  done <<<"$files"
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      *.yml|*.yaml|*.properties|*.env|infra/*|k8s/*|helm/*|kustomize/*|terraform/*|.github/workflows/*)
+        signals+=("config_infra_touch"); break;;
+    esac
+  done <<<"$files"
+
+  local level="low"
+  for s in "${signals[@]:-}"; do
+    case "$s" in
+      diff_large_800|auth_touch|payment_touch|config_infra_touch) level="high";;
+    esac
+  done
+  if [ "$level" = "low" ] && [ "${#signals[@]}" -gt 0 ]; then
+    level="medium"
+  fi
+
+  # dedup signals
+  local joined=""
+  if [ "${#signals[@]}" -gt 0 ]; then
+    joined="$(printf '%s\n' "${signals[@]}" | awk '!s[$0]++' | paste -sd, -)"
+  fi
+  printf '%s\n%s\n' "$level" "${joined}"
+}
+
+# hpx_diff_split <patch_path> <out_dir> [max_chunks=3]
+# 우선순위: (1) 실행 코드 (2) 테스트 (3) 설정/문서. file 단위로 chunk 할당.
+# stdout: 한 줄당 "<chunk_index>\t<chunk_path>\t<file_count>\t<line_count>"
+hpx_diff_split() {
+  local patch="$1"
+  local out_dir="$2"
+  local max_chunks="${3:-3}"
+  mkdir -p "$out_dir" >/dev/null 2>&1 || true
+  python3 - "$patch" "$out_dir" "$max_chunks" <<'PY'
+import os, re, sys
+patch_path, out_dir, max_chunks = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(patch_path, 'r', errors='replace') as f:
+    data = f.read()
+# diff --git a/.. b/.. 기준으로 split
+parts = re.split(r'(?m)^(?=diff --git )', data)
+blocks = [p for p in parts if p.startswith('diff --git ')]
+
+def classify(block):
+    m = re.search(r'^diff --git a/\S+ b/(\S+)', block, re.M)
+    fname = m.group(1) if m else ''
+    low = fname.lower()
+    if re.search(r'(^|/)(src/test/|test/|tests/|__tests__/|.*\.test\.|.*\.spec\.)', low):
+        return 2, fname  # tests
+    if low.endswith(('.md','.yml','.yaml','.properties','.json','.toml','.ini','.txt')) \
+       or low.startswith(('docs/','infra/','k8s/','helm/','kustomize/','terraform/','.github/')):
+        return 3, fname  # config/docs
+    return 1, fname  # executable code
+
+bucketed = {1: [], 2: [], 3: []}
+for b in blocks:
+    pr, fname = classify(b)
+    bucketed[pr].append((fname, b))
+
+# Flatten by priority, then chunk up to max_chunks by roughly equal line count
+ordered = bucketed[1] + bucketed[2] + bucketed[3]
+if not ordered:
+    sys.exit(0)
+
+total_lines = sum(b.count('\n') for _, b in ordered)
+# If only 1 chunk needed or few files: don't split further than necessary
+n_chunks = min(max_chunks, max(1, len(ordered)))
+# simple greedy pack to balance lines
+chunks = [[] for _ in range(n_chunks)]
+loads = [0] * n_chunks
+for fname, block in ordered:
+    idx = loads.index(min(loads))
+    chunks[idx].append((fname, block))
+    loads[idx] += block.count('\n')
+
+# collapse empty tails
+chunks = [c for c in chunks if c]
+
+base = os.path.basename(patch_path).rsplit('.patch', 1)[0]
+for i, c in enumerate(chunks, start=1):
+    out = os.path.join(out_dir, f'{base}-c{i}.patch')
+    with open(out, 'w') as f:
+        for _, blk in c:
+            f.write(blk)
+    fcount = len(c)
+    lcount = sum(b.count('\n') for _, b in c)
+    print(f'{i}\t{out}\t{fcount}\t{lcount}')
+PY
+}

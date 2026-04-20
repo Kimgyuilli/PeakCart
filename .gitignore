@@ -41,4 +41,5 @@ logs/
 # Claude × Codex harness (prototype)
 docs/plans/*.state.json
 docs/plans/*.lock/
+docs/plans/.archive/
 .cache/

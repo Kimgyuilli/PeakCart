@@ -8,3 +8,6 @@
 - raw: .cache/codex-reviews/diff-task-work-smoke-1776680763.json
 - tokens: 17997
 
+
+## 20260420T194121Z — state_drift_archive
+- reason: cached diff already absorbed into git history; active state archived instead of /ship execute

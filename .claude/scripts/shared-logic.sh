@@ -277,13 +277,14 @@ hpx_json_validate() {
 # ---------- /work: base branch / diff capture / split / risk ----------
 
 # hpx_base_branch_name
-# origin/HEAD -> git config peakcart.baseBranch -> $PEAKCART_BASE_BRANCH -> 'main'
+# $PEAKCART_BASE_BRANCH -> git config peakcart.baseBranch -> origin/HEAD -> 'main'
 # stdout: base branch **이름** (display/gh pr create --base 용). merge-base 계산 없음.
 hpx_base_branch_name() {
   local base_branch
-  base_branch="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
+  base_branch="${PEAKCART_BASE_BRANCH:-}"
   base_branch="${base_branch:-$(git config --get peakcart.baseBranch 2>/dev/null)}"
-  base_branch="${base_branch:-${PEAKCART_BASE_BRANCH:-main}}"
+  base_branch="${base_branch:-$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')}"
+  base_branch="${base_branch:-main}"
   printf '%s\n' "${base_branch}"
 }
 
@@ -336,6 +337,61 @@ hpx_diff_files() {
   local p="$1"
   [ -f "$p" ] || return 0
   awk '/^diff --git / { sub(/^b\//,"",$4); print $4 }' "$p" | awk '!seen[$0]++'
+}
+
+# hpx_diff_absorption_status <patch_path>
+# stdout:
+#   all_absorbed   - patch files exist but none are currently uncommitted
+#   partially_live - patch files 일부만 현재 uncommitted
+#   all_live       - patch files 전부 현재 uncommitted
+#   no_files       - patch 에서 파일을 추출할 수 없음
+hpx_diff_absorption_status() {
+  local patch_path="$1"
+  [ -f "$patch_path" ] || { printf 'no_files\n'; return 0; }
+
+  python3 - "$patch_path" <<'PY'
+import subprocess, sys
+from pathlib import Path
+
+patch = Path(sys.argv[1])
+files = []
+for line in patch.read_text(encoding="utf-8", errors="ignore").splitlines():
+    if line.startswith("diff --git "):
+        parts = line.split()
+        if len(parts) >= 4:
+            path = parts[3]
+            if path.startswith("b/"):
+                path = path[2:]
+            files.append(path)
+
+files = list(dict.fromkeys(files))
+if not files:
+    print("no_files")
+    raise SystemExit(0)
+
+res = subprocess.run(
+    ["git", "status", "--porcelain"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+uncommitted = set()
+for raw in res.stdout.splitlines():
+    if len(raw) < 4:
+        continue
+    path = raw[3:]
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    uncommitted.add(path)
+
+matched = [f for f in files if f in uncommitted]
+if len(matched) == 0:
+    print("all_absorbed")
+elif len(matched) == len(files):
+    print("all_live")
+else:
+    print("partially_live")
+PY
 }
 
 # hpx_risk_classify <patch_path>

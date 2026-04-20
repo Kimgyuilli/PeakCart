@@ -54,6 +54,34 @@ echo "MODE=$MODE"  # dry-run | execute
   - 그 외 → "/ship 은 work.done 이후에만 진행 가능" 안내 후 종료
 - `SID=$(hpx_lock_acquire "$TASK_ID" ship "$(python3 -c 'import json; print(json.load(open("docs/plans/'"$TASK_ID"'.state.json")).get("session_id",""))')")` — state.session_id 재사용으로 re-enter idempotent
 - HEAD 와 `state.branch` 교차 검증 (`git branch --show-current` == `state.branch`). 불일치 → 사용자 보고 후 중단
+- `work.done` 진입에서는 `last_diff_path` 기준 **state drift detector** 를 먼저 수행:
+  ```bash
+  bash -c 'set -euo pipefail
+  source .claude/scripts/shared-logic.sh
+  STAGE=$(python3 -c "import json; print(json.load(open('"'"'docs/plans/'"$TASK_ID"'.state.json'"'"')).get('"'"'stage'"'"','"'"''"'"'))")
+  DIFF_PATH=$(python3 -c "import json; print(json.load(open('"'"'docs/plans/'"$TASK_ID"'.state.json'"'"')).get('"'"'last_diff_path'"'"','"'"''"'"'))")
+  if [ "$STAGE" = "work.done" ] && [ -n "$DIFF_PATH" ] && [ -f "$DIFF_PATH" ]; then
+    STATUS=$(hpx_diff_absorption_status "$DIFF_PATH")
+    echo "DRIFT_STATUS=$STATUS"
+    if [ "$STATUS" = "all_absorbed" ]; then
+      hpx_diff_files "$DIFF_PATH" || true
+    fi
+  fi
+  '
+  ```
+- `DRIFT_STATUS=all_absorbed` 이면 **GS-0 게이트**:
+  ```
+  === state drift 감지 ===
+  last_diff_path 의 변경이 현재 working tree 에 없습니다.
+  diff 캐시 기준 변경은 이미 커밋에 흡수되었을 가능성이 높습니다.
+
+    [1] archive — state 정리 후 종료
+    [2] 종료
+  >
+  ```
+  - `[1]` 선택 시 audit log 에 `state_drift_archive` 기록 후 state 를 `docs/plans/.archive/` 로 이동하고 종료
+  - `[2]` 선택 시 audit log 에 `state_drift_abort` 기록 후 종료
+- `DRIFT_STATUS=partially_live` 이면 partial drift 로 간주하고 경고 후 종료. 자동 진행 금지
 
 ### Step 2. Consistency precheck (GS-1 conditional)
 
@@ -156,6 +184,10 @@ bash -c 'set -euo pipefail
 source .claude/scripts/shared-logic.sh
 # Claude 가 commit_plan 각 partition 에 대해 다음 루프를 순차 실행:
 git add -- <files_of_partition>
+if git diff --cached --quiet; then
+  echo "partition=<id> staged diff empty"
+  exit 20
+fi
 git commit -m "<subject>"
 SHA=$(git rev-parse HEAD)
 echo "partition=<id> sha=$SHA"
@@ -163,6 +195,7 @@ echo "partition=<id> sha=$SHA"
 ```
 
 - `git add -A` **금지**. partition 의 `files[]` 만 명시
+- `git add` 직후 `git diff --cached --quiet` 이면 fail-fast 로 중단. 이는 stale state/drift 재발생 신호로 간주하며 Step 1 detector 경로로 되돌아가야 함
 - 각 커밋 직후 `git rev-parse HEAD` 로 sha 수집 → state 의 `created_commits[]` 에 `{partition_id, sha, subject, ts}` append → 원자 저장
 - 재진입 시 재커밋 방지 교차 검증:
   ```bash
@@ -354,6 +387,7 @@ dry-run 모드에서 종료 시:
 | 현재 stage / cursor | 확인 | 다음 Step |
 |-----------|----|----------|
 | 없음 / `work.done` | — | Step 2 (precheck) 부터 |
+| `work.done` + drift=`all_absorbed` | cached diff files vs current uncommitted 불일치 | **GS-0 (`archive` / `종료`)** |
 | `ship.precheck` | — | Step 3 (분할 제안) |
 | `ship.partition.previewed` | — | Step 4 (커밋 생성) |
 | `ship.commits.created`, cursor 없음 | `created_commits[]` vs `git log` 교차 확인 | Step 5 (PR 본문) |

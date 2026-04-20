@@ -102,3 +102,12 @@ fresh `work.done` state 를 의도적으로 만들고 `/ship --execute`의 commi
 - 앞선 loop 1 은 codex 60s timeout (result=timeout) 으로 loop 2 재시도됨
 - raw: .cache/codex-reviews/plan-task-ship-smoke-fresh-1776715704.json
 - run_id: plan:20260420T200824Z:ae97f975-d328-48d8-ac0d-5d2083318b55:2
+
+### 2026-04-21 05:25 — GW-2 (loop 1, auto-pass)
+- 리뷰 run: work:20260420T202330Z:ae97f975-d328-48d8-ac0d-5d2083318b55:1 (single)
+- 항목: 0건 (P0:0, P1:0, P2:0) → 자동 통과
+- 요약: diff 가 계획 §3 범위를 그대로 따름. 레이어 위반·보안 이슈 없음. null 처리·음수 clamp·INFO 로그 1회·테스트 5건 계획 일치.
+- diff base override: 이번 /work 호출에 한해 `HEAD` 로 치환 (원인: `experiment/harness-prototype` 의 누적 commit 이 merge-base 대비 2204 lines 로 §7-4 상한 초과. 리뷰 대상을 이번 task 범위로 좁힘).
+- diff: .cache/diffs/diff-task-ship-smoke-fresh-1776716494-head.patch (125 lines, 2 files)
+- raw: .cache/codex-reviews/diff-task-ship-smoke-fresh-1776716610.json
+- 로컬 gradle test: green (./gradlew test --tests HarnessShipFreshWindowTest — BUILD SUCCESSFUL)

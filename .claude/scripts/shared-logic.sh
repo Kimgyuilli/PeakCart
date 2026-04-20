@@ -13,6 +13,30 @@
 
 # ---------- 공통 유틸 ----------
 
+# 일부 슬래시 커맨드 실행 환경에서 PATH 가 비정상적으로 축소되는 사례를 방어한다.
+# core shell helper 는 /usr/bin, /bin 을 전제로 동작하므로 최소 PATH 를 복구한다.
+if [ -z "${PATH:-}" ]; then
+  PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+else
+  case ":$PATH:" in
+    *:/usr/bin:*) ;;
+    *) PATH="$PATH:/usr/bin:/bin:/usr/sbin:/sbin" ;;
+  esac
+  case ":$PATH:" in
+    *:/usr/local/bin:*) ;;
+    *) PATH="/usr/local/bin:/opt/homebrew/bin:$PATH" ;;
+  esac
+fi
+export PATH
+
+hpx_parent_dir() {
+  local path="$1"
+  case "$path" in
+    */*) printf '%s\n' "${path%/*}" ;;
+    *) printf '.\n' ;;
+  esac
+}
+
 hpx_utc_ts() {
   date -u +%Y%m%dT%H%M%SZ
 }
@@ -145,11 +169,12 @@ hpx_state_read() {
 hpx_state_write() {
   local task_id="$1"
   shift
-  local path tmp
+  local path tmp parent_dir
   path="$(hpx_state_path "$task_id")"
   tmp="${path}.tmp.$$"
+  parent_dir="$(hpx_parent_dir "$path")"
 
-  mkdir -p "$(dirname "$path")" >/dev/null 2>&1 || true
+  mkdir -p "$parent_dir" >/dev/null 2>&1 || true
 
   if [ $# -gt 0 ]; then
     printf '%s\n' "$*" >"$tmp"
@@ -211,7 +236,7 @@ hpx_sync_context() {
 hpx_audit_append() {
   local task_id="$1"
   local path="docs/plans/.audit/${task_id}.md"
-  mkdir -p "$(dirname "$path")" >/dev/null 2>&1 || true
+  mkdir -p "$(hpx_parent_dir "$path")" >/dev/null 2>&1 || true
   shift
   {
     if [ $# -gt 0 ]; then
@@ -234,7 +259,7 @@ hpx_metrics_path() {
 hpx_metrics_append() {
   local path
   path="$(hpx_metrics_path)"
-  mkdir -p "$(dirname "$path")" >/dev/null 2>&1 || true
+  mkdir -p "$(hpx_parent_dir "$path")" >/dev/null 2>&1 || true
   if [ ! -f "$path" ]; then
     hpx_metrics_header >"$path"
   fi
@@ -251,7 +276,7 @@ hpx_gate_events_path() {
 hpx_gate_events_append() {
   local path
   path="$(hpx_gate_events_path)"
-  mkdir -p "$(dirname "$path")" >/dev/null 2>&1 || true
+  mkdir -p "$(hpx_parent_dir "$path")" >/dev/null 2>&1 || true
   if [ ! -f "$path" ]; then
     hpx_gate_events_header >"$path"
   fi

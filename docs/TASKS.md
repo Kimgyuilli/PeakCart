@@ -405,12 +405,12 @@
 
 ### Task 3-5: HPA 검증
 **상태**: 🔲 대기
-**목표**: Order Service HPA 설정, 부하 테스트 중 자동 스케일아웃 검증
+**목표**: `peekcart` Deployment HPA 설정, 부하 테스트 중 자동 스케일아웃 검증 (Phase 4 MSA 분리 이후 `Order Service` 로 재정의 예정)
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
 | metrics-server 설치 (GKE 는 기본 제공) | 🔲 | minikube addon 불필요, GKE 는 Cloud Monitoring 연계 |
-| HPA 매니페스트 작성 (CPU 기반, min 1 / max 3) | 🔲 | |
+| HPA 매니페스트 작성 (CPU 기반, min 1 / max 3) | ✅ | `k8s/overlays/gke/hpa.yml` 추가 (task-hpa-manifest). minikube overlay 는 비포함이 정상 |
 | nGrinder 부하 중 Pod 자동 증설 확인 | 🔲 | Task 3-4 부하 테스트와 연계 실행 (`docs/03-requirements.md` 7-1) |
 | Grafana에서 HPA 스케일 이벤트 + Pod 증설 시점 스크린샷 캡처 | 🔲 | Task 3-3 Grafana 대시보드 연계 |
 
@@ -434,6 +434,7 @@
 | D-008 | 리뷰 종합 (2026-04-10) | Monitoring | **Grafana datasource UID 하드코딩**. 모든 대시보드/알림에서 `"uid": "prometheus"`. Helm 기본값과 일치하는 한 문제 없으나 Helm 업그레이드 시 변경 가능성 | 현재 동작. Helm 업그레이드 시 확인 | 낮음 |
 | D-009 | CI 분석 (2026-04-14) | CI / Test Infra | **통합 테스트 인프라 분산**. 통합 테스트 7개가 각자 `@Testcontainers` + `static @Container` 로 MySQL/Redis/Kafka 를 클래스별 중복 기동. 공통 `AbstractIntegrationTest` 베이스 없음. 개별 `@Import(TestConfig)` / `@TestPropertySource` 사용으로 Spring 컨텍스트 캐시 적중 불가. 통합 테스트 증가 시 CI 시간·유지보수 비용 동반 악화 예상 | `AbstractIntegrationTest`(cleanup 규약) + `IntegrationTestConfig`(no-op SlackPort) 도입. 7개 통합 테스트 마이그레이션 완료. 컨테이너 수명 모델(per-class)은 유지, cleanup/mock 규약 단일화. 244건 전체 통과 | ~~중간~~ **해결됨 (1차 목표)** |
 | D-010 | D-007 분리 (2026-04-14) | Observability | **Outbox trace context 미영속화**. 모든 production Kafka 발행이 `OutboxPollingService` (별도 스케줄 스레드) 경유 → 원본 HTTP 요청의 MDC traceId/userId 가 publish 시점에 이미 소멸. `OutboxEvent` 엔티티에 trace context 컬럼 부재로 end-to-end 추적 불가 | D-007 옵션 B 로 Consumer 측 traceId 부재는 봉합(eventId fallback). 진정한 end-to-end 추적은 `OutboxEvent` 에 `trace_id`/`user_id` 컬럼 추가(Flyway) + `OutboxEvent.create()` MDC 캡처 + Producer Interceptor 헤더 주입 필요. `MdcRecordInterceptor` 가 헤더 우선순위로 forward-compatible. Phase 4 전 ADR 작성 후 진행 권장 | 중간 |
+| D-011 | task-hpa-manifest Codex 리뷰 (2026-04-21) | Tooling / Harness | **`/plan`·`/work` harness 견고화 필요** — task-hpa-manifest diff 리뷰에서 발견된 선-존재 harness 이슈 4건. (a) `hpx_lock_dir`/`hpx_state_path` 등이 `task_id` 를 경로에 그대로 삽입해 `../` injection 위험 (`.claude/scripts/shared-logic.sh:92,149-159,164-208,411-423`). (b) `hpx_diff_capture` 가 untracked 파일에 `git add -N` 을 실행해 index 전역 부작용 발생(`shared-logic.sh:503-520`). (c) 875줄 공용 shell helper 회귀 방지 테스트 전무 (Bats 등). (d) `scripts/timeout_wrapper.py:35` 가 0/음수 seconds 를 거부하지 않아 "정상 timeout" 처럼 오인 가능 | HPA task 범위 외(이번 세션 변경 아님)이므로 별도 harness 정비 task 로 분리. 우선순위는 (a) > (d) > (b) > (c). 원본 리뷰: `.cache/codex-reviews/diff-task-hpa-manifest-*-c{1,3}.json` | 중간 |
 
 ## 다음 Phase 예정
 

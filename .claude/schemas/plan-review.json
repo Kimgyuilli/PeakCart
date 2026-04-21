@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "summary", "items"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "summary": { "type": "string" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "category", "finding", "suggestion"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "severity": { "type": "string", "enum": ["P0", "P1", "P2"] },
+          "category": {
+            "type": "string",
+            "enum": ["architecture", "bug", "security", "test", "doc", "style", "convention"]
+          },
+          "finding": { "type": "string" },
+          "suggestion": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -32,3 +32,33 @@
 - raw: `.cache/codex-reviews/plan-task-hpa-manifest-1776765407.json`
 - run_id: `plan:20260421T095647Z:f38d8c03-33ae-4cab-b0d3-47ac3801d6f3:3`
 - tokens used: 73,628
+
+## 2026-04-21 19:17 — GW-2 (work loop 1, split)
+- 리뷰 모드: split (mode=split, chunks=3) — 사용자 선택지 B (merge-base 2659 라인 강행)
+- aggregate_result: ok
+- 리뷰 runs:
+  - `work:20260421T101046Z:f38d8c03-33ae-4cab-b0d3-47ac3801d6f3:1:c1` — shared-logic.sh 단독 (P0:0 P1:2 P2:2)
+  - `work:20260421T101046Z:f38d8c03-33ae-4cab-b0d3-47ac3801d6f3:1:c2` — hpa.yml + docs/harness 혼합 (P0:0 P1:2 P2:2)
+  - `work:20260421T101046Z:f38d8c03-33ae-4cab-b0d3-47ac3801d6f3:1:c3` — kustomization.yml + harness/docs 혼합 (P0:1 P1:1 P2:1)
+- 총 항목: 11건 (P0:1, P1:5, P2:5)
+- 사용자 선택: "동의하는 부분에 대해 반영" — 판단 기반 선별 반영
+- 수용 (deferred to tech debt, 본 task 범위 외 harness 선-존재 이슈):
+  - `c1:2` task_id path injection 위험 (`shared-logic.sh:92,149-208,411-423`) → TASKS.md D-011 (a)
+  - `c1:3` `hpx_diff_capture` 의 `git add -N` 전역 부작용 (`shared-logic.sh:503-520`) → TASKS.md D-011 (b)
+  - `c1:4` 875줄 shell helper 회귀 테스트 전무 → TASKS.md D-011 (c)
+  - `c3:3` `scripts/timeout_wrapper.py:35` 0/음수 seconds 미검증 → TASKS.md D-011 (d)
+- 거부 (split-chunk 리뷰 아티팩트 — 전체 patch 기준 충족):
+  - `c3:1` P0 "hpa.yml 미포함" — hpa.yml 은 c2 에 실제 존재. `kubectl kustomize k8s/overlays/gke` 렌더 통과 확인 (P4)
+  - `c1:1` P1 "P1-P5 전부 미구현" — hpa.yml(c2) + kustomization.yml(c3) 실제 존재
+  - `c2:1` P1 "kustomization 미수정, hpa.yml orphan" — kustomization.yml 수정은 c3 에 존재
+  - `c2:3` P2 "07-roadmap 미갱신" — c3 에 실제 갱신 존재
+- 거부 (약한 제안):
+  - `c2:4` P2 "kubectl kustomize smoke 테스트 추가" — 비용>효과, 본 task 단발성
+- 관찰 수용 (별도 코드 변경 불요):
+  - `c2:2`/`c3:2` 범위 혼입 — 사용자 B 선택(merge-base 전체 리뷰)으로 prior plan/harness 커밋 포함됨을 이미 인지·수용
+- HPA 구현 자체: 계획서 P1-P5 완결 + 정적 렌더 검증 + `kubectl apply --dry-run=server -f hpa.yml` 통과 (Step 5 내 확인)
+- diff: `.cache/diffs/diff-task-hpa-manifest-1776766110.patch` (split: `-c1`, `-c2`, `-c3`)
+- raw:
+  - `.cache/codex-reviews/diff-task-hpa-manifest-1776766422-c1.json`
+  - `.cache/codex-reviews/diff-task-hpa-manifest-1776766518-c2.json`
+  - `.cache/codex-reviews/diff-task-hpa-manifest-1776766621-c3.json`

@@ -25,17 +25,41 @@
   - 근거 2 — ADR-0004 는 minikube 8GB 환경에서 `maxReplicas=3` 이 eviction 위험을 유발한다고 명시. 실제로 `k8s/overlays/gke/patches/peekcart-deployment.yml` 최상단 주석은 `HPA max=3` 전제를 기준으로 GKE resources 상향 근거를 기술하고 있어, GKE 전용 배치가 이미 코드 레벨에서 정합
   - 적용 범위: minikube overlay 는 본 task 대상 아님 (매니페스트 없음 = 렌더링 출력에 HPA 미포함이 정상). GKE overlay 렌더링 결과에만 HPA 포함
 - [ ] **P2.** `peekcart` 대상 HPA 매니페스트 작성
-  - `apiVersion: autoscaling/v2`
-  - `minReplicas: 1`
-  - `maxReplicas: 3`
-  - CPU 평균 사용률 기준 target 포함
+  - **API / 식별자**
+    - `apiVersion: autoscaling/v2`, `kind: HorizontalPodAutoscaler`
+    - `metadata.name: peekcart`, `metadata.namespace: peekcart` — ADR-0005 L109 의 "namespace 누락 시 default NS 로 새는 위험" 방지 (base 는 `kustomize namespace:` 미사용)
+    - 공통 라벨 — base deployment 와 동일 패턴 (`k8s/base/services/peekcart/deployment.yml:6-9`):
+      - `app.kubernetes.io/name: peekcart`
+      - `app.kubernetes.io/component: backend`
+      - `app.kubernetes.io/part-of: peekcart`
+  - **스케일 타겟**
+    - `spec.scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: peekcart }`
+  - **스케일 범위**
+    - `spec.minReplicas: 1`
+    - `spec.maxReplicas: 3` (ADR-0004 L51-57 의 GKE e2-standard-4 용량 전제와 정합)
+  - **메트릭 타겟**
+    - `spec.metrics` — CPU Resource, `type: Utilization`, `averageUtilization: 60`
+    - 근거: GKE overlay `requests.cpu: 500m` 기준 60% = 300m 사용 시 scale-out 트리거. `max=3` 의 requests 합계 1.5 vCPU 가 노드 allocatable 여유 내 (`k8s/overlays/gke/patches/peekcart-deployment.yml:1-6`). 초기 보수값이며 Task 3-5 본편 부하 테스트 결과에 따라 조정 여지 명시
+  - **behavior (안정화 정책)**
+    - `spec.behavior.scaleUp.stabilizationWindowSeconds: 30` — 부하 중 "Pod 자동 증설 순간 캡처" 재현성 확보 (TASKS.md L414-415)
+    - `spec.behavior.scaleDown.stabilizationWindowSeconds: 300` — autoscaling/v2 기본값 유지, 플래핑 방지
 - [ ] **P3.** Kustomize 연결
   - `k8s/overlays/gke/kustomization.yml` 의 `resources:` 에 HPA 파일 추가
   - 기존 deployment/service/monitoring 경로와 충돌 없는지 확인
 - [ ] **P4.** 정적 + 서버측 검증
-  - `kubectl kustomize k8s/overlays/gke` → 렌더링 출력에 `kind: HorizontalPodAutoscaler` 포함 확인
-  - `kubectl kustomize k8s/overlays/minikube` → 회귀 없음 (HPA 미포함이 정상)
-  - `kubectl apply --dry-run=server -k k8s/overlays/gke` → HPA API 스키마 수용 + `scaleTargetRef` 대상(Deployment `peekcart`) 참조 유효성 확인
+  - 렌더 존재 확인
+    - `kubectl kustomize k8s/overlays/gke` → 출력에 `kind: HorizontalPodAutoscaler` 포함
+    - `kubectl kustomize k8s/overlays/minikube` → 회귀 없음 (HPA 미포함이 정상)
+  - 렌더 필드값 확인 — 임의 기본값 유입 방지
+    - `metadata.namespace == peekcart`
+    - `spec.scaleTargetRef.kind == Deployment`, `name == peekcart`
+    - `spec.minReplicas == 1`, `spec.maxReplicas == 3`
+    - `spec.metrics[0].resource.target.averageUtilization == 60`
+    - `spec.behavior.scaleUp.stabilizationWindowSeconds == 30`
+    - `spec.behavior.scaleDown.stabilizationWindowSeconds == 300`
+    - 수단: `kubectl kustomize k8s/overlays/gke | yq 'select(.kind == "HorizontalPodAutoscaler")'` 또는 동등한 `grep`/`awk` 파이프라인
+  - 서버측 스키마 검증
+    - `kubectl apply --dry-run=server -k k8s/overlays/gke` → HPA API 스키마 수용 + `scaleTargetRef` 참조 유효성
   - 런타임 metrics API 확인(`kubectl top pods`) 및 실제 scale-out 관측은 Task 3-5 본편으로 이관 (본 task 비대상)
 - [ ] **P5.** Layer 1 문서 갱신
   - `docs/02-architecture.md` §12 K8s 트리에 `k8s/overlays/gke/hpa.yml` 반영
@@ -55,9 +79,12 @@
 
 ## 5. 검증 방법
 
-- 렌더링 검증:
+- 렌더링 검증 (존재):
   - `kubectl kustomize k8s/overlays/gke` → 출력에 `kind: HorizontalPodAutoscaler` 포함 확인
   - `kubectl kustomize k8s/overlays/minikube` → 회귀 없음 (HPA 미포함이 정상)
+- 렌더링 검증 (필드값) — §3 P4 체크리스트 참조:
+  - namespace / scaleTargetRef / min·maxReplicas / `averageUtilization` / `behavior.*` 수치가 계획서 값과 일치
+  - 수단: `kubectl kustomize ... | yq 'select(.kind=="HorizontalPodAutoscaler")'` 또는 동등한 파이프라인
 - 서버측 검증:
   - `kubectl apply --dry-run=server -k k8s/overlays/gke` → HPA API 스키마 수용 + `scaleTargetRef` 가 Deployment `peekcart` 를 유효하게 참조
 - 구조 검증:

@@ -28,7 +28,7 @@
 ### Step 2. lock 획득 + sync 로직
 - `hpx_lock_acquire "$TASK_ID" plan` 로 lock 획득. 실패 시 meta.json 내용을 사용자에게 제시하고 중단
 - 반환된 `session_id` 를 state 와 이후 Bash 호출에 전달 (재진입용). 현재 Claude 세션 동안 같은 task 를 다시 Bash 호출로 진입할 때는 `hpx_lock_acquire "$TASK_ID" plan "$session_id"` 로 re-enter
-- `hpx_sync_context` 출력을 읽고 현재 Phase / 진행 중 Task / 활성 ADR 을 파악 (내부적으로만 사용, 사용자에게 별도 보고 불필요)
+- `hpx_sync_context` 구조화 요약을 읽고 현재 Phase / 다음 task 후보 / 활성 state / 활성 ADR 을 파악 (내부적으로만 사용, 사용자에게 별도 보고 불필요)
 
 ### Step 3. state 파일 확인
 - `hpx_state_exists "$TASK_ID"` 가 true 면 JSON 을 파싱해 `stage`, `loop_count_by_command.plan`, `attempts_by_command.plan`, `review_runs[]` 을 읽고 재개 지점 판단
@@ -80,6 +80,10 @@
 ### Step 5. 계획서 초안 작성/확인
 - `docs/plans/${TASK_ID}.md` 가 비어있거나 템플릿 섹션 중 필수(§1, §2, §4) 항목이 빠져있으면 초안 작성
 - 작업 항목은 **stable id** (`P1.`, `P2.`, ...) 강제
+- Codex 호출 전에 `hpx_plan_lint "$TASK_ID"` 실행
+  - 통과 시 `"OK"`
+  - 실패 시 누락 섹션 / stable id 오류를 사용자에게 먼저 제시하고 종료
+  - 이 경우 Codex 리뷰는 건너뛴다 (형식 오류에 토큰을 쓰지 않기 위함)
 - 작성/확인 완료 후 상태: `stage = "plan.draft.created"`
 
 ### Step 6. run 예약 + attempts 증가

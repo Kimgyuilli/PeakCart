@@ -117,11 +117,12 @@ bash -c 'set -euo pipefail
 source .claude/scripts/shared-logic.sh
 
 TS=$(hpx_epoch_ts)
-TIMEOUT_PREFIX=$(hpx_timeout_prefix 180)
+TIMEOUT_PREFIX=$(hpx_timeout_prefix "$(hpx_codex_timeout_seconds work)")
 mkdir -p .cache/codex-reviews
 
 RAW=".cache/codex-reviews/diff-'"$TASK_ID"'-${TS}.json"
 ERR=".cache/codex-reviews/diff-'"$TASK_ID"'-${TS}.stderr"
+DIFF_META=$(hpx_diff_meta_summary "'"$DIFF_PATH"'")
 
 eval "$TIMEOUT_PREFIX" codex exec \
     --cd "$(pwd)" \
@@ -139,6 +140,8 @@ eval "$TIMEOUT_PREFIX" codex exec \
   - 시큐리티 (입력 검증, 권한, 시크릿 노출)
   - 테스트 커버리지 (추가/수정 필요 여부)
   - 컨벤션 (네이밍, 패키지 위치, 로그 레벨)
+[diff 메타데이터]
+${DIFF_META}
 [ADR 인덱스 핵심]
   - ADR-0001: 4-Layered + DDD
   - ADR-0002: 모놀리식 → MSA 단계적 진화

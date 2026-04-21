@@ -16,6 +16,8 @@
 - 모든 Bash 호출은 `bash -c '...'` 서브셸 (zsh vs bash `set -euo pipefail` 상이 대응)
 - 각 Bash 호출 선두에 `set -euo pipefail && source .claude/scripts/shared-logic.sh`
 - state.json 은 항상 `hpx_state_write` 로 원자적 치환
+- state mutation 은 `hpx_state_patch`, `hpx_state_set_*`, `hpx_state_append_*` helper 로만 수행
+- raw JSON heredoc 직접 조립이나 state direct overwrite 우회는 금지한다.
 - 외부 부작용 직전 → state 예약 → 부작용 → state 재기록
 - Codex timeout **기본 180s** (Phase 1 측정 결과 wall 78s / tokens 39,865 반영)
 - 복잡한 heredoc 은 `/tmp/work-*.sh` 로 분리해 실행
@@ -39,9 +41,11 @@
 
 ### Step 3. 재개 지점 결정 + pending_run finalize
 - `pending_run != null` → §6-4-6 규약으로 finalize:
-  1. `raw_path` 존재 + parseable JSON → 해당 run 을 `review_runs[]` 에 승격
-  2. raw 없음/깨짐 → `result="error"`, `error_reason="interrupted_before_output"` 로 finalize
-  3. `pending_run=null` 로 정리 후 저장
+  1. `raw_path` 존재 + parseable JSON → `hpx_state_append_review_run "$TASK_ID" "$RUN_JSON" work step3.finalize` 로 승격
+  2. raw 없음/깨짐 → `result="error"`, `error_reason="interrupted_before_output"` finalize JSON 을 같은 helper 로 append
+  3. `pending_run` 정리는 `hpx_state_set_pending_run "$TASK_ID" 'null' work step3.finalize` 로 수행
+- finalize payload 는 `python3` 로 구성하고, `pending_run` 일부 필드가 비어 있는 재진입 state 도 허용해야 한다.
+- `hpx_state_init` 이외의 mutation helper 는 state 파일이 없으면 실패해야 한다.
 - 현재 stage 에 따라 재진입 지점 결정:
 
 | stage | 재진입 Step |
@@ -59,14 +63,15 @@
   - 기본 제안: `feat/${TASK_ID}-$(계획서 §1 의 한 단어 요약 kebab-case)`
   - **GW-1 게이트** 노출 (브랜치 이름 확인/수정/취소). 수정 선택 시 사용자 입력 반영
   - `git switch -c <BRANCH>` 또는 기존 존재 시 `git switch <BRANCH>`
-  - state.branch 기록 후 원자 저장
+  - `hpx_state_patch "$TASK_ID" '{"branch":"<branch>","updated_at":"<now ISO8601>"}' work step4.branch` 로 저장
 - gate 이벤트는 `hpx_gate_events_append` 로 TSV 기록 (자동 통과도 기록)
 
 ### Step 5. 계획 항목 구현
 - 계획서 `docs/plans/${TASK_ID}.md` 의 작업 항목 (`P1.`, `P2.`, ...) 순회
-- 항목 하나씩 Edit/Write 로 구현. 각 항목 완료 직후 state 의 `completed_plan_items[]` 에 해당 stable id append → 원자 저장
-- 진행 중 상태: `stage=work.impl.inprogress`
-- 전체 항목 완료 (또는 사용자 승인 하에 부분 완료) 후: `stage=work.impl.completed`
+- 항목 하나씩 Edit/Write 로 구현. 각 항목 완료 직후 `hpx_state_append_completed_item "$TASK_ID" "P<n>" work step5.item` 으로 append
+- 진행 중 상태는 `hpx_state_patch "$TASK_ID" '{"stage":"work.impl.inprogress","updated_at":"<now ISO8601>"}' work step5.stage` 로 기록
+- 전체 항목 완료 (또는 사용자 승인 하에 부분 완료) 후 상태는 `hpx_state_patch "$TASK_ID" '{"stage":"work.impl.completed","updated_at":"<now ISO8601>"}' work step5.stage` 로 전환
+- `completed_plan_items[]` append 는 동일 stable id 재기록 시 중복 추가하지 않는 idempotent helper 계약을 따른다.
 - 이후에도 추가 수정이 필요하면 다시 `work.impl.inprogress` 로 내려가 구현 이어간다
 
 ### Step 6. diff 캡처
@@ -82,7 +87,7 @@ git diff --stat "$(hpx_base_branch_discover)" | tail -20
 '
 ```
 - diff 가 empty (0 lines) → "변경사항이 없습니다. 구현 후 다시 호출하세요." 출력 후 종료 (stage 유지)
-- state 갱신: `last_diff_path = $DIFF_PATH` 저장
+- state 갱신: `hpx_state_set_last_diff_path "$TASK_ID" "$DIFF_PATH" work step6.diff` 후 `updated_at` 은 `hpx_state_patch` 로 같이 기록
 
 ### Step 7. diff 크기 분기 + review plan 예약 (§7-4)
 | 조건 | mode | 예약 동작 |
@@ -107,7 +112,10 @@ git diff --stat "$(hpx_base_branch_discover)" | tail -20
     ]
   }
   ```
-- 예약 + state 원자 저장 후 다음 Step
+- 예약 단계는 helper 로만 수행:
+  - `hpx_state_set_pending_run "$TASK_ID" "$PENDING_RUN_JSON" work step7.reserve`
+  - `hpx_state_set_review_plan "$TASK_ID" "$REVIEW_PLAN_JSON" work step7.reserve`
+  - loop/attempt/budget 갱신은 `hpx_state_patch "$TASK_ID" "$COUNTER_PATCH_JSON" work step7.reserve`
 
 ### Step 8. Codex diff 리뷰 호출 (§7-2)
 single / chunk 공통 템플릿. prompt 에 `${RUN_ID}` 와 `${DIFF_PATH}` (해당 chunk 경로) 치환.
@@ -200,11 +208,10 @@ split aggregate 규칙 (§7-4):
   - raw: .cache/codex-reviews/diff-*.json
   ```
 - state 갱신 (원자):
-  - 각 run 을 `review_runs[]` 에 append:
-    `{ run_id, parent_run_id, command: "work", loop, ts, raw_path, result, accepted_ids[], rejected_ids[], deferred_ids[], degraded_accepted, degraded_reason, risk_level, risk_signals, chunk_index, chunk_total }`
-  - `pending_run = null`, `review_plan.aggregate_result` 기록
-  - `stage = "work.review.completed"`
-  - `updated_at = now`
+  - 각 run 은 `hpx_state_append_review_run "$TASK_ID" "$RUN_JSON" work step11.finalize` 로 append
+  - `pending_run = null` 은 `hpx_state_set_pending_run "$TASK_ID" 'null' work step11.finalize`
+  - `review_plan.aggregate_result`, `stage`, `updated_at` 은 `hpx_state_patch "$TASK_ID" "$FINAL_PATCH_JSON" work step11.finalize`
+- `review_runs[]` append 는 동일 `run_id` 재기록 시 중복 추가하지 않는 idempotent helper 계약을 따른다.
 - `hpx_metrics_append` 로 각 run 에 대해 `_metrics.tsv` 1행씩 기록
 
 ### Step 12. 루프 판정 / 종료
@@ -214,7 +221,7 @@ Step 6 (diff 캡처) 로 복귀 조건 — **모두** 만족:
 - `attempts_by_command.work < 3` 이고 `codex_attempts_cycle_total < 5`
 
 아니면 종료:
-- `stage = "work.done"`, `updated_at = now` 저장
+- `hpx_state_patch "$TASK_ID" '{"stage":"work.done","updated_at":"<now ISO8601>"}' work step12.done` 저장
 - `hpx_lock_force_release "$TASK_ID"`
 - 사용자 보고: 구현 완료 요약, 최종 accepted/rejected/deferred/degraded, 다음 단계 `/ship` 안내
 

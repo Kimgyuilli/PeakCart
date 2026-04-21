@@ -16,6 +16,8 @@
 - 모든 Bash 호출은 `bash -c '...'` 로 실행 (zsh 가 아닌 bash 에서 `shared-logic.sh` 를 source)
 - 각 Bash 호출의 시작부에 `set -euo pipefail && source .claude/scripts/shared-logic.sh` 를 둔다
 - state.json 은 항상 `hpx_state_write` 로 원자적 치환
+- state mutation 은 `hpx_state_init`, `hpx_state_patch`, `hpx_state_set_*`, `hpx_state_append_*` helper 로만 수행
+- shell 에서 raw JSON 전체 문자열을 조립해 직접 overwrite 하지 않는다. direct write 우회 경로는 금지한다.
 - 외부 부작용 직전 → state 기록 → 부작용 → state 재기록
 
 ## 12-step 절차
@@ -34,36 +36,12 @@
 - `hpx_state_exists "$TASK_ID"` 가 true 면 JSON 을 파싱해 `stage`, `loop_count_by_command.plan`, `attempts_by_command.plan`, `review_runs[]` 을 읽고 재개 지점 판단
 - `stage == "plan.done"` 이고 추가 수정이 필요 없으면 종료 (완료 보고)
 - `pending_run != null` 이면 §6-4-6 규약대로 먼저 finalize:
-  1. `raw_path` 존재 + parseable JSON → 기존 run 을 `review_runs[]` 로 승격
-  2. raw 없음 → `result="error"`, `error_reason="interrupted_before_output"` 로 finalize
-  3. `pending_run=null` 로 정리
-- 없으면 아래 초기 state 를 만들어 `hpx_state_write` 로 기록
-
-```json
-{
-  "task_id": "${TASK_ID}",
-  "stage": "plan.draft.created",
-  "session_id": "${SID}",
-  "branch": null,
-  "completed_plan_items": [],
-  "pending_run": null,
-  "review_plan": null,
-  "review_runs": [],
-  "loop_count_by_command": { "plan": 0, "work": 0 },
-  "attempts_by_command": { "plan": 0, "work": 0 },
-  "codex_attempts_cycle_total": 0,
-  "commit_plan": [],
-  "created_commits": [],
-  "ship_resume_cursor": null,
-  "push_status": null,
-  "remote_branch": null,
-  "pr_url": null,
-  "done_applied": false,
-  "last_diff_path": null,
-  "started_at": "<now ISO8601>",
-  "updated_at": "<now ISO8601>"
-}
-```
+  1. `raw_path` 존재 + parseable JSON → `hpx_state_append_review_run "$TASK_ID" "$RUN_JSON" plan step3.finalize` 로 승격
+  2. raw 없음 → `result="error"`, `error_reason="interrupted_before_output"` 를 포함한 finalize JSON 을 만들어 같은 helper 로 append
+  3. 마지막 정리는 `hpx_state_set_pending_run "$TASK_ID" 'null' plan step3.finalize` 로 수행
+- state 가 없으면 `NOW=$(date -u +%FT%TZ)` 후 `hpx_state_init "$TASK_ID" "$SID" "$NOW" plan step3.init` 로 초기 state 생성
+- `hpx_state_init` 이외의 mutation helper 는 state 파일이 없으면 실패해야 한다. partial state 자동 생성은 허용하지 않는다.
+- 초기 생성 직후 필요한 추가 field 가 있으면 `hpx_state_patch` 로만 보강한다. 전체 state JSON heredoc 재조립은 금지한다.
 
 ### Step 4. ADR 선행 판단 (GP-1 conditional)
 다음 중 **하나라도** 감지되면 GP-1 게이트 노출. 신호 없으면 자동 통과 (§6-2).
@@ -84,18 +62,16 @@
   - 통과 시 `"OK"`
   - 실패 시 누락 섹션 / stable id 오류를 사용자에게 먼저 제시하고 종료
   - 이 경우 Codex 리뷰는 건너뛴다 (형식 오류에 토큰을 쓰지 않기 위함)
-- 작성/확인 완료 후 상태: `stage = "plan.draft.created"`
+- 작성/확인 완료 후 상태는 `hpx_state_set_stage "$TASK_ID" "plan.draft.created" plan step5.stage` 로 보장하고 `updated_at` 은 `hpx_state_patch` 로 함께 갱신
 
 ### Step 6. run 예약 + attempts 증가
 - `ATTEMPT=$(현재 attempts_by_command.plan + 1)`
 - 상한 확인: `ATTEMPT <= 3` 아니면 사용자에게 "더 호출할까요?" 확인 (§7-6)
 - `RUN_ID=$(hpx_run_id_new plan "$SID" "$ATTEMPT")`
-- state 갱신 (원자 저장):
-  - `pending_run = { run_id, command: "plan", loop: loop_count_by_command.plan + 1, ts: now, raw_path: ".cache/codex-reviews/plan-${TASK_ID}-${TS}.json", status: "reserved" }`
-  - `loop_count_by_command.plan += 1`
-  - `attempts_by_command.plan += 1`
-  - `codex_attempts_cycle_total += 1`
-  - `updated_at = now`
+- state 갱신은 helper 로만 수행:
+  - `hpx_state_set_pending_run "$TASK_ID" "$PENDING_RUN_JSON" plan step6.reserve`
+  - `hpx_state_patch "$TASK_ID" "$COUNTER_PATCH_JSON" plan step6.reserve`
+- `PENDING_RUN_JSON` 과 `COUNTER_PATCH_JSON` 은 `python3 - <<'PY'` 로 구조화 생성하고, shell 문자열 이어붙이기로 직접 JSON 을 만들지 않는다.
 
 ### Step 7. Codex 리뷰 호출 (§7-1)
 Bash 블록 단위로 실행:
@@ -178,11 +154,11 @@ ls -la "$RAW" "$ERR" 2>/dev/null || true
 - run_id: ${RUN_ID}
 ```
 
-- state 원자 갱신:
-  - `review_runs[]` append `{ run_id, command: "plan", loop, ts, raw_path, result, accepted_ids[], rejected_ids[], deferred_ids[], degraded_accepted, degraded_reason, risk_level, risk_signals }`
-  - `pending_run = null`
-  - `stage = "plan.review.completed"`
-  - `updated_at = now`
+- state 원자 갱신도 helper 로만 수행:
+  - `hpx_state_append_review_run "$TASK_ID" "$REVIEW_RUN_JSON" plan step10.finalize`
+  - `hpx_state_set_pending_run "$TASK_ID" 'null' plan step10.finalize`
+  - `hpx_state_patch "$TASK_ID" '{"stage":"plan.review.completed","updated_at":"<now ISO8601>"}' plan step10.finalize`
+- `review_runs[]` append 는 동일 `run_id` 재기록 시 중복 추가하지 않는 idempotent helper 계약을 따른다.
 - `hpx_metrics_append` 로 `_metrics.tsv` 1행 기록
 
 ### Step 11. 루프 판정
@@ -194,7 +170,7 @@ ls -la "$RAW" "$ERR" 2>/dev/null || true
 아니면 Step 12 로.
 
 ### Step 12. 종료
-- state 갱신: `stage = "plan.done"`, `updated_at = now`
+- state 갱신: `hpx_state_patch "$TASK_ID" '{"stage":"plan.done","updated_at":"<now ISO8601>"}' plan step12.done`
 - lock 해제: `hpx_lock_force_release "$TASK_ID"`
 - 사용자에게 완료 보고: 계획서 경로, 수용/거부 요약, 다음 단계 (/work) 안내
 

@@ -50,11 +50,13 @@
   - 렌더 존재 확인
     - `kubectl kustomize k8s/overlays/gke` → 출력에 `kind: HorizontalPodAutoscaler` 포함
     - `kubectl kustomize k8s/overlays/minikube` → 회귀 없음 (HPA 미포함이 정상)
-  - 렌더 필드값 확인 — 임의 기본값 유입 방지
-    - `metadata.namespace == peekcart`
-    - `spec.scaleTargetRef.kind == Deployment`, `name == peekcart`
+  - 렌더 필드값 확인 — P2 스펙과 1:1 (임의 기본값 유입 방지)
+    - `apiVersion == autoscaling/v2`, `kind == HorizontalPodAutoscaler`
+    - `metadata.name == peekcart`, `metadata.namespace == peekcart`
+    - 공통 라벨: `app.kubernetes.io/name == peekcart`, `app.kubernetes.io/component == backend`, `app.kubernetes.io/part-of == peekcart`
+    - `spec.scaleTargetRef.apiVersion == apps/v1`, `kind == Deployment`, `name == peekcart`
     - `spec.minReplicas == 1`, `spec.maxReplicas == 3`
-    - `spec.metrics[0].resource.target.averageUtilization == 60`
+    - `spec.metrics[0].type == Resource`, `resource.name == cpu`, `resource.target.type == Utilization`, `averageUtilization == 60`
     - `spec.behavior.scaleUp.stabilizationWindowSeconds == 30`
     - `spec.behavior.scaleDown.stabilizationWindowSeconds == 300`
     - 수단: `kubectl kustomize k8s/overlays/gke | yq 'select(.kind == "HorizontalPodAutoscaler")'` 또는 동등한 `grep`/`awk` 파이프라인

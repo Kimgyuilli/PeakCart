@@ -244,6 +244,7 @@ _hpx_state_mutate_json() {
   local mode="$5"
   local field_path="${6:-}"
   local payload="${7:-}"
+  local unique_key="${8:-}"
   local state_path tmp_json tmp_err payload_preview reason
 
   state_path="$(hpx_state_path "$task_id")"
@@ -258,6 +259,7 @@ _hpx_state_mutate_json() {
     HPX_STATE_MODE="$mode" \
     HPX_STATE_FIELD_PATH="$field_path" \
     HPX_STATE_PAYLOAD="$payload" \
+    HPX_STATE_UNIQUE_KEY="$unique_key" \
     python3 - >"$tmp_json" 2>"$tmp_err" <<'PY'
 import json
 import os
@@ -268,11 +270,12 @@ state_path = Path(os.environ["HPX_STATE_PATH"])
 mode = os.environ["HPX_STATE_MODE"]
 field_path = os.environ.get("HPX_STATE_FIELD_PATH", "")
 payload_raw = os.environ.get("HPX_STATE_PAYLOAD", "")
+unique_key = os.environ.get("HPX_STATE_UNIQUE_KEY", "")
 
 
 def load_state(path: Path):
     if not path.exists():
-        return {}
+        raise FileNotFoundError(f"state file missing: {path}")
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
 
@@ -304,7 +307,22 @@ def deep_merge(base, patch):
     return patch
 
 
+def should_append(current, item, key: str):
+    if key == "scalar":
+        return item not in current
+    if key:
+        item_key = item.get(key) if isinstance(item, dict) else None
+        if item_key is None:
+            raise ValueError(f"append item missing unique key: {key}")
+        for existing in current:
+            if isinstance(existing, dict) and existing.get(key) == item_key:
+                return False
+        return True
+    return True
+
+
 state = load_state(state_path)
+item = load_payload(payload_raw) if mode == "append" else None
 
 if mode == "patch":
     state = deep_merge(state, load_payload(payload_raw))
@@ -319,7 +337,8 @@ elif mode == "append":
         parent[leaf] = current
     if not isinstance(current, list):
         raise TypeError(f"path is not a list: {field_path}")
-    current.append(load_payload(payload_raw))
+    if should_append(current, item, unique_key):
+        current.append(item)
 else:
     raise ValueError(f"unsupported mode: {mode}")
 
@@ -431,9 +450,10 @@ hpx_state_append_json_array_item() {
   local task_id="$1"
   local field_path="$2"
   local item_json="$3"
-  local command_name="${4:-unknown}"
-  local step_name="${5:-state.append_json}"
-  _hpx_state_mutate_json "$task_id" "hpx_state_append_json_array_item" "$command_name" "$step_name" "append" "$field_path" "$item_json"
+  local unique_key="${4:-}"
+  local command_name="${5:-unknown}"
+  local step_name="${6:-state.append_json}"
+  _hpx_state_mutate_json "$task_id" "hpx_state_append_json_array_item" "$command_name" "$step_name" "append" "$field_path" "$item_json" "$unique_key"
 }
 
 # hpx_state_append_string_array_item <task_id> <field_path> <string_value> [command_name] [step_name]
@@ -450,7 +470,7 @@ import sys
 print(json.dumps(sys.argv[1], ensure_ascii=False))
 PY
 )"
-  _hpx_state_mutate_json "$task_id" "hpx_state_append_string_array_item" "$command_name" "$step_name" "append" "$field_path" "$item_json"
+  _hpx_state_mutate_json "$task_id" "hpx_state_append_string_array_item" "$command_name" "$step_name" "append" "$field_path" "$item_json" "scalar"
 }
 
 hpx_state_set_stage() {
@@ -490,7 +510,7 @@ hpx_state_append_review_run() {
   local run_json="$2"
   local command_name="${3:-unknown}"
   local step_name="${4:-state.append_review_run}"
-  hpx_state_append_json_array_item "$task_id" "review_runs" "$run_json" "$command_name" "$step_name"
+  hpx_state_append_json_array_item "$task_id" "review_runs" "$run_json" "run_id" "$command_name" "$step_name"
 }
 
 hpx_state_set_last_diff_path() {
@@ -514,7 +534,7 @@ hpx_state_append_created_commit() {
   local commit_json="$2"
   local command_name="${3:-ship}"
   local step_name="${4:-state.append_created_commit}"
-  hpx_state_append_json_array_item "$task_id" "created_commits" "$commit_json" "$command_name" "$step_name"
+  hpx_state_append_json_array_item "$task_id" "created_commits" "$commit_json" "partition_id" "$command_name" "$step_name"
 }
 
 # hpx_run_id_new <command> <session_id> <attempt> [chunk_index]

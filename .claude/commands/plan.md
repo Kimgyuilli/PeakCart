@@ -40,6 +40,7 @@
   2. raw 없음 → `result="error"`, `error_reason="interrupted_before_output"` 를 포함한 finalize JSON 을 만들어 같은 helper 로 append
   3. 마지막 정리는 `hpx_state_set_pending_run "$TASK_ID" 'null' plan step3.finalize` 로 수행
 - state 가 없으면 `NOW=$(date -u +%FT%TZ)` 후 `hpx_state_init "$TASK_ID" "$SID" "$NOW" plan step3.init` 로 초기 state 생성
+- `hpx_state_init` 이외의 mutation helper 는 state 파일이 없으면 실패해야 한다. partial state 자동 생성은 허용하지 않는다.
 - 초기 생성 직후 필요한 추가 field 가 있으면 `hpx_state_patch` 로만 보강한다. 전체 state JSON heredoc 재조립은 금지한다.
 
 ### Step 4. ADR 선행 판단 (GP-1 conditional)
@@ -157,6 +158,7 @@ ls -la "$RAW" "$ERR" 2>/dev/null || true
   - `hpx_state_append_review_run "$TASK_ID" "$REVIEW_RUN_JSON" plan step10.finalize`
   - `hpx_state_set_pending_run "$TASK_ID" 'null' plan step10.finalize`
   - `hpx_state_patch "$TASK_ID" '{"stage":"plan.review.completed","updated_at":"<now ISO8601>"}' plan step10.finalize`
+- `review_runs[]` append 는 동일 `run_id` 재기록 시 중복 추가하지 않는 idempotent helper 계약을 따른다.
 - `hpx_metrics_append` 로 `_metrics.tsv` 1행 기록
 
 ### Step 11. 루프 판정

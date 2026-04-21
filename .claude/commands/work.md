@@ -45,6 +45,7 @@
   2. raw 없음/깨짐 → `result="error"`, `error_reason="interrupted_before_output"` finalize JSON 을 같은 helper 로 append
   3. `pending_run` 정리는 `hpx_state_set_pending_run "$TASK_ID" 'null' work step3.finalize` 로 수행
 - finalize payload 는 `python3` 로 구성하고, `pending_run` 일부 필드가 비어 있는 재진입 state 도 허용해야 한다.
+- `hpx_state_init` 이외의 mutation helper 는 state 파일이 없으면 실패해야 한다.
 - 현재 stage 에 따라 재진입 지점 결정:
 
 | stage | 재진입 Step |
@@ -70,6 +71,7 @@
 - 항목 하나씩 Edit/Write 로 구현. 각 항목 완료 직후 `hpx_state_append_completed_item "$TASK_ID" "P<n>" work step5.item` 으로 append
 - 진행 중 상태는 `hpx_state_patch "$TASK_ID" '{"stage":"work.impl.inprogress","updated_at":"<now ISO8601>"}' work step5.stage` 로 기록
 - 전체 항목 완료 (또는 사용자 승인 하에 부분 완료) 후 상태는 `hpx_state_patch "$TASK_ID" '{"stage":"work.impl.completed","updated_at":"<now ISO8601>"}' work step5.stage` 로 전환
+- `completed_plan_items[]` append 는 동일 stable id 재기록 시 중복 추가하지 않는 idempotent helper 계약을 따른다.
 - 이후에도 추가 수정이 필요하면 다시 `work.impl.inprogress` 로 내려가 구현 이어간다
 
 ### Step 6. diff 캡처
@@ -209,6 +211,7 @@ split aggregate 규칙 (§7-4):
   - 각 run 은 `hpx_state_append_review_run "$TASK_ID" "$RUN_JSON" work step11.finalize` 로 append
   - `pending_run = null` 은 `hpx_state_set_pending_run "$TASK_ID" 'null' work step11.finalize`
   - `review_plan.aggregate_result`, `stage`, `updated_at` 은 `hpx_state_patch "$TASK_ID" "$FINAL_PATCH_JSON" work step11.finalize`
+- `review_runs[]` append 는 동일 `run_id` 재기록 시 중복 추가하지 않는 idempotent helper 계약을 따른다.
 - `hpx_metrics_append` 로 각 run 에 대해 `_metrics.tsv` 1행씩 기록
 
 ### Step 12. 루프 판정 / 종료

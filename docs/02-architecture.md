@@ -370,8 +370,9 @@ peekcart/
     │   │   ├── kustomization.yml
     │   │   └── patches/              # imagePullPolicy: Never, Service type: NodePort 등
     │   └── gke/                      # 부하 테스트 / 운영 (ADR-0004)
-    │       ├── kustomization.yml     # patches + images (PROJECT_ID placeholder)
+    │       ├── kustomization.yml     # patches + images (PROJECT_ID placeholder) + hpa.yml
     │       ├── README.md             # 이미지 운반 / PROJECT_ID 치환 / 정리 절차
+    │       ├── hpa.yml               # HorizontalPodAutoscaler (autoscaling/v2, CPU 60%, min=1/max=3) — Task 3-5 선행
     │       └── patches/              # peekcart Service LB(Internal), Deployment 리소스 상향, PVC standard-rwo
     └── monitoring/                   # base/ 분리된 관측성 스택 (ADR-0006)
         ├── namespace.yml             # monitoring NS SSOT (불변식 5)

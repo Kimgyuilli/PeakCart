@@ -20,6 +20,7 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - hpa.yml
 
 patches:
   # Deployment / Service 는 strategic merge (gvk + name 기반 자동 매칭, target 불필요)

@@ -64,9 +64,12 @@ bash k8s/monitoring/gke/install.sh
 # 3. 환경 무관 대시보드/Alert (configMapGenerator 가 *.json → ConfigMap 생성)
 kubectl apply -k k8s/monitoring/shared/
 
-# 4. app/infra + ServiceMonitor
+# 4. app/infra + HPA + ServiceMonitor
 kubectl apply -k k8s/overlays/gke/
 ```
+
+> **HPA 전제**: 4단계 적용에 포함된 `HorizontalPodAutoscaler/peekcart` (`hpa.yml`) 는 CPU Utilization 기반이며 metrics-server API (`metrics.k8s.io`) 가 필요합니다. GKE Standard 는 기본 제공이므로 추가 설치 없이 동작합니다. minikube 에서는 본 overlay 범위 밖입니다 (overlays/minikube 에는 HPA 미포함).
+> HPA 상태 확인: `kubectl get hpa -n peekcart peekcart` · `kubectl top pods -n peekcart`.
 
 ## 정리 (ADR-0004 운영 체크리스트)
 

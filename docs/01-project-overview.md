@@ -31,7 +31,7 @@ Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes
 - Kafka 기반 이벤트 드리븐 아키텍처 + Transactional Outbox 패턴 적용
 - Redis 캐싱 적용 전/후 성능 개선 수치 측정 및 검증
 - Prometheus + Grafana 기반 실시간 모니터링 시스템 구축 (kube-prometheus-stack)
-- nGrinder / JMeter를 활용한 부하 테스트 시나리오 작성 및 병목 개선
+- nGrinder / k6를 활용한 부하 테스트 시나리오 작성 및 병목 개선
 - Kubernetes HPA를 통한 자동 스케일아웃 검증
 - Toss Payments 연동을 통한 실결제 플로우 구현 (가상 결제)
 - 대규모 주문 데이터 처리 경험 (페이지네이션, 배치, 인덱싱 최적화)
@@ -61,7 +61,7 @@ Java 17 · Spring Boot 3.x · Kafka · Redis · Toss Payments · Kubernetes
 | 모니터링 | Prometheus + Grafana | kube-prometheus-stack, Pod 단위 메트릭 수집 |
 | 결제 | Toss Payments API | 국내 표준 결제 플로우, 가상 결제 지원 |
 | 알림 | Slack Webhook | Kafka Consumer 연동, 실제 발송 동작 증명 |
-| 부하 테스트 | nGrinder + JMeter | nGrinder: 분산 테스트 / JMeter: 시나리오 테스트 |
+| 부하 테스트 | nGrinder + k6 | nGrinder: 분산 테스트 / k6: 시나리오 테스트 |
 | 빌드 | Gradle | 멀티모듈 구성, 빌드 캐시 활용 |
 | 컨테이너 | Docker + Kubernetes | 서비스별 독립 배포, HPA 자동 스케일아웃. 환경 상세는 §4 운영 환경 |
 | 레포 전략 | 모노레포 (Gradle 멀티모듈) | 전체 구조 가시성, common 모듈 공유 용이 |

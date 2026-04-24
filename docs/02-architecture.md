@@ -97,7 +97,7 @@ graph TD
     Client["Client (Browser)"]
     Toss["Toss Payments API (외부)"]
     Slack["Slack Webhook (외부)"]
-    LB["nGrinder / JMeter 부하 테스트"]
+    LB["nGrinder / k6 부하 테스트"]
 
     Client -->|HTTP| Gateway["Spring Cloud Gateway\\n라우팅 · JWT 인증 필터 · Rate Limit"]
 

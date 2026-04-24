@@ -392,8 +392,8 @@
 | **리뷰 개선 P1-D**: 관측성 회귀 테스트 추가 | ✅ | `@SpringBootTest` + `@AutoConfigureObservability` — `GET /api/v1/products` 호출 후 `/actuator/prometheus` 응답에서 비즈니스 URI histogram bucket + `application="peekcart"` 태그 검증. D-001 재발 방지 |
 | **리뷰 개선 P1-E**: Error Rate PromQL NaN 가드 | ✅ | `api-jvm-dashboard.json` / `dashboards-configmap.yml` 동기: `(A / (B > 0) * 100) or vector(0)` (idle 구간 0% 강제). `grafana-alerts.yml`: `($B > 0) && (($A / $B) * 100 > 5)` (Grafana math `&&` 문법). **신호 손실 보완**: Service Up stat 패널 + `peekcart-target-down` (up==0) + `peekcart-scrape-absent` (series 부재) 알림 2건 분리 추가. **런타임 검증 완료** (minikube, 2026-04-14): 5개 PromQL live 질의 성공 + 4개 알림 rule 로드 + firing 실증 (scale→0 시 scrape-absent firing, target-down inactive 로 배타적 분리 확인) |
 | **리뷰 개선 P1-F**: 대시보드 JSON SSOT 단일화 | ✅ | 옵션 A (standalone JSON = SSOT) 채택. `k8s/monitoring/shared/kustomization.yml` 신규 — `configMapGenerator` 3개 (`options.labels: grafana_dashboard: "1"`, `disableNameSuffixHash: true`) + `grafana-alerts.yml` resources. `dashboards-configmap.yml` 삭제. 배포 진입점 `kubectl apply -k k8s/monitoring/shared/` 로 단일화. minikube 런타임 검증: 대시보드 3종 + alert rule 4건 로드 유지 |
-| JMeter 설치 + 설정 (loadgen VM) | 🔲 | 시나리오 준비 완료 (`loadtest/scripts/order-concurrency.jmx` + `users.csv`). 세션 C 에서 VM 에 설치 후 실행 |
-| 시나리오 2: 동시 주문 정합성 (1,000 VUser) | 🔲 | 목표: 정합성 100%, 오버셀링 0건. 세션 C 범위 |
+| k6 설치 + Grafana 대시보드 ID 19665 import 준비 | 🔲 | 시나리오 준비 완료 (`loadtest/scripts/order-concurrency.js` + `users.csv`). 세션 C 에서 VM 에 설치 후 실행 |
+| 시나리오 2: 동시 주문 정합성 (1,000 VUser, k6) | 🔲 | 목표: 정합성 100%, 오버셀링 0건. 세션 C 범위 |
 | 시나리오 3: Kafka Consumer Lag 모니터링 | 🔲 | 목표: 정상 구간 Lag 0 유지 (Prometheus 대시보드 연계). 세션 C 범위 |
 | 테스트 리포트 작성 (전/후 비교 수치) | 🔄 | 세션 B 리포트 완료 (`loadtest/reports/2026-04-09/REPORT.md`). 세션 C 결과 추가 후 최종 완성 |
 

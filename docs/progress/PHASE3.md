@@ -928,3 +928,36 @@ Task 3-4 리뷰 개선 마지막 항목. `k8s/monitoring/shared/` 에 standalone
 - InventoryConcurrencyTest cleanDatabase() 추가 후 동시성 테스트 결과 불변
 - ProductCacheIntegrationTest Kafka 추가 + cleanCaches() 전환 후 캐시 동작 불변
 
+## 2026-04-22 — Task 3-4 세션 C 선행: 부하 도구 JMeter → k6 전환
+
+### 배경
+
+세션 B(시나리오 1, nGrinder)는 이미 측정 완료. 세션 C(시나리오 2: 1,000 VU 동시 주문) 실행 전에 부하 도구를 k6 로 교체한다. 전환 결정 근거·대안 비교는 `docs/progress/loadtest-tool-evaluation.md` 옵션 B (부분 전환) 참조. 설계 결정(ADR-0004 L44 "nGrinder + JMeter 조합")은 immutable — 본 작업은 `loadtest/` 도구 교체 + 문서 동기화 범위로 한정.
+
+### 변경 스코프
+
+1. **Part A — 문서 동기화 (JMeter 언급 치환)**
+   - Layer 1: `docs/01-project-overview.md`, `02-architecture.md`, `03-requirements.md`, `06-testing-strategy.md`, `07-roadmap-portfolio.md` 의 도구명만 교체 (nGrinder 항목 불변)
+   - `loadtest/README.md` 디렉토리/전제조건/§A 시드/§E 리포트 파일명 동기화
+   - `loadtest/reports/TEMPLATE.md` 환경 표 행 + scenario 2 첨부 산출물에 `k6-summary.json` 추가
+   - `loadtest/sql/seed.sql` 주석 3개 (L12/L42/L100) 치환 (스키마 불변)
+   - `docs/TASKS.md` Task 3-4 진행 중 행 (L395/L396) 치환 (L487 완료 이력 행은 불변)
+2. **P7 k6 스크립트 작성 + 로컬 리허설 안내**
+   - 신규 `loadtest/scripts/order-concurrency.js`: `SharedArray` + `ramping-vus` (30s→1000 / 1m hold / 30s→0) + Threshold `http_req_failed<0.1`
+   - 기존 `order-concurrency.jmx` 삭제 (git history 로 보존)
+   - 로컬 리허설 명령은 `loadtest/README.md` §A/§C 에 반영되어 있음. **실제 docker-compose 기반 리허설·`k6-summary.json` 생성 확인은 본 task 범위에서 deferred** — 로컬에 k6 미설치 + 리허설 자체가 과금 없는 선택 활동이라 operator 가 세션 C 준비 시 수행. 본 task 는 Codex diff 리뷰로 스크립트 정적 품질을 보장하고 실행 검증은 세션 C 준비 단계로 분리 (계획서 §6 완료 조건 일부 유보 — 스크립트 작성·문서 동기화·receiver 활성화는 충족, 런타임 리허설만 연기)
+3. **P8-a · P9 문서 절차 갱신**
+   - loadgen VM 전제조건: JDK 17 요구 제거, JDK 11 (nGrinder agent 전용) + k6 v0.49+ 로 교체
+   - §C 실행 블록: `k6 run -e BASE_URL=http://<internal-lb>:8080 -o experimental-prometheus-rw=...` 으로 전환
+   - Grafana k6 대시보드 ID `19665` import 절차 추가. 대시보드 JSON 매니페스트 선제 커밋은 SSOT 단일화 원칙(P1-F)에 따라 세션 C 실증 후 별도 PR 로 분리
+4. **P8-b GKE monitoring values 1줄 변경 — `enableRemoteWriteReceiver: true` 추가**
+   - `k8s/monitoring/gke/values-prometheus.yml` `prometheus.prometheusSpec` 에 추가. k6 `experimental-prometheus-rw` 수신 전제
+   - ADR-0006 (monitoring 스택 환경 분리) 원칙에 따른 **GKE 한정 운영 세부 조정** — minikube values 는 **미변경** (로컬 리허설은 Prometheus 미사용)
+   - ADR 신규 작성 없음: 부하 테스트 기간 외에는 클러스터 자체가 폐기되므로 ADR-0006 운영 세부 범위
+
+### 비대상 (후속)
+
+- **P10 세션 C 실제 실행** (1,000 VU / Kafka Lag 관찰 / 정합성 검증 / cleanup) — 별도 과금 세션
+- **P11 세션 C 리포트 작성** — 후속 Task
+- Grafana k6 대시보드 JSON 파일(`k8s/monitoring/shared/`) 선제 커밋 — 세션 C 당일 실증 후 별도 PR
+

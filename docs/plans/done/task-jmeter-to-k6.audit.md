@@ -14,3 +14,10 @@
 - raw: `.cache/codex-reviews/diff-task-jmeter-to-k6-1776948553.json`
 - tokens used: 56,582
 - 비고: 로컬 k6 리허설은 의도적으로 deferred (PHASE3 엔트리 명시). attempts 1/3, cycle 4/5 — 루프 종료 판단
+
+## 2026-04-24 — /done applied (PR https://github.com/Kimgyuilli/PeakCart/pull/26)
+- TASKS.md: 변경 없음 (Task 3-4 L395/L396/L397 은 세션 C 실행 대기, 🔲 유지. 본 PR 은 "스크립트/문서 준비"까지이며 TASKS 상의 설치·실행 행과 1:1 매칭되지 않음)
+- ADR: 신규·전환 없음 (계획서 §7 "ADR 신규 작성 없음" 충실 이행)
+- PHASE3.md: /work 단계에서 이미 2026-04-22 엔트리 기록됨. 프로젝트 관행상 PHASE 엔트리에 PR URL 미기록 — git log 로 추적 가능
+- Layer 1 docs: 본 PR (p2) 에서 갱신 완료
+

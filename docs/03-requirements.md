@@ -81,7 +81,7 @@
 | --- | --- | --- |
 | 상품 목록 API 응답시간 | p99 기준 100ms 이하 | nGrinder 부하 테스트 |
 | Redis 캐싱 개선 효과 | 캐시 미적용 대비 TPS 3배 이상 | 캐싱 전/후 TPS 비교 (동일 GKE 환경 내) |
-| 동시 주문 처리 | 1,000 VUser 동시 주문 정합성 100% | JMeter 동시성 시나리오 |
+| 동시 주문 처리 | 1,000 VUser 동시 주문 정합성 100% | k6 동시성 시나리오 |
 | 주문 이벤트 처리 | Kafka Consumer Lag 0 유지 (정상 구간) | Prometheus 모니터링 |
 | K8s HPA 스케일아웃 | 부하 급증 시 Pod 자동 증설 검증 | nGrinder + Grafana 연계 |
 

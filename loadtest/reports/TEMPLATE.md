@@ -20,7 +20,7 @@
 | 도구 | 버전 | 설정 요약 |
 |---|---|---|
 | nGrinder | X.Y | controller+agent 로컬 |
-| JMeter | 5.6.3 | non-GUI 모드 |
+| k6 | v0.49+ | CLI (Prometheus remote-write) |
 | kube-prometheus-stack (Helm chart) | X.Y |  |
 | peekcart 이미지 | asia-northeast3-docker.pkg.dev/\<project\>/peekcart/peekcart:\<sha\> |  |
 
@@ -32,7 +32,8 @@
 - 랜덤 범위: categoryId 1..5 · page 0..49 · productId 1..1000
 
 ### 시나리오 2 — 1,000 VUser 동시 주문
-- VUser: 1000 · ramp-up 30초 · loop 1
+- VUser: 1000 · ramp-up 30초 → 1m hold (Grafana 타임라인 관찰용) → 30s ramp-down
+- 주문 시도: VU 당 1회 (k6 `__ITER === 0` 가드) — 총 주문 시도 1,000
 - 타깃: 경합 상품 product_id 1001..1010 (각 재고 100, 총 1000)
 - 기대: 성공 ≤ 1000, 오버셀링 0
 
@@ -66,7 +67,7 @@
 | DB 정합성 (verify-concurrency.sql 결과) | `OK` / `MISMATCH` |
 | 오버셀링 여부 | `OK` / `OVERSELL` |
 
-스크린샷: `grafana/scenario2-dashboard.png` · `sql/verify-concurrency-output.txt`
+스크린샷: `grafana/scenario2-dashboard.png` · `sql/verify-concurrency-output.txt` · `k6-summary.json`
 
 ### 시나리오 3 — Kafka Lag
 

@@ -9,7 +9,7 @@
 -- 본 스크립트는 로드 테스트 전용이며 스키마를 변경하지 않는다.
 --
 -- 비밀번호 해시는 "LoadTest123!" 의 BCrypt(cost=10) 결과.
--- JMeter 시나리오에서 로그인 시 동일 평문 사용.
+-- k6 시나리오에서 로그인 시 동일 평문 사용.
 -- ============================================================
 
 SET @password_hash = '$2a$10$uyo/cG3tOHyV36gx4aaH6OPKEonaX/ytclNITv/cJhopxacnjS5Qq';
@@ -39,7 +39,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 -- ------------------------------------------------------------
 -- 2. 사용자 (admin 1 + loaduser 1100)
---    loaduser0001 ~ loaduser1100  — JMeter 1,000 VUser + 100 여유분
+--    loaduser0001 ~ loaduser1100  — k6 1,000 VUser + 100 여유분
 -- ------------------------------------------------------------
 INSERT INTO users (email, password_hash, name, role, created_at, updated_at)
 VALUES ('admin@peekcart.test', @password_hash, 'Admin', 'ADMIN', @now, @now);
@@ -97,7 +97,7 @@ FROM seq;
 
 -- 경합 타깃 10건 — 명시 ID (id 1001~1010) 로 삽입.
 -- 이유: innodb_autoinc_lock_mode=2 (MySQL 8 기본) 에서 INSERT...SELECT 는
---       auto_increment 를 블록 단위로 할당하여 ID 간극이 발생. JMeter 시나리오가
+--       auto_increment 를 블록 단위로 할당하여 ID 간극이 발생. k6 시나리오가
 --       고정 범위 [1001..1010] 을 참조하므로 ID 안정성이 필수.
 ALTER TABLE products AUTO_INCREMENT = 1001;
 

@@ -12,6 +12,9 @@
 
 prometheus:
   prometheusSpec:
+    # k6 experimental-prometheus-rw 수신 전용 (ADR-0006 보완).
+    # 본 클러스터는 부하 테스트 기간에만 존재하며 외부 노출 없음.
+    enableRemoteWriteReceiver: true
     retention: 24h
     resources:
       requests:

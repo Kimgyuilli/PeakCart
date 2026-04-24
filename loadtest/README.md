@@ -15,8 +15,8 @@ loadtest/
 │   └── verify-concurrency.sql         시나리오 2 정합성 검증 쿼리
 ├── scripts/
 │   ├── ngrinder-product-query.groovy  시나리오 1 (상품 조회 TPS)
-│   ├── order-concurrency.jmx          시나리오 2 (1,000 VUser 동시 주문)
-│   ├── users.csv                      JMeter 입력 (샘플 5건)
+│   ├── order-concurrency.js           시나리오 2 (1,000 VUser 동시 주문)
+│   ├── users.csv                      k6 입력 (샘플 5건)
 │   └── generate-users-csv.sh          users.csv 재생성 (기본 1,100건)
 └── reports/
     └── TEMPLATE.md                    측정 세션별 리포트 템플릿
@@ -38,7 +38,7 @@ loadtest/
 2. peekcart 이미지가 Artifact Registry 에 push 되어 있음
 3. `kustomize edit set image` 로 `PROJECT_ID_PLACEHOLDER` 가 실제 프로젝트 ID 로 치환됨 (**커밋 금지**, `k8s/overlays/gke/README.md` 참고)
 4. 4단계 apply 완료 (namespace → infra → services → monitoring, `docs/02-architecture.md` §12)
-5. 부하 발생기 VM `loadgen` 에 JDK 17, nGrinder, JMeter 설치 완료
+5. 부하 발생기 VM `loadgen` 에 JDK 11 (nGrinder agent 전용), nGrinder, k6 v0.49+ 설치 완료
 6. billing alert ₩50,000 설정 확인
 
 ## 절차
@@ -46,7 +46,7 @@ loadtest/
 ### A. 시드 적용
 
 ```bash
-# 1) JMeter 입력 CSV 재생성 (기본 1,100 users)
+# 1) k6 입력 CSV 재생성 (기본 1,100 users)
 bash loadtest/scripts/generate-users-csv.sh
 
 # 2) 클러스터의 MySQL Pod 로 seed.sql 실행
@@ -87,18 +87,24 @@ kubectl -n peekcart rollout status deployment/peekcart
 kubectl -n peekcart exec -i <mysql-pod> -- \
   mysql -upeekcart -p<password> peekcart < loadtest/sql/seed.sql
 
-# loadgen VM 에서 (users.csv 와 .jmx 는 같은 디렉토리에)
-cd loadtest/scripts
-jmeter -n -t order-concurrency.jmx \
-  -Jbaseurl=http://<app-endpoint>:8080 \
-  -Jvusers=1000 -JrampUp=30 \
-  -l results.jtl \
-  -e -o ../reports/YYYY-MM-DD/jmeter-html/
+# Prometheus remote-write receiver 포트포워드 (values-prometheus.yml 에서 enableRemoteWriteReceiver: true 전제)
+kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090:9090 &
+
+# <internal-lb> 는 세션 C 과금 전에 `kubectl -n default get svc` 로 확보
+mkdir -p loadtest/reports/YYYY-MM-DD/sql loadtest/reports/YYYY-MM-DD/grafana
+k6 run \
+  --summary-export=loadtest/reports/YYYY-MM-DD/k6-summary.json \
+  -e BASE_URL=http://<internal-lb>:8080 \
+  -o experimental-prometheus-rw=http://localhost:9090/api/v1/write \
+  loadtest/scripts/order-concurrency.js
+
+# Grafana k6 대시보드 import (최초 1회)
+#   Grafana UI → Dashboards → Import → "19665" 입력 → Prometheus datasource 선택
 
 # 정합성 검증
 kubectl -n peekcart exec -i <mysql-pod> -- \
   mysql -upeekcart -p<password> peekcart < loadtest/sql/verify-concurrency.sql \
-  | tee ../reports/YYYY-MM-DD/sql/verify-concurrency-output.txt
+  | tee loadtest/reports/YYYY-MM-DD/sql/verify-concurrency-output.txt
 ```
 
 ### D. 시나리오 3 — Kafka Consumer Lag
@@ -110,7 +116,7 @@ kubectl -n peekcart exec -i <mysql-pod> -- \
 1. `loadtest/reports/TEMPLATE.md` 를 `loadtest/reports/YYYY-MM-DD/REPORT.md` 로 복사
 2. (a)~(f) 항목을 채움
 3. Grafana 스크린샷을 `loadtest/reports/YYYY-MM-DD/grafana/` 에 저장
-4. jmeter-html · results.jtl · verify-concurrency-output.txt 첨부
+4. k6-summary.json · Grafana k6 dashboard PNG · verify-concurrency-output.txt 첨부
 
 ### F. 정리 (절대 스킵 금지)
 

@@ -970,6 +970,7 @@ Task 3-4 리뷰 개선 마지막 항목. `k8s/monitoring/shared/` 에 standalone
 GKE 1회 과금 세션 (~35분, 클러스터 + loadgen VM + AR push) 으로 시나리오 2/3 + Task 3-5 + D-002 데이터 수집을 통합 실행. 본 entry 는 Part A~D 요약 + Run 1/2 비교 + 후속 추적 안건.
 
 **브랜치**: `test/phase3-loadtest-session-c`
+**PR**: https://github.com/Kimgyuilli/PeakCart/pull/27
 **리포트**: `loadtest/reports/2026-04-29/REPORT.md` (REPORT.md + grafana 4장 + run1/2 산출물)
 
 **Part A (무과금 리허설)**:
@@ -1020,4 +1021,3 @@ Run 2 (3 pods pre-warmed, HPA 일시 제거 + manual scale=3, DB 재시드):
 - **D-002 후속 추적**: MySQL 리소스 + HikariCP 풀 튜닝 후 재측정, 분산 락 acquisition latency metric, Phase 4 Order Service 격리 측정 (TASKS.md D-002 행 우선순위 갱신)
 
 **Phase 3 Exit Criteria 모두 충족 → Phase 3 종결**. 다음: Phase 4 MSA 분리 준비 (Gradle 멀티모듈, Spring Cloud Gateway, Choreography Saga, CQRS 로컬 캐시).
-

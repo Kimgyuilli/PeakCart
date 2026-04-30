@@ -1,0 +1,16 @@
+mysql: [Warning] Using a password on the command line interface can be insecure.
+product_id	name	initial_stock	current_stock	stock_decreased	items_sold	consistency
+1001	Contention Target 1	100	98	2	2	OK
+1002	Contention Target 2	100	96	4	4	OK
+1003	Contention Target 3	100	96	4	4	OK
+1004	Contention Target 4	100	100	0	0	OK
+1005	Contention Target 5	100	97	3	3	OK
+1006	Contention Target 6	100	96	4	4	OK
+1007	Contention Target 7	100	96	4	4	OK
+1008	Contention Target 8	100	97	3	3	OK
+1009	Contention Target 9	100	99	1	1	OK
+1010	Contention Target 10	100	100	0	0	OK
+active_order_items	total_quantity_sold	oversell_check
+25	25	OK
+status	cnt
+PENDING	25

@@ -9,9 +9,11 @@
 
 **Exit Criteria**:
 - [x] K8s에 모든 서비스 정상 배포 확인
-- [x] Grafana 대시보드에서 API 응답시간/에러율/Kafka Lag 모니터링 확인 (세션 B: RPS/JVM/Pod 확인. p95/p99 패널 No data — 후속 수정 필요)
-- [ ] nGrinder 부하 테스트 리포트 완성 (캐싱 전/후 TPS 비교 수치 포함)
-- [ ] HPA 동작 확인 (Pod 자동 증설 Grafana 스크린샷)
+- [x] Grafana 대시보드에서 API 응답시간/에러율/Kafka Lag 모니터링 확인 (세션 B: RPS/JVM/Pod, 세션 C: HPA/Kafka Lag — D-001 1차 수정 후 histogram bucket 정상 노출)
+- [x] 부하 테스트 리포트 완성 (세션 B 캐싱 전/후 TPS + 세션 C 시나리오 2/3 + Task 3-5 + D-002 데이터 통합)
+- [x] HPA 동작 확인 (Pod 1→3 자동 증설 + Grafana 스크린샷 — 세션 C Run 1)
+
+→ **Phase 3 종결 (2026-04-29)**. 다음: Phase 4 MSA 분리 준비.
 
 ---
 
@@ -960,4 +962,62 @@ Task 3-4 리뷰 개선 마지막 항목. `k8s/monitoring/shared/` 에 standalone
 - **P10 세션 C 실제 실행** (1,000 VU / Kafka Lag 관찰 / 정합성 검증 / cleanup) — 별도 과금 세션
 - **P11 세션 C 리포트 작성** — 후속 Task
 - Grafana k6 대시보드 JSON 파일(`k8s/monitoring/shared/`) 선제 커밋 — 세션 C 당일 실증 후 별도 PR
+
+### 2026-04-29
+
+#### Task 3-4 세션 C + Task 3-5 완료 (Phase 3 종결)
+
+GKE 1회 과금 세션 (~35분, 클러스터 + loadgen VM + AR push) 으로 시나리오 2/3 + Task 3-5 + D-002 데이터 수집을 통합 실행. 본 entry 는 Part A~D 요약 + Run 1/2 비교 + 후속 추적 안건.
+
+**브랜치**: `test/phase3-loadtest-session-c`
+**리포트**: `loadtest/reports/2026-04-29/REPORT.md` (REPORT.md + grafana 4장 + run1/2 산출물)
+
+**Part A (무과금 리허설)**:
+- 로컬 docker-compose + k6 docker 컨테이너 (`grafana/k6` 이미지) 로 P1 5항목 게이트 통과: login 성공률 100% / cart 실패율 0% / order 5xx 0건 / consistency=OK / summary metrics 파싱
+
+**Part B (GKE 환경 기동)**:
+- 클러스터 `peekcart-loadtest` (asia-northeast3-a, e2-standard-4 × 1, pd-standard 50GB)
+- loadgen VM `peekcart-loadgen` (e2-standard-2, Ubuntu 22.04, `--scopes=cloud-platform` 으로 metadata SA 인증)
+- 이미지 재빌드 (`docker buildx build --platform=linux/amd64`, 태그 `f7ea932` + `latest`, digest `sha256:25068882...`) — 세션 B 의 2026-04-09 이미지는 src/ 9개 commit 변경으로 stale (D-001/D-007/P0-A/P0-B/P1-D 포함)
+- 4단계 배포 순서 준수 (ADR-0006): namespace → install.sh → monitoring/shared → overlays/gke
+- smoke 4종 통과: HPA target 정상 (`cpu: 4%/60%`), `/actuator/health` UP, **D-001 회귀 검증** (`http_server_requests_seconds_bucket{application="peekcart",uri="/api/v1/products"}` 라인 존재), Prometheus receiver POST → HTTP 400
+
+**Part C (실측 — 2 runs)**:
+
+Run 1 (1 pod cold-start, HPA 활성):
+- HPA 1→3 전이 확인 (`kubectl get hpa -w`): CPU 269% → 400% saturation → scale-out → 안정화 90% → 15%
+- 신규 pod 65초 내 Ready, r58t4 readiness 일시 손실 후 회복
+- k6: 60.59% http_req_failed, login 46.3%, 25 successful orders, 정합성 OK
+- → **Task 3-5 핵심 산출물 + D-002 1차 병목 (CPU saturation) 확증**
+
+Run 2 (3 pods pre-warmed, HPA 일시 제거 + manual scale=3, DB 재시드):
+- k6: 35.90% http_req_failed (-24.7pp), login 96.7% (+50.4pp), 110 successful orders (×4.4)
+- p95 30.21s 로 오히려 증가 — 깊은 단계 (cart insert / inventory decrement) 도달 요청들이 DB 커넥션 / 락 대기에서 timeout
+- 정합성 OK (모든 경합상품 + 오버셀링 0건)
+- → **D-002 2차 병목 = MySQL 커넥션 풀 / Redis 분산 락 contention 식별**
+
+시나리오 3 (Kafka Consumer Lag):
+- 메트릭 출처는 **Micrometer-Kafka client** (`kafka_consumer_fetch_manager_records_lag_max`) — kafka-exporter 미배포
+- 라벨 구조: `client_id` (그룹 정보 임베디드), `topic`, `partition`. `kafka_consumer_group_id` 라벨 부재
+- 실제 토픽: `order_created`, `order_cancelled`, `payment_completed`, `payment_failed` (계획서 §3 P5 placeholder `order-created` / `payment.approved` 와 상이 — underscore + `payment.approved` 부재)
+- steady-state: lag 0 또는 NaN, peak 후 5분 내 빈 결과 복귀 ✅
+
+**Part D (정리)**:
+- cleanup.sh 실행 — GKE 클러스터 정상 삭제, **VM 삭제 단계 실패** (script 변수 `loadgen=loadgen` 이 실제 이름 `peekcart-loadgen` 과 불일치)
+- 운영자 수동 보완: VM + 5개 디스크 (1× pd-standard 20GB + 4× pvc-* pd-balanced) 일괄 삭제
+- 콘솔 육안 확인: instances/disks/clusters/addresses 모두 빈 결과
+- AR 이미지 보존 (재사용 가치)
+
+**P9 문서 갱신**:
+- TASKS.md: Task 3-4 / 3-5 ✅, Phase 3 헤더 ✅, Phase 3 Exit Criteria 모두 [x], D-002 행에 세션 C 데이터 추가, 완료 작업 표 새 행
+- PHASE3.md: 본 entry 신규
+- `.gitignore`: `loadtest/reports/local/` 추가 (계획서 §4)
+
+**부산물 / 후속 안건**:
+- **cleanup.sh VM 이름 변수 버그**: `loadgen=loadgen` → `loadgen=peekcart-loadgen` 로 정정 필요. 별도 후속 task
+- **kafka-lag-dashboard.json legend `{{kafka_consumer_group_id}}`**: 본 프로젝트의 Micrometer client metric 에 해당 라벨 부재 — 빈 문자열 렌더. 별도 dashboard 수정 안건
+- **계획서 §3 P5 placeholder PromQL 부정확성**: 본 프로젝트 metric 출처와 라벨 구조에 맞게 실측 쿼리 치환됨 (REPORT.md §(f) 에 기록)
+- **D-002 후속 추적**: MySQL 리소스 + HikariCP 풀 튜닝 후 재측정, 분산 락 acquisition latency metric, Phase 4 Order Service 격리 측정 (TASKS.md D-002 행 우선순위 갱신)
+
+**Phase 3 Exit Criteria 모두 충족 → Phase 3 종결**. 다음: Phase 4 MSA 분리 준비 (Gradle 멀티모듈, Spring Cloud Gateway, Choreography Saga, CQRS 로컬 캐시).
 

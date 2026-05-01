@@ -1,11 +1,14 @@
 package com.peekcart.global.outbox;
 
+import com.peekcart.global.kafka.KafkaTraceHeaders;
 import com.peekcart.global.port.SlackPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Slf4j
@@ -25,8 +28,7 @@ public class OutboxPollingService {
 
         for (OutboxEvent event : pendingEvents) {
             try {
-                kafkaTemplate.send(event.getEventType(), event.getAggregateId(), event.getPayload())
-                        .get();
+                kafkaTemplate.send(buildRecord(event)).get();
                 event.markPublished();
                 outboxEventRepository.save(event);
             } catch (Exception e) {
@@ -49,5 +51,21 @@ public class OutboxPollingService {
                 outboxEventRepository.save(event);
             }
         }
+    }
+
+    private ProducerRecord<String, String> buildRecord(OutboxEvent event) {
+        ProducerRecord<String, String> record = new ProducerRecord<>(
+                event.getEventType(), null, event.getAggregateId(), event.getPayload());
+        addHeaderIfPresent(record, KafkaTraceHeaders.TRACE_ID, event.getTraceId());
+        addHeaderIfPresent(record, KafkaTraceHeaders.USER_ID, event.getUserId());
+        return record;
+    }
+
+    // null/blank 모두 미주입 — Consumer 측 MdcRecordInterceptor.headerValue() 의 isBlank ? null 분기와 정합 (ADR-0008)
+    private static void addHeaderIfPresent(ProducerRecord<String, String> record, String key, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        record.headers().add(key, value.getBytes(StandardCharsets.UTF_8));
     }
 }

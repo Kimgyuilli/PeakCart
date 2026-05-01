@@ -1,5 +1,6 @@
 package com.peekcart.global.outbox;
 
+import com.peekcart.global.kafka.KafkaTraceHeaders;
 import com.peekcart.notification.domain.model.Notification;
 import com.peekcart.notification.domain.model.NotificationType;
 import com.peekcart.notification.infrastructure.NotificationJpaRepository;
@@ -18,14 +19,20 @@ import com.peekcart.support.AbstractIntegrationTest;
 import com.peekcart.support.IntegrationTestConfig;
 import com.peekcart.user.domain.model.User;
 import jakarta.persistence.EntityManager;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -33,8 +40,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,9 +53,26 @@ import static org.awaitility.Awaitility.await;
 @SpringBootTest
 @Testcontainers
 @TestPropertySource(properties = "spring.task.scheduling.pool.size=1")
-@Import(IntegrationTestConfig.class)
+@Import({IntegrationTestConfig.class, OutboxKafkaIntegrationTest.TraceCaptureConfig.class})
 @DisplayName("Outbox → Kafka E2E 통합 테스트")
 class OutboxKafkaIntegrationTest extends AbstractIntegrationTest {
+
+    @TestConfiguration
+    static class TraceCaptureConfig {
+        @Bean
+        OrderCancelledHeaderCapture orderCancelledHeaderCapture() {
+            return new OrderCancelledHeaderCapture();
+        }
+    }
+
+    static class OrderCancelledHeaderCapture {
+        final BlockingQueue<ConsumerRecord<String, String>> records = new LinkedBlockingQueue<>();
+
+        @KafkaListener(topics = "order.cancelled", groupId = "test-trace-header-verifier")
+        public void capture(ConsumerRecord<String, String> record) {
+            records.add(record);
+        }
+    }
 
     private Long userId;
 
@@ -70,11 +97,14 @@ class OutboxKafkaIntegrationTest extends AbstractIntegrationTest {
     @Autowired PaymentRepository paymentRepository;
     @Autowired InventoryRepository inventoryRepository;
     @Autowired NotificationJpaRepository notificationJpaRepository;
+    @Autowired OrderCancelledHeaderCapture headerCapture;
 
     private Long productId;
 
     @BeforeEach
     void setUp() {
+        MDC.clear();
+        headerCapture.records.clear();
         cleanDatabase();
 
         EntityManager em = emf.createEntityManager();
@@ -99,6 +129,11 @@ class OutboxKafkaIntegrationTest extends AbstractIntegrationTest {
 
         em.getTransaction().commit();
         em.close();
+    }
+
+    @AfterEach
+    void clearMdc() {
+        MDC.clear();
     }
 
     @Test
@@ -240,7 +275,73 @@ class OutboxKafkaIntegrationTest extends AbstractIntegrationTest {
         assertThat(notifications).hasSize(1);
     }
 
+    @Test
+    @DisplayName("MDC traceId/userId set → ProducerRecord 헤더 X-Trace-Id / X-User-Id 전파 (D-010)")
+    void traceHeaders_propagated_when_mdc_set() {
+        // given
+        MDC.put("traceId", "test-trace-001");
+        MDC.put("userId", "42");
+        Order order = persistOrder(OrderStatus.PENDING);
+        cancelOrder(order.getId());
+        String aggregateKey = order.getId().toString();
+
+        // when
+        orderOutboxEventPublisher.publishOrderCancelled(order);
+        outboxPollingService.pollAndPublish();
+
+        // then: 별도 consumer group 의 @KafkaListener 큐에서 본 테스트가 발행한 메시지(key=orderId)만 식별해 검증
+        ConsumerRecord<String, String> record = awaitRecordWithKey(aggregateKey);
+        assertThat(headerValue(record, KafkaTraceHeaders.TRACE_ID)).isEqualTo("test-trace-001");
+        assertThat(headerValue(record, KafkaTraceHeaders.USER_ID)).isEqualTo("42");
+    }
+
+    @Test
+    @DisplayName("MDC 미설정 → ProducerRecord 헤더 X-Trace-Id / X-User-Id 미주입 (빈 헤더 생성 금지)")
+    void traceHeaders_absent_when_mdc_clear() {
+        // given (MDC.clear 는 setUp 에서 보장)
+        Order order = persistOrder(OrderStatus.PENDING);
+        cancelOrder(order.getId());
+        String aggregateKey = order.getId().toString();
+
+        // when
+        orderOutboxEventPublisher.publishOrderCancelled(order);
+        outboxPollingService.pollAndPublish();
+
+        // then
+        ConsumerRecord<String, String> record = awaitRecordWithKey(aggregateKey);
+        assertThat(record.headers().lastHeader(KafkaTraceHeaders.TRACE_ID)).isNull();
+        assertThat(record.headers().lastHeader(KafkaTraceHeaders.USER_ID)).isNull();
+    }
+
     // ── 헬퍼 메서드 ──
+
+    /**
+     * headerCapture 큐에서 주어진 key 와 일치하는 record 를 찾을 때까지 polling.
+     * 같은 클래스의 다른 테스트가 발행한 stale record 가 큐에 섞여 있을 수 있으므로
+     * key (= order aggregateId) 로 현재 테스트의 record 를 식별한다.
+     */
+    private ConsumerRecord<String, String> awaitRecordWithKey(String key) {
+        long deadline = System.currentTimeMillis() + 10_000L;
+        while (System.currentTimeMillis() < deadline) {
+            for (ConsumerRecord<String, String> r : headerCapture.records) {
+                if (key.equals(r.key())) {
+                    return r;
+                }
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("interrupted while awaiting record", e);
+            }
+        }
+        throw new AssertionError("no record with key=" + key + " arrived within timeout");
+    }
+
+    private static String headerValue(ConsumerRecord<String, String> record, String key) {
+        var header = record.headers().lastHeader(key);
+        return header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
+    }
 
     private Order persistOrder(OrderStatus targetStatus) {
         return persistOrderWithQuantity(targetStatus, 2);

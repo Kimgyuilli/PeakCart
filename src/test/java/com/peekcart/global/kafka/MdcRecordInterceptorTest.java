@@ -65,6 +65,34 @@ class MdcRecordInterceptorTest {
     }
 
     @Test
+    @DisplayName("X-Trace-Id 헤더가 blank(빈 문자열) 이면 payload.eventId 로 fallback 한다")
+    void traceId_falls_back_when_header_blank() {
+        ConsumerRecord<String, String> record = recordWith(
+                "{\"eventId\":\"evt-blank\",\"payload\":{\"orderId\":3}}");
+        record.headers().add(KafkaTraceHeaders.TRACE_ID, "".getBytes(StandardCharsets.UTF_8));
+
+        interceptor.intercept(record, null);
+
+        assertThat(MDC.get("traceId")).isEqualTo("evt-blank");
+        assertThat(MDC.get("orderId")).isEqualTo("3");
+        assertThat(MDC.get("userId")).isNull();
+    }
+
+    @Test
+    @DisplayName("X-Trace-Id 만 헤더에 있고 X-User-Id 부재 → traceId 는 헤더값, userId 는 null")
+    void traceId_from_header_userId_missing() {
+        ConsumerRecord<String, String> record = recordWith(
+                "{\"eventId\":\"evt-x\",\"payload\":{\"orderId\":5}}");
+        record.headers().add(KafkaTraceHeaders.TRACE_ID, "header-trace".getBytes(StandardCharsets.UTF_8));
+
+        interceptor.intercept(record, null);
+
+        assertThat(MDC.get("traceId")).isEqualTo("header-trace");
+        assertThat(MDC.get("userId")).isNull();
+        assertThat(MDC.get("orderId")).isEqualTo("5");
+    }
+
+    @Test
     @DisplayName("payload 의 userId/orderId 가 없으면 MDC 에 설정하지 않는다")
     void optional_fields_skipped_when_absent() {
         ConsumerRecord<String, String> record = recordWith(

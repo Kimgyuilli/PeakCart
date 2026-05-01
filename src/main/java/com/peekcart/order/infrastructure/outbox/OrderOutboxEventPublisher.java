@@ -2,6 +2,7 @@ package com.peekcart.order.infrastructure.outbox;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.peekcart.global.kafka.MdcSnapshot;
 import com.peekcart.global.outbox.OutboxEvent;
 import com.peekcart.global.outbox.OutboxEventRepository;
 import com.peekcart.global.outbox.dto.KafkaEventEnvelope;
@@ -56,7 +57,9 @@ public class OrderOutboxEventPublisher {
     }
 
     private void saveOutboxEvent(String eventType, String aggregateId, Object payload) {
+        MdcSnapshot.Snapshot mdc = MdcSnapshot.current();
         OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, aggregateId, eventType,
+                mdc.traceId(), mdc.userId(),
                 eventId -> serialize(new KafkaEventEnvelope(eventId, eventType, LocalDateTime.now(), payload)));
         outboxEventRepository.save(outboxEvent);
     }

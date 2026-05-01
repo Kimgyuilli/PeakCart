@@ -3,10 +3,13 @@ package com.peekcart.global.kafka;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.support.AbstractIntegrationTest;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -26,6 +29,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -106,8 +110,14 @@ class DlqIntegrationTest extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        MDC.clear();
         dlqTestListener.records.clear();
         TestConfig.slackCallCount.set(0);
+    }
+
+    @AfterEach
+    void clearMdc() {
+        MDC.clear();
     }
 
     @Test
@@ -130,5 +140,38 @@ class DlqIntegrationTest extends AbstractIntegrationTest {
             assertThat(record.topic()).isEqualTo("order.created.dlq");
             assertThat(record.value()).isEqualTo(invalidMessage);
         });
+    }
+
+    @Test
+    @DisplayName("DLQ 라우팅 시 X-Trace-Id / X-User-Id 헤더가 보존된다 (D-010)")
+    void dlqPreservesTraceHeaders() {
+        // given: ProducerRecord 직접 생성 + KafkaTraceHeaders 부착 (Outbox 발행 경로 모방)
+        // MDC.put 만으로는 Kafka 헤더가 자동 생성되지 않으므로 헤더를 명시적으로 부착해야 한다.
+        ProducerRecord<String, String> record = new ProducerRecord<>(
+                "order.created", null, "test-key", "invalid-json-message");
+        record.headers().add(KafkaTraceHeaders.TRACE_ID,
+                "trace-dlq-001".getBytes(StandardCharsets.UTF_8));
+        record.headers().add(KafkaTraceHeaders.USER_ID,
+                "77".getBytes(StandardCharsets.UTF_8));
+
+        // when
+        kafkaTemplate.send(record);
+
+        // then: DLQ 토픽의 record 가 원본 헤더 보존 (DeadLetterPublishingRecoverer 가 헤더 자동 복사)
+        await().atMost(15, TimeUnit.SECONDS).untilAsserted(() -> {
+            assertThat(dlqTestListener.records).hasSize(2);
+        });
+
+        assertThat(dlqTestListener.records).allSatisfy(dlqRecord -> {
+            assertThat(headerValue(dlqRecord, KafkaTraceHeaders.TRACE_ID))
+                    .isEqualTo("trace-dlq-001");
+            assertThat(headerValue(dlqRecord, KafkaTraceHeaders.USER_ID))
+                    .isEqualTo("77");
+        });
+    }
+
+    private static String headerValue(ConsumerRecord<String, String> record, String key) {
+        var header = record.headers().lastHeader(key);
+        return header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }
 }

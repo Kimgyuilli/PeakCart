@@ -1021,3 +1021,52 @@ Run 2 (3 pods pre-warmed, HPA 일시 제거 + manual scale=3, DB 재시드):
 - **D-002 후속 추적**: MySQL 리소스 + HikariCP 풀 튜닝 후 재측정, 분산 락 acquisition latency metric, Phase 4 Order Service 격리 측정 (TASKS.md D-002 행 우선순위 갱신)
 
 **Phase 3 Exit Criteria 모두 충족 → Phase 3 종결**. 다음: Phase 4 MSA 분리 준비 (Gradle 멀티모듈, Spring Cloud Gateway, Choreography Saga, CQRS 로컬 캐시).
+
+---
+
+## 2026-05-01 — task-d010-outbox-trace-context (Outbox trace context 영속화 + Producer 헤더 전파)
+
+**범위**: Phase 3 잔여 부채 D-010 해결. Phase 4 MSA 분리 진입 전 모놀리스 단계에서 Outbox-only end-to-end 추적 인프라 선결. 결정 근거: ADR-0008.
+
+**Part A — ADR 작성**:
+- `docs/adr/0008-outbox-trace-context-propagation.md` 신규 (Status `Proposed` → 종결 시 `Accepted` 전환)
+- 4 대안 비교: A. 컬럼 추가 + MDC 캡처 + 헤더 주입 (선택) / B. payload envelope 임베드 / C. 별도 테이블 / D. OpenTelemetry 즉시 도입
+- 선택 근거: 기존 `MdcRecordInterceptor` 헤더 우선순위 인프라 (D-007 옵션 B) 와 정합 + Phase 4 forward-compat (`traceparent` 한 단계 추가만으로 동작)
+- 핵심 결정: **MDC 캡처 책임은 Publisher**, `OutboxEvent.create(...)` 는 명시 인자 (옵션 a) — 도메인 횡단 엔티티의 SLF4J 결합 회피
+
+**Part B — 스키마 + 엔티티**:
+- Flyway V4 (`outbox_events` 에 `trace_id` / `user_id` VARCHAR(64) NULL 컬럼) — backfill 불필요, 신규 이벤트부터 채워짐
+- 인덱스 미생성 — 기존 `idx_outbox_status_created` 가 폴링 쿼리 (`status='PENDING' ORDER BY created_at ASC`) 커버. trace 기반 조회는 사후 ad-hoc
+- `OutboxEvent.create(...)` 시그니처 확장 (traceId/userId 명시 인자), 호출부 3곳 갱신
+- `MdcSnapshot.current()` 정적 헬퍼 (`global/kafka/`) — Snapshot record (traceId, userId)
+
+**Part C — Producer 헤더 주입**:
+- `OutboxPollingService.kafkaTemplate.send(...)` 3-인자 → `ProducerRecord` 빌드 + `KafkaTraceHeaders.TRACE_ID` / `USER_ID` 헤더 주입
+- 헤더 부재 정책: traceId/userId null 이면 헤더 자체 미추가 (빈 문자열 헤더 추가 금지) — `MdcRecordInterceptor.headerValue()` 의 `value.isBlank() ? null` 분기와 정합
+
+**Part D — 테스트**:
+- 단위 (Mockito): MdcSnapshotTest 3건, OrderOutboxEventPublisherTest 3건 (MDC 미설정 / traceId-only / both), PaymentOutboxEventPublisherTest 3건, OutboxPollingServiceTest 헤더 검증 2건 (set / null)
+- 단위 (interceptor 경계 확장): MdcRecordInterceptorTest 신규 2건 — blank X-Trace-Id → eventId fallback, X-Trace-Id 만 + X-User-Id 부재 → userId null
+- 통합: OutboxKafkaIntegrationTest raw consumer 헤더 전파 2건 (MDC set / MDC clear), DlqIntegrationTest 헤더 보존 1건 — DlqIntegrationTest 는 ProducerRecord 직접 생성 + KafkaTraceHeaders 부착 방식
+- 안전망: 신규 통합 테스트에 `@BeforeEach`/`@AfterEach` MDC.clear() — JVM thread 재사용 시 케이스 간 누수 방지
+
+**Part E — 문서 동기화**:
+- TASKS.md: D-010 행 `중간` → `해결됨`, 완료 작업 표 새 행
+- 본 PHASE3.md 엔트리
+- 02-architecture.md 패키지 트리 (`global/kafka/MdcSnapshot.java` 추가)
+- adr/README.md 인덱스에 ADR-0008 행
+- 05-data-design.md outbox_events ERD 에 trace_id/user_id 컬럼 + 인덱스 미생성 명시 (Why → ADR-0008)
+- ADR-0008 Status `Proposed` → `Accepted` (별도 커밋)
+
+**검증**:
+- `./gradlew test` 전체 통과 (244 + 신규 14건) — 5xx/회귀 0건
+- raw KafkaConsumer 로 ProducerRecord 헤더 자체 검증 (Spring `RecordInterceptor` 통과 우회) — 외부 poll 경로의 `MdcRecordInterceptor.afterRecord()` MDC 제거 한계는 별도 `MdcRecordInterceptorTest` 단위 테스트로 보호
+
+**커밋 구조 (5분할)**:
+1. `docs(adr): add ADR-0008 outbox trace context propagation (Proposed)`
+2. `feat(outbox): persist trace context columns on outbox events`
+3. `feat(outbox): inject trace headers on kafka publish`
+4. `test(outbox): verify end-to-end trace header propagation`
+5. `docs: mark D-010 resolved + ADR-0008 accepted`
+
+브랜치: `feat/d010-outbox-trace-context`. 계획 리뷰 3 loops 누적 14건 전부 반영. /work loop 1 진행.

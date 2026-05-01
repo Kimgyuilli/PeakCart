@@ -150,6 +150,8 @@ erDiagram
     timestamp last_attempted_at
     timestamp created_at
     timestamp published_at
+    string trace_id "MDC traceId — D-010 (see ADR-0008)"
+    string user_id "MDC userId — D-010 (see ADR-0008)"
   }
   processed_events {
     bigint id PK
@@ -386,6 +388,7 @@ erDiagram
 | `order_items` | `idx_order_items_order_id (order_id)` | 주문별 상품 목록 조회 |
 | `products` | `idx_products_category_status (category_id, status)` | 카테고리별 상품 목록 조회 |
 | `outbox_events` | `idx_outbox_status_created (status, created_at)` | Polling 스케줄러 대상 조회 (PENDING 상태) |
+| `outbox_events` | `trace_id` / `user_id` 컬럼은 인덱스 없음 | trace 기반 조회는 사후 ad-hoc 분석용 — 인덱스 추가 시 insert/update 비용만 증가 (see ADR-0008) |
 | `processed_events` | `uk_processed_event_consumer (event_id, consumer_group)` | 멱등성 체크 (중복 소비 방지, 복합 UK) |
 | `notifications` | `idx_notifications_user_id (user_id)` | 사용자별 알림 목록 조회 |
 | `refresh_tokens` | `idx_refresh_tokens_user_id (user_id)` | 사용자별 토큰 조회/삭제 |

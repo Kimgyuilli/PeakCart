@@ -50,8 +50,15 @@ public class OutboxEvent {
     @Column(name = "published_at")
     private LocalDateTime publishedAt;
 
+    @Column(name = "trace_id", length = 64)
+    private String traceId;
+
+    @Column(name = "user_id", length = 64)
+    private String userId;
+
     public static OutboxEvent create(String aggregateType, String aggregateId,
                                      String eventType,
+                                     String traceId, String userId,
                                      Function<String, String> payloadFactory) {
         OutboxEvent event = new OutboxEvent();
         event.aggregateType = aggregateType;
@@ -62,6 +69,8 @@ public class OutboxEvent {
         event.status = OutboxEventStatus.PENDING;
         event.retryCount = 0;
         event.createdAt = LocalDateTime.now();
+        event.traceId = traceId;
+        event.userId = userId;
         return event;
     }
 

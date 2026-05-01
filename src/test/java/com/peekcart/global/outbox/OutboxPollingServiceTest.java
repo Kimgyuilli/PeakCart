@@ -1,7 +1,9 @@
 package com.peekcart.global.outbox;
 
+import com.peekcart.global.kafka.KafkaTraceHeaders;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.support.ServiceTest;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,13 +13,13 @@ import org.mockito.Mock;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.times;
@@ -32,22 +34,19 @@ class OutboxPollingServiceTest {
     @Mock KafkaTemplate<String, String> kafkaTemplate;
     @Mock SlackPort slackPort;
 
-    private OutboxEvent event;
-
     @BeforeEach
-    void setUp() {
-        event = OutboxEvent.create("Order", "1", "order.created", eventId -> "{}");
-        // MAX_RETRY=5. 다음 폴링에서 Kafka 실패 → retryCount 5 도달 → markFailed + Slack 알림 경로 진입
-        ReflectionTestUtils.setField(event, "retryCount", 4);
+    void clearMdc() {
+        org.slf4j.MDC.clear();
     }
 
     @Test
     @DisplayName("Slack 알림 실패 시에도 FAILED 상태 저장이 수행되고 예외가 전파되지 않는다")
     void slackFailureIsIsolated() {
+        OutboxEvent event = retryableEvent(null, null);
         given(outboxEventRepository.findPendingEvents(anyInt())).willReturn(List.of(event));
-        given(kafkaTemplate.send(anyString(), anyString(), anyString()))
+        given(kafkaTemplate.send(any(ProducerRecord.class)))
                 .willThrow(new RuntimeException("Kafka down"));
-        willThrow(new RuntimeException("Slack down")).given(slackPort).send(anyString());
+        willThrow(new RuntimeException("Slack down")).given(slackPort).send(any(String.class));
 
         assertThatCode(() -> outboxPollingService.pollAndPublish()).doesNotThrowAnyException();
 
@@ -55,14 +54,15 @@ class OutboxPollingServiceTest {
         verify(outboxEventRepository).save(savedCaptor.capture());
         assertThat(savedCaptor.getValue().getStatus()).isEqualTo(OutboxEventStatus.FAILED);
         assertThat(savedCaptor.getValue().getRetryCount()).isEqualTo(5);
-        verify(slackPort, times(1)).send(anyString());
+        verify(slackPort, times(1)).send(any(String.class));
     }
 
     @Test
     @DisplayName("MAX_RETRY 도달 시 Slack 알림이 정상 발송되면 FAILED 상태로 저장된다")
     void slackNotifiedOnMaxRetryReached() {
+        OutboxEvent event = retryableEvent(null, null);
         given(outboxEventRepository.findPendingEvents(anyInt())).willReturn(List.of(event));
-        given(kafkaTemplate.send(anyString(), anyString(), anyString()))
+        given(kafkaTemplate.send(any(ProducerRecord.class)))
                 .willThrow(new RuntimeException("Kafka down"));
 
         outboxPollingService.pollAndPublish();
@@ -72,5 +72,77 @@ class OutboxPollingServiceTest {
         assertThat(msgCaptor.getValue()).contains("[Outbox FAILED]", event.getEventId());
         verify(outboxEventRepository).save(any(OutboxEvent.class));
         assertThat(event.getStatus()).isEqualTo(OutboxEventStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("trace_id / user_id 가 set 된 OutboxEvent 발행 시 ProducerRecord 헤더에 두 키 모두 포함된다")
+    void producerRecordCarriesTraceHeadersWhenSet() throws Exception {
+        OutboxEvent event = pendingEvent("trace-abc", "42");
+        given(outboxEventRepository.findPendingEvents(anyInt())).willReturn(List.of(event));
+        given(kafkaTemplate.send(any(ProducerRecord.class)))
+                .willReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+
+        outboxPollingService.pollAndPublish();
+
+        ArgumentCaptor<ProducerRecord<String, String>> recCaptor = recordCaptor();
+        verify(kafkaTemplate).send(recCaptor.capture());
+        ProducerRecord<String, String> sent = recCaptor.getValue();
+        assertThat(headerValue(sent, KafkaTraceHeaders.TRACE_ID)).isEqualTo("trace-abc");
+        assertThat(headerValue(sent, KafkaTraceHeaders.USER_ID)).isEqualTo("42");
+    }
+
+    @Test
+    @DisplayName("trace_id / user_id 가 둘 다 null 이면 ProducerRecord 헤더에 두 키 모두 미주입된다")
+    void producerRecordOmitsTraceHeadersWhenNull() {
+        OutboxEvent event = pendingEvent(null, null);
+        given(outboxEventRepository.findPendingEvents(anyInt())).willReturn(List.of(event));
+        given(kafkaTemplate.send(any(ProducerRecord.class)))
+                .willReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+
+        outboxPollingService.pollAndPublish();
+
+        ArgumentCaptor<ProducerRecord<String, String>> recCaptor = recordCaptor();
+        verify(kafkaTemplate).send(recCaptor.capture());
+        ProducerRecord<String, String> sent = recCaptor.getValue();
+        assertThat(sent.headers().lastHeader(KafkaTraceHeaders.TRACE_ID)).isNull();
+        assertThat(sent.headers().lastHeader(KafkaTraceHeaders.USER_ID)).isNull();
+    }
+
+    @Test
+    @DisplayName("trace_id / user_id 가 빈 문자열이면 ProducerRecord 헤더에 두 키 모두 미주입된다 (ADR-0008 blank 정책)")
+    void producerRecordOmitsTraceHeadersWhenBlank() {
+        OutboxEvent event = pendingEvent("", "  ");
+        given(outboxEventRepository.findPendingEvents(anyInt())).willReturn(List.of(event));
+        given(kafkaTemplate.send(any(ProducerRecord.class)))
+                .willReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+
+        outboxPollingService.pollAndPublish();
+
+        ArgumentCaptor<ProducerRecord<String, String>> recCaptor = recordCaptor();
+        verify(kafkaTemplate).send(recCaptor.capture());
+        ProducerRecord<String, String> sent = recCaptor.getValue();
+        assertThat(sent.headers().lastHeader(KafkaTraceHeaders.TRACE_ID)).isNull();
+        assertThat(sent.headers().lastHeader(KafkaTraceHeaders.USER_ID)).isNull();
+    }
+
+    private static OutboxEvent pendingEvent(String traceId, String userId) {
+        return OutboxEvent.create("Order", "1", "order.created", traceId, userId, eventId -> "{}");
+    }
+
+    private static OutboxEvent retryableEvent(String traceId, String userId) {
+        OutboxEvent event = pendingEvent(traceId, userId);
+        // MAX_RETRY=5. 다음 폴링에서 Kafka 실패 → retryCount 5 도달 → markFailed + Slack 알림 경로 진입
+        ReflectionTestUtils.setField(event, "retryCount", 4);
+        return event;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static ArgumentCaptor<ProducerRecord<String, String>> recordCaptor() {
+        return ArgumentCaptor.forClass((Class) ProducerRecord.class);
+    }
+
+    private static String headerValue(ProducerRecord<String, String> record, String key) {
+        var header = record.headers().lastHeader(key);
+        return header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }
 }

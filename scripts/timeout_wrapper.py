@@ -10,6 +10,7 @@ SIGTERM is sent first; after a 2s grace period, SIGKILL is sent.
 """
 from __future__ import annotations
 
+import math
 import os
 import signal
 import subprocess
@@ -29,6 +30,10 @@ def main(argv: list[str]) -> int:
     try:
         seconds = float(argv[1])
     except ValueError:
+        print(f"invalid seconds: {argv[1]}", file=sys.stderr)
+        return 2
+
+    if math.isnan(seconds) or math.isinf(seconds) or seconds <= 0:
         print(f"invalid seconds: {argv[1]}", file=sys.stderr)
         return 2
 

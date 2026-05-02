@@ -1070,3 +1070,47 @@ Run 2 (3 pods pre-warmed, HPA 일시 제거 + manual scale=3, DB 재시드):
 5. `docs: mark D-010 resolved + ADR-0008 accepted`
 
 브랜치: `feat/d010-outbox-trace-context`. 계획 리뷰 3 loops 누적 14건 전부 반영. /work loop 1 진행.
+
+## 2026-05-02 — task-d011-harness-hardening (`/plan`·`/work` 공용 shell helper 4건 정비)
+
+**범위**: Phase 3 잔여 부채 D-011 해결 (Phase 4 MSA 분리 진입 전 harness 안전성 베이스라인 확보). harness 자체 변경이므로 회귀 방지 자동화(Bats) 도 동일 task 범위에 포함.
+
+**Part A — 경로 인젝션 차단** (a, 우선순위 1):
+- `hpx_task_id_validate` 헬퍼 신규 (`shared-logic.sh` 공통 유틸 섹션) — allowlist `[A-Za-z0-9._-]+`, 길이 1~128, `..` 부분문자열 금지, 선두 `-`/`.` 금지 (옵션/dotfile 오인 방지)
+- 진입부 검증 추가 (1지점 커버 + 직접 보간 helper 별도 호출):
+  - `hpx_lock_dir`, `hpx_state_path` (1지점 → 호출자 자동 보호)
+  - 별도: `hpx_lock_acquire`, `hpx_lock_force_release`, `hpx_lock_release`, `hpx_state_exists/read/write`, `hpx_plan_lint`, `hpx_audit_append`, `hpx_diff_capture`, `hpx_ship_pr_body_data` — 각 진입부 1회 검증
+- `.claude/commands/{plan,work}.md` Step 1 직후 1회 검증 라인 명시 (`bash -c '... hpx_task_id_validate "$TASK_ID"' || exit 1`)
+- 검증: 악성 `task_id` (`../etc`, `foo;rm` 등) 가 `mkdir`/`rm -rf`/file write 에 도달하지 않음 (sentinel guard)
+
+**Part B — `timeout_wrapper.py` 견고화** (d, 우선순위 2):
+- `seconds <= 0`, `math.isnan`, `math.isinf` 거부 → exit 2 + stderr `invalid seconds:` 출력
+- 종료 코드 2 (잘못된 인자) 유지 — 124 (정상 timeout) 침범 차단
+- `1e309` (Python `float()` 가 `inf` 로 받아들임) 도 동일 거부
+
+**Part C — `hpx_diff_capture` 부작용 제거** (b, 우선순위 3):
+- 실제 `.git/index` 에 `git add -N` 을 실행하던 기존 방식 → 격리된 임시 `GIT_INDEX_FILE` 로 전환
+- 흐름: `mktemp -d` 임시 dir → `cp $GIT_DIR/index $tmp_dir/index` (없으면 빈 index — unborn repo 가드) → `GIT_INDEX_FILE=$tmp_index git ls-files --others -z | xargs -0 sh -c '... git add -N -- "$@"'` (NUL 파이프 직결) → `GIT_INDEX_FILE=$tmp_index git diff "$base"` → `rm -rf $tmp_dir`
+- 사용자 staged 상태 무손상: `.git/index` sha256 호출 전후 동일 + `git status --porcelain` 동일
+- staged 신규 파일 / 공백·개행 파일명 untracked 모두 diff 산출물에 포함 (read-tree HEAD 방식 회귀 차단)
+
+**Part D — Bats 회귀 테스트** (c, 우선순위 4):
+- 신규 디렉토리 `.claude/scripts/tests/bats/` + README (설치/실행 가이드)
+- `task_id_validate.bats` — 정상 (task-foo, task-d011-harness-hardening) + done/ basename 회귀 가드 + 거부 케이스 (`../foo`, `foo..bar`, `-foo`, `.foo`, 공백, 128자 초과, 슬래시/세미콜론/달러/탭/개행)
+- `lock_state_paths.bats` — 정상 idempotent re-enter + 부정 (`../etc`, `foo;rm` 등) 에서 lock/state 파일 생성 0건, sentinel rm 도달 0건
+- `plan_audit_paths.bats` — `hpx_plan_lint` / `hpx_audit_append` 외부 경로 거부 + 부작용 0건
+- `diff_capture.bats` — 임시 git repo 격리 시나리오 (staged modified + staged 신규 + untracked + 공백/개행 untracked → `.git/index` sha 불변, git status 불변, 모든 변경분 diff 포함, unborn repo 도 동작)
+- `timeout_wrapper.bats` — 거부 11건 (0/-1/-0.5/NaN/nan/Inf/+Inf/Infinity/1e309/abc/empty) + 정상 3건 (작은 timeout pass-through, 진짜 timeout=124)
+- 미실행 환경: 본 task 작성 시점에 `bats-core` 미설치. 모든 테스트 시나리오는 별도 bash 스크립트로 수동 검증 완료 (sha 불변, status 불변, 거부 11건, 정상 3건 모두 OK). 사용자가 `brew install bats-core` 후 `bats .claude/scripts/tests/bats/` 로 자동 실행 가능
+
+**Part E — 문서 동기화**:
+- TASKS.md: D-011 행 `중간` → `해결됨`, 완료 작업 표 새 행
+- 본 PHASE3.md 엔트리
+- `docs/02-architecture.md` 변경 없음 (§12 가 `.claude/` 트리 미언급 — `grep -c '.claude' = 0` 확인)
+
+**검증**:
+- 본 task `/work` 의 GP-3 (diff 캡처) 단계에서 P6 변경 동작 자체 검증 — `.git/index` sha256 호출 전후 동일 (`b807c52e...`)
+- 본 task 진행 중 lock/state 정상 동작 (`task-d011-harness-hardening` 가 신규 allowlist 통과)
+- `./gradlew test` 영향 없음 (Java 코드 변경 0건)
+
+**브랜치**: `chore/task-d011-harness-hardening`. 계획 리뷰 3 loops 누적 11건 전부 반영. /work loop 1 진행.

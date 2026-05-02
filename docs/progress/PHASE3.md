@@ -1113,4 +1113,4 @@ Run 2 (3 pods pre-warmed, HPA 일시 제거 + manual scale=3, DB 재시드):
 - 본 task 진행 중 lock/state 정상 동작 (`task-d011-harness-hardening` 가 신규 allowlist 통과)
 - `./gradlew test` 영향 없음 (Java 코드 변경 0건)
 
-**브랜치**: `chore/task-d011-harness-hardening`. 계획 리뷰 3 loops 누적 11건 전부 반영. /work loop 1 진행.
+**브랜치**: `chore/task-d011-harness-hardening`. 계획 리뷰 3 loops 누적 11건 전부 반영. /work loop 1 (Codex 리뷰 4건 모두 반영). PR: https://github.com/Kimgyuilli/PeakCart/pull/29

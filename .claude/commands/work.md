@@ -28,6 +28,7 @@
 ### Step 1. 인자 파싱 + task 확정 + state 파일 확인
 - `$ARGUMENTS` 가 있으면 `TASK_ID` 로 확정
 - 없으면 `docs/plans/*.state.json` 중 `stage` 가 `plan.done` 또는 `work.*` 인 파일을 updated_at 내림차순 스캔해 후보 제시 → 사용자 승인
+- **확정 직후 1회 검증 강제** (env-var 전달, 문자열 보간 금지): `TASK_ID="$TASK_ID" bash -c 'set -euo pipefail; source .claude/scripts/shared-logic.sh; hpx_task_id_validate "$TASK_ID"' || exit 1` — `TASK_ID` 가 inner shell 코드 문자열에 직접 보간되면 quote 포함 악성 입력이 validator 실행 *전에* 토큰을 깰 수 있어, 반드시 export 형태로 전달한다. 통과 후에만 이후 본문에서 `TASK_ID` 를 경로 보간 (RAW/ERR/diff path/계획서 path) 에 사용한다 (allowlist `[A-Za-z0-9._-]+`, `..` 금지, 선두 `-`/`.` 금지)
 - `hpx_state_exists "$TASK_ID"` false → "계획서가 없거나 /plan 을 먼저 돌려야 합니다." 종료
 - state 로드 후 다음 중 하나만 진행 허용:
   - `stage ∈ { plan.done, work.impl.inprogress, work.impl.completed, work.review.completed }`

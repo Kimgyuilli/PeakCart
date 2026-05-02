@@ -37,6 +37,39 @@ hpx_parent_dir() {
   esac
 }
 
+# hpx_task_id_validate <task_id>
+# 경로 보간 helper 진입부에서 호출. allowlist [A-Za-z0-9._-]+, 1~128자,
+# `..` 부분문자열 금지, 선두 `-`/`.` 금지 (옵션 인자 / 숨김파일 오인 방지).
+# 통과 시 exit 0, 실패 시 stderr 메시지 + exit 1.
+hpx_task_id_validate() {
+  local task_id="${1-}"
+  if [ -z "$task_id" ]; then
+    printf 'task_id_validate: empty task_id\n' >&2
+    return 1
+  fi
+  if [ "${#task_id}" -gt 128 ]; then
+    printf 'task_id_validate: too long (>128): %s\n' "$task_id" >&2
+    return 1
+  fi
+  case "$task_id" in
+    -*|.*)
+      printf 'task_id_validate: leading -/. not allowed: %s\n' "$task_id" >&2
+      return 1
+      ;;
+    *..*)
+      printf 'task_id_validate: substring "..": %s\n' "$task_id" >&2
+      return 1
+      ;;
+  esac
+  case "$task_id" in
+    *[!A-Za-z0-9._-]*)
+      printf 'task_id_validate: disallowed char: %s\n' "$task_id" >&2
+      return 1
+      ;;
+  esac
+  return 0
+}
+
 hpx_utc_ts() {
   date -u +%Y%m%dT%H%M%SZ
 }
@@ -90,6 +123,7 @@ hpx_codex_timeout_seconds() {
 
 # hpx_lock_dir <task_id>
 hpx_lock_dir() {
+  hpx_task_id_validate "$1" || return 1
   printf 'docs/plans/%s.lock' "$1"
 }
 
@@ -101,6 +135,7 @@ hpx_lock_acquire() {
   local task_id="$1"
   local command="$2"
   local reuse_session="${3:-}"
+  hpx_task_id_validate "$task_id" || return 1
   local lock_dir
   lock_dir="$(hpx_lock_dir "$task_id")"
   local pid_file="$lock_dir/pid"
@@ -147,34 +182,39 @@ hpx_lock_acquire() {
 # hpx_lock_force_release <task_id>
 # 명시적으로 호출될 때만 lock 제거 (stale override 포함). audit 기록은 호출자 책임.
 hpx_lock_force_release() {
+  hpx_task_id_validate "$1" || return 1
   local lock_dir
-  lock_dir="$(hpx_lock_dir "$1")"
+  lock_dir="$(hpx_lock_dir "$1")" || return 1
   rm -rf "$lock_dir"
 }
 
 # hpx_lock_release <task_id>
 hpx_lock_release() {
+  hpx_task_id_validate "$1" || return 1
   local lock_dir
-  lock_dir="$(hpx_lock_dir "$1")"
+  lock_dir="$(hpx_lock_dir "$1")" || return 1
   rm -rf "$lock_dir"
 }
 
 # ---------- State (atomic write) ----------
 
 hpx_state_path() {
+  hpx_task_id_validate "$1" || return 1
   printf 'docs/plans/%s.state.json' "$1"
 }
 
 # hpx_state_exists <task_id>
 hpx_state_exists() {
+  hpx_task_id_validate "$1" || return 1
   [ -f "$(hpx_state_path "$1")" ]
 }
 
 # hpx_state_read <task_id>
 # stdout 에 JSON 전체 출력. 없으면 빈 문자열, exit 1.
 hpx_state_read() {
+  hpx_task_id_validate "$1" || return 1
   local path
-  path="$(hpx_state_path "$1")"
+  path="$(hpx_state_path "$1")" || return 1
   if [ ! -f "$path" ]; then
     return 1
   fi
@@ -186,8 +226,9 @@ hpx_state_read() {
 hpx_state_write() {
   local task_id="$1"
   shift
+  hpx_task_id_validate "$task_id" || return 1
   local path tmp parent_dir
-  path="$(hpx_state_path "$task_id")"
+  path="$(hpx_state_path "$task_id")" || return 1
   tmp="${path}.tmp.$$"
   parent_dir="$(hpx_parent_dir "$path")"
 
@@ -560,6 +601,7 @@ hpx_run_id_new() {
 # exit 0: 통과, exit 1: 실패
 hpx_plan_lint() {
   local task_id="$1"
+  hpx_task_id_validate "$task_id" || return 1
   local path="docs/plans/${task_id}.md"
   python3 - "$path" <<'PY'
 import re
@@ -739,6 +781,7 @@ PY
 # markdown_block 는 stdin 으로 받아도 됨.
 hpx_audit_append() {
   local task_id="$1"
+  hpx_task_id_validate "$task_id" || return 1
   local path="docs/plans/.audit/${task_id}.md"
   mkdir -p "$(hpx_parent_dir "$path")" >/dev/null 2>&1 || true
   shift
@@ -832,24 +875,48 @@ hpx_base_branch_discover() {
 # hpx_diff_capture <task_id> <ts>
 # git diff <BASE> > .cache/diffs/diff-<task>-<ts>.patch, 경로 echo
 # 주의: `git diff` 는 untracked 파일을 포함하지 않으므로, .gitignore 에 걸리지 않은
-# untracked 파일을 `git add -N` (intent-to-add) 으로 먼저 등록해 diff 에 포함시킨다.
-# 이는 working tree 외 부작용이 없는 안전한 연산이다 (staging 은 하지 않음).
+# untracked 파일을 intent-to-add 으로 먼저 등록해 diff 에 포함시킨다. 사용자 staging
+# 작업 (`git add -p` 등) 과 충돌하지 않도록 격리된 임시 index (`GIT_INDEX_FILE`) 에서
+# 수행하여 실제 `.git/index` 는 건드리지 않는다.
 hpx_diff_capture() {
   local task_id="$1"
   local ts="$2"
+  hpx_task_id_validate "$task_id" || return 1
   local base path
   base="$(hpx_base_branch_discover)"
   path=".cache/diffs/diff-${task_id}-${ts}.patch"
   mkdir -p .cache/diffs >/dev/null 2>&1 || true
 
-  # untracked (non-ignored) 파일을 intent-to-add 으로 마킹
-  local untracked
-  untracked="$(git ls-files --others --exclude-standard -z 2>/dev/null || true)"
-  if [ -n "$untracked" ]; then
-    printf '%s' "$untracked" | xargs -0 git add -N -- 2>/dev/null || true
+  # 격리된 임시 index 디렉토리. 실제 .git/index 를 그대로 복사하여 staged 변경
+  # (수정/신규 모두) 을 보존한 상태로 untracked 만 추가 등록한다.
+  local tmp_dir tmp_index git_dir real_index
+  tmp_dir="$(mktemp -d -t hpx-diff-index.XXXXXX)" || return 1
+  tmp_index="${tmp_dir}/index"
+  git_dir="$(git rev-parse --git-dir 2>/dev/null)" || {
+    rm -rf "$tmp_dir"
+    return 1
+  }
+  real_index="${git_dir}/index"
+  if [ -f "$real_index" ]; then
+    cp "$real_index" "$tmp_index" || {
+      rm -rf "$tmp_dir"
+      return 1
+    }
   fi
+  # unborn repo / 신규 worktree 는 .git/index 가 없을 수 있다 — 빈 tmp_index 로 진행
+  # (git 이 0 byte index 를 빈 트리로 수용).
 
-  git diff "${base}" >"${path}"
+  # NUL-delimited 파이프 직결 (변수 경유 X) 로 공백/개행 파일명 안전.
+  # untracked 0 개일 때 git add 호출은 일어나지 않는다 (xargs 가 빈 입력 시 미실행).
+  GIT_INDEX_FILE="$tmp_index" git ls-files --others --exclude-standard -z 2>/dev/null \
+    | xargs -0 sh -c '[ "$#" -gt 0 ] && GIT_INDEX_FILE="'"$tmp_index"'" git add -N -- "$@"' _ \
+    2>/dev/null || true
+
+  if ! GIT_INDEX_FILE="$tmp_index" git diff "${base}" >"${path}"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  rm -rf "$tmp_dir"
   printf '%s\n' "${path}"
 }
 
@@ -1048,6 +1115,7 @@ PY
 # §7-5-E 분기 근거 제공. script 부재는 unavailable (호출자가 skip), exec 실패는 script_error.
 hpx_consistency_precheck() {
   local task_id="$1"
+  hpx_task_id_validate "$task_id" || return 1
   local ts
   ts="$(hpx_epoch_ts)"
   local log_path=".cache/consistency-${task_id}-${ts}.log"
@@ -1121,6 +1189,7 @@ PY
 #   - adr_mentions[] (plan.md / diff 에서 등장하는 ADR-NNNN)
 hpx_ship_pr_body_data() {
   local task_id="$1"
+  hpx_task_id_validate "$task_id" || return 1
   local state_path
   state_path="$(hpx_state_path "$task_id")"
   [ -f "$state_path" ] || return 1

@@ -25,6 +25,7 @@
 ### Step 1. 인자 파싱 + task 확정
 - `$ARGUMENTS` 가 비어있지 않으면 그 값이 `TASK_ID`
 - 비어있으면 `hpx_sync_context` 의 TASKS.md 출력을 근거로 "다음 항목" 을 골라 사용자에게 제시하고 승인 받은 후 `TASK_ID` 확정
+- **확정 직후 1회 검증 강제** (env-var 전달, 문자열 보간 금지): `TASK_ID="$TASK_ID" bash -c 'set -euo pipefail; source .claude/scripts/shared-logic.sh; hpx_task_id_validate "$TASK_ID"' || exit 1` — `TASK_ID` 가 inner shell 코드 문자열에 직접 보간되면 quote 포함 악성 입력이 validator 실행 *전에* 토큰을 깰 수 있어, 반드시 export 형태로 전달한다. 통과 후에만 이후 본문에서 `TASK_ID` 를 경로 보간에 사용한다 (allowlist `[A-Za-z0-9._-]+`, `..` 금지, 선두 `-`/`.` 금지)
 - `docs/plans/${TASK_ID}.md` 파일의 존재를 확인. 없으면 `§10-1` 템플릿 기반 초안을 사용자와 대화하며 작성
 
 ### Step 2. lock 획득 + sync 로직

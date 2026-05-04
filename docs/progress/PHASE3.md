@@ -1114,3 +1114,41 @@ Run 2 (3 pods pre-warmed, HPA 일시 제거 + manual scale=3, DB 재시드):
 - `./gradlew test` 영향 없음 (Java 코드 변경 0건)
 
 **브랜치**: `chore/task-d011-harness-hardening`. 계획 리뷰 3 loops 누적 11건 전부 반영. /work loop 1 (Codex 리뷰 4건 모두 반영). PR: https://github.com/Kimgyuilli/PeakCart/pull/29
+
+## 2026-05-04 — task-adr-observability-ssot (관측성 계약 SSOT ADR-0009 작성)
+
+**범위**: D-005 잔여 리스크 1차 봉합 후, "어느 surface 의 SSOT 가 어느 파일·레이어인가" 의 결정 부재를 ADR 로 못 박는 작업. Phase 4 모듈 분리 진입 전 처리 (D-005 자체 해결은 후속 task 범위로 분리).
+
+**Part A — 사전 감사 (P1, P2)**:
+- 9 surface 위치 재확인 (라인 인용): S1 `MetricsConfig.java:17-37`, S2 `application.yml:38-40`, S3 `application.yml:33-37` (회색지대 `application-k8s.yml:14-19`), S4 `SecurityConfig.java:47-48`, S5 `servicemonitor.yml:10-20`, S6.a~d `grafana-alerts.yml:17-52/53-83/84-110/111-137`
+- 자동 회귀 검증 범위 확정: 기존 `ObservabilityMetricsIntegrationTest` 가 S1/S2/S3 happy path/S4 happy path 검증. 잔여 4 공백 (S3 whitelist 정확도, S4 health 경로, S5 selector, S6 PromQL) 식별
+
+**Part B — Decision (P3, P4)**:
+- 3안 비교 (5축: 변경 범위 / ADR-0007 정합성 / Phase 4 비용 / 검증 가능성 / 채택·기각 사유)
+- **Alt B 채택** = surface 별 SSOT 명시 (현 위치 유지). Alt A (Java Config 통합) 는 후속 task 범위로 분리. Alt C (자동 생성) 는 Phase 4 진입 전 부담 과다로 기각
+
+**Part C — ADR-0009 본문 (P5, P6)**:
+- `docs/adr/0009-observability-contract-ssot.md` 신규 (Status `Proposed` → 동일 task 내 `Accepted` 전환)
+- §Decision 6 컬럼 강제 표 (모든 행 "TBD"/"추후 검토" 금지): Surface / 현 SSOT (파일:라인) / 본 task 변경 / Phase 4 owner / 이동·복제 금지 규칙 / 검증 수단
+- 본 task 변경 컬럼 = 모든 행 "없음" (코드/매니페스트 변경 0건. 통합은 후속 task)
+- Phase 4 owner: S1/S3/S4 = `peekcart-common-observability` 공통 모듈, S2 = 각 서비스 own (서비스 이름 = `application=` 값), S5 = per-service ServiceMonitor, S6 = `monitoring/shared/` 유지
+- 미검증 4 동작 공백 (S3 whitelist / S4 health / S5 selector / S6 PromQL) 을 후속 action id D5-V3~V6 으로 명시. 위치/복제 정적 검증은 D5-V1, D5-V2 로 별도 정의 (후속 task plan §3 source)
+- ADR-0007 Extends (Supersede 아님), ADR-0006 위치 분담 유지
+
+**Part D — 인덱스/참조 동기화 (P7~P10)**:
+- `docs/adr/README.md` INDEX 표에 행 9 추가
+- `bash docs/consistency-hints.sh` exit 0 (ADR 참조 파일 존재 확인. INDEX↔파일 frontmatter 자동 검증은 비대상 — 수동 확인)
+- `CLAUDE.md` §설정/YAML 프로파일 끝에 1줄 참조 추가 ("관측성 계약 SSOT — see ADR-0009"). plan P9 원안 ("1~2 문장 + 참조") 준수, 본문 미복제. 결정 빈도 낮은 영역에 별도 §관측성 계약 절을 두는 over-spec 회피
+- `docs/02-architecture.md` 변경 없음 — §관측성 또는 §설정 전용 절 부재 확인 (`§4-3 인프라 전략` 의 ADR-0006 참조 라인은 위치 분담만 다루고 SSOT 결정과는 다른 축)
+
+**Part E — 문서 동기화 (P11, P12)**:
+- TASKS.md: D-005 행 우선순위 변경 없음 (해결은 후속 task). "완료된 작업" 표에 본 task 행 추가 — 결정 문서화 완료, 코드 통합 미실행 명시
+- 본 PHASE3.md 엔트리
+
+**검증**:
+- §5 수동 체크리스트 (C1~C3, D1~D3, A1~A2, CQ1~CQ2): ADR 본문 작성 시 모든 컬럼/대안축 채움 확인
+- `bash docs/consistency-hints.sh` exit 0 통과
+- `./gradlew test` 영향 없음 (Java 코드 변경 0건)
+- 후속 task `task-d005-observability-consolidation` 작업 항목이 본 ADR §Decision 표에서 1:1 도출 가능 (CQ1, CQ2 충족)
+
+**브랜치**: `docs/adr-0009-observability-ssot`. 계획 리뷰 1 loop (Codex 6건 — P0:0/P1:4/P2:2 — 전체 반영).

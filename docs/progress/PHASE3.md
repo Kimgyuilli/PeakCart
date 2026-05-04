@@ -1151,4 +1151,4 @@ Run 2 (3 pods pre-warmed, HPA 일시 제거 + manual scale=3, DB 재시드):
 - `./gradlew test` 영향 없음 (Java 코드 변경 0건)
 - 후속 task `task-d005-observability-consolidation` 작업 항목이 본 ADR §Decision 표에서 1:1 도출 가능 (CQ1, CQ2 충족)
 
-**브랜치**: `docs/adr-0009-observability-ssot`. 계획 리뷰 1 loop (Codex 6건 — P0:0/P1:4/P2:2 — 전체 반영).
+**브랜치**: `docs/adr-0009-observability-ssot`. 계획 리뷰 1 loop (Codex 6건 — P0:0/P1:4/P2:2 — 전체 반영). /work 3 loops (Codex 12건 — P0:0/P1:8/P2:4 — 전체 반영). PR: https://github.com/Kimgyuilli/PeakCart/pull/30

@@ -53,3 +53,10 @@
   - p3: docs(plan): task-adr-observability-ssot plan + audit log
 - 사용자 결정: [1] 승인 (PR title 한글화 옵션 선택)
 - diff: .cache/diffs/diff-task-adr-observability-ssot-1777874687.patch
+
+## 2026-05-04 06:05 — /done applied (PR https://github.com/Kimgyuilli/PeakCart/pull/30)
+- 갱신: TASKS.md 완료된 작업 행에 PR URL 추가, PHASE3.md 엔트리에 /work loop summary + PR URL 추가
+- ADR Status: Accepted (전환 없음, 본 task 내 직접 Accepted)
+- Layer 1 영향: 02-architecture.md 변경 없음 (plan P10 확정 — §관측성 전용 절 부재)
+- D-005 자체: 후속 task 까지 미해결 유지 (의도)
+- commits 4 (p1 ADR / p2 docs / p3 plan+audit / done)

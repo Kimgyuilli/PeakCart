@@ -31,4 +31,5 @@
 | [0006](./0006-monitoring-stack-environment-separation.md) | Monitoring 스택 환경 분리 (base 에서 제외) | Accepted | Phase 3 Task 3-4+ | 02 |
 | [0007](./0007-yaml-profile-merge-principle.md) | YAML 프로파일 병합 원칙 — 연결 정보 vs 동작 정책 | Accepted | 전체 | CLAUDE.md |
 | [0008](./0008-outbox-trace-context-propagation.md) | Outbox Trace Context Propagation | Accepted | Phase 3 잔여 부채 | 02, 05 |
+| [0009](./0009-observability-contract-ssot.md) | 관측성 계약 SSOT 결정 | Accepted | 전체 | 02 |
 <!-- INDEX:END -->

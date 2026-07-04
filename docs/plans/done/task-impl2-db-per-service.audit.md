@@ -24,3 +24,8 @@
   - P2#3 base-only 정적 가드: product 프로파일 yml 정책키 부재 테스트(RetentionPolicyPlacementTest) + 전서비스 verify grep
 - diff: .cache/diffs/diff-task-impl2-db-per-service-1783125420.patch
 - raw: .cache/codex-reviews/diff-task-impl2-db-per-service-1783125566.json
+
+## 2026-07-04 02:12 — /done applied (PR https://github.com/Kimgyuilli/PeekCart/pull/72)
+- 커밋 3(feat/test/docs) + docs(progress) 1 = 4, push origin/feat/impl2-pr3-retention-scheduler
+- TASKS ② 🔄→✅ (#72, L-008/011 종결)·focus→③ / PHASE4 PR3 이력
+- ADR 변경 없음(ADR-0012 D5 기존)

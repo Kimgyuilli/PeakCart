@@ -55,7 +55,19 @@ app:
     secret: ${JWT_SECRET:peekcart-secret-key-must-be-at-least-256-bits-long-xxxxxxxxxxxxxxx}
     access-token-expiry: 1800000    # 30분 (ms) — 검증 전용이나 단일 계약(JwtAuthProperties) 바인딩
     refresh-token-expiry: 604800000 # 7일 (ms)
+  # processed_events 멱등성 보존 정책 (ADR-0012 D5 · 구현 ② PR3) — 동작 정책이므로 base 소유(ADR-0007).
+  idempotency:
+    retention: 7d          # floor 4창 max(=7d) 이상 — 미만이면 부팅 실패(fail-fast)
+    floor:
+      kafka-topic-retention: 7d
+      max-consumer-downtime: 24h
+      dlq-replay-window: 7d
+      backfill-replay-window: 7d
+    cleanup:
+      batch-size: 500
+      max-batches-per-run: 20
   outbox:
+    retention: 7d          # PUBLISHED outbox_events 보존기간 (구현 ② PR3)
     # 공유 DB 전환기 poller 소유권 분리 (Order peel): order 는 ORDER 이벤트만 발행.
     lock-name: orderOutboxPollingJob
     polling:

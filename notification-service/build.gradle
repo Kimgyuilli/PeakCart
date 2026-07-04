@@ -24,6 +24,15 @@ dependencies {
     // Redis — blacklist read adapter(common-auth) 런타임 + 서비스 자체 사용
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
+    // Bean Validation 런타임 — processed_events retention floor fail-fast(@Validated @ConfigurationProperties, 구현 ② PR3).
+    // notification 은 cleanup 소유(processed only)이나 web validation 미사용이라 미보유였음 → 추가.
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // ShedLock — processed_events retention cleanup 스케줄러(@SchedulerLock) + ShedLockConfig (구현 ② PR3).
+    // notification 은 소비 전용이라 outbox poller 가 없어 미보유였음 → cleanup 잡 도입으로 추가.
+    implementation 'net.javacrumbs.shedlock:shedlock-spring:6.3.1'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.3.1'
+
     // Micrometer Prometheus registry (observability 는 micrometer-core 만 api 노출)
     implementation 'io.micrometer:micrometer-registry-prometheus'
 

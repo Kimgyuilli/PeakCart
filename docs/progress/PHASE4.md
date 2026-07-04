@@ -533,3 +533,27 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **프로세스**: `/plan`(Codex 2 loop: PR2/PR3 재검토 5→2건 — ADR 거버넌스 전파·P9 ConfigMap 비밀번호·k8s rollout 검증·README 영향파일·Dockerfile assert·P9-sweep 처분표) → `/work`(diff split 3 chunks aggregate=ok, 4건[P1:1 GRANT DROP·P2:3 cleanDatabase 세션누수/ADR 위치/Order ERD] 전부 반영) → `/ship`([PR #71](https://github.com/Kimgyuilli/PeakCart/pull/71), 8 커밋). consistency precheck ok(ADR-0016 실재).
 
 **다음**: PR3 — retention/cleanup 스케줄러(`processed_events`/`outbox_events`, ShedLock 잡) + floor fail-fast 가드(D5 식 = kafka-retention/consumer-downtime/dlq-replay/backfill max). L-008/011 종결. (인스턴스 물리 분리·k8s 실배포 검증은 후속.)
+
+---
+
+## 구현 ② 서비스별 DB 분리 — PR3 (retention/cleanup 스케줄러) — [#72](https://github.com/Kimgyuilli/PeakCart/pull/72)
+
+> PR2(물리 스키마 분리) 후, `processed_events`(멱등성 창)·`outbox_events`(PUBLISHED)의 무한 증가를 ShedLock 배치 스케줄러로 닫는다. 보존기간이 D5 floor 미만이면 부팅 실패(fail-fast). ADR-0012 §D5 구현 → **L-008/011 종결**.
+
+**작업 (P16~P19)**:
+- **P16** `processed_events` retention 스케줄러(product/order/payment/notification). `common` 단일 typed `IdempotencyRetentionProperties` + **`@AssertTrue` cross-field**(4 `Duration` floor `max ≤ retention`) → 소유 서비스만 `@EnableConfigurationProperties` 활성(**user 누출 0** — `@ConfigurationPropertiesScan` 부재). floor 키 4종 base.
+- **P17** `outbox_events` cleanup 스케줄러(product/order/payment). predicate `status='PUBLISHED' AND published_at < cutoff` — **PENDING/FAILED/`published_at IS NULL` 자연 보존**(유실 금지).
+- **배치 삭제 계약**: `cutoff` 실행 시작 1회 계산 + `cleanup.batch-size`×`max-batches-per-run` 반복(unbounded DELETE 방지)·per-batch `@Transactional`(리포지토리 native `DELETE … LIMIT`). V2 마이그레이션에 삭제 기준 컬럼 인덱스(`processed_at`·`(status, published_at)`).
+- **서비스×잡 매트릭스(물리 배치)**: 잡 클래스를 소유 서비스 모듈에만 둠(기존 `global/*` 복제 패턴). processed=4·outbox=3·**user=0**(구조적 부재).
+- **notification 신규 ShedLock 인프라**: 소비 전용이라 미보유였음 → `shedlock-spring`/`-jdbc-template` dep + `ShedLockConfig` + `@EnableScheduling` + `shedlock` 테이블(V2).
+- **P18** 테스트: floor 검증·max·fail-fast(`ApplicationContextRunner`)·base-only 배치 가드·processed/outbox 다중 batch 삭제·PENDING/FAILED/NULL/미만료 보존·**5서비스 매트릭스**(product/order/payment=both, notification=processed only, user=cleanup·retention props bean 0).
+- **P19** `./gradlew build test` 8모듈 BUILD SUCCESSFUL(9m16s) + 신규 통합테스트 그린(3m6s).
+
+**핵심 결정**:
+- **floor = 교차필드 불변식**(Codex work 2회차 P1): 단순 필드 제약이 아니라 `max(4창) ≤ retention` → `@AssertTrue` cross-field. 구현 위치를 common 단일 typed properties 로 고정(5서비스 중복 정의·Duration 파싱 드리프트 차단).
+- **bean 활성화 = 소유 서비스 물리 배치**(택1 확정): auto-config/`@ConditionalOnProperty` 대신 클래스 물리 부재로 매트릭스 성립(user=0 자연).
+- **replay 정책**: TTL 만료 후 동일 eventId 재처리는 멱등 보장 밖 → 새 eventId/운영자 중복 확인(§2 트레이드오프).
+
+**프로세스**: `/plan`(Codex 2 loop: PR3 재검토 5→3건 — 매트릭스/outbox FAILED 보존/kafka-retention SSOT → 2회차 floor 구현위치·대량삭제 배치·활성화 메커니즘, 전부 반영) → `/work`(diff single 리뷰 1 loop, 0 P0/0 P1/**3 P2**[5서비스 매트릭스·outbox 다중 batch·base-only 정적 가드] 자동통과분 전부 반영·검증) → `/ship`([PR #72](https://github.com/Kimgyuilli/PeakCart/pull/72), 3 커밋). consistency precheck ok.
+
+**다음**: 구현 ③ Spring Cloud Gateway(선행 ADR-0013). 후속 비차단: 인스턴스 물리 분리(URL 교체 가역 승격)·k8s 실배포 rollout 검증·D-002 격리 재측정.

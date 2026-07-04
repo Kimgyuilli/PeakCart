@@ -15,6 +15,9 @@ dependencies {
 
     // implementation — common 내부 전용 (공개 시그니처 미노출, 소비자는 자체 선언)
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'  // RedisConfig
+    // Bean Validation 어노테이션 — retention properties(@AssertTrue/@NotNull) 컴파일용.
+    // 런타임 검증(hibernate-validator)은 소유 서비스(starter-validation 보유)에서 수행 → compileOnly.
+    compileOnly 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.redisson:redisson:3.27.0'                             // RedissonConfig · DistributedLockManager
     implementation 'org.springframework.security:spring-security-core'        // MdcFilter(SecurityContextHolder)
 

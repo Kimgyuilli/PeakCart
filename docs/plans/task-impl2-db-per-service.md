@@ -97,6 +97,7 @@ peel 선례로 각 서비스 통합테스트는 이미 `@TestPropertySource(flyw
 - **베이스라인 consolidation**: 과거 13개 마이그레이션 이력 단절(그린필드라 무영향) vs 단순·정확. (a) 채택 권고.
 - **3 PR**: PR1(FK drop, 단일 DB·저위험 그린 체크포인트) → PR2(물리 분리, 큰 변경) → PR3(retention). 각 PR 독립 롤백 가능. 대안 서비스별 5+1 PR 은 공유 인프라(k8s mysql·CI·gradle) 증분 전환이 어색해 기각(사용자 게이트).
 - **결과적 일관성 심화**: 교차 FK 제거로 DB 레벨 무결성 보장 상실 → 이벤트/로컬 캐시로 대체(ADR-0012 D2/D3, 이미 strangler 에서 수용). 고아 참조(없는 user_id 등)는 애플리케이션/이벤트 정합이 책임.
+- **retention 만료 후 replay(PR3·Codex 4차 P2 #5·ADR-0012 §98)**: `processed_events` TTL 경과 후 **동일 eventId 재처리는 멱등 보장 대상 밖**이다 → replay 는 **새 eventId 발행 또는 운영자 중복 확인 절차**를 따른다(floor 식이 정상 운영의 재처리 창을 이미 덮으므로 TTL 내 replay 는 멱등 보호됨). `outbox_events` PUBLISHED 삭제는 **감사 이력 보존기간 vs 저장 용량 절감**의 트레이드오프 — retention 은 감사 필요 최소기간 이상으로 잡는다.
 
 ## 3. 작업 항목
 
@@ -123,16 +124,41 @@ peel 선례로 각 서비스 통합테스트는 이미 `@TestPropertySource(flyw
 
 ### PR3 — retention/cleanup 스케줄러 (D5 · L-008/011)
 
-- [ ] **P16.** `processed_events` retention 스케줄러(ShedLock 잡, 발행/소비 서비스별): 보존기간 `app.idempotency.retention` 경과 행 삭제. **floor 가드 = fail-fast(경고 아님, Codex P2 #4)**: `retention < max(floor 입력)` 이면 **부팅 실패**(`@PostConstruct`/`@Validated` ConfigurationProperties). floor 입력 설정키(전부 `application.yml` base — 동작 정책, ADR-0007): `app.idempotency.floor.kafka-topic-retention`·`max-consumer-downtime`·`dlq-replay-window`·`backfill-replay-window`. D5 식 = 이 4값의 `max`. 기본값은 base 에 명시(예: 7d/24h/7d/7d → floor 7d), `retention` 기본은 floor 이상.
-- [ ] **P17.** `outbox_events` cleanup 스케줄러(ShedLock 잡, 발행 서비스별): PUBLISHED 상태 + `app.outbox.retention`(N일) 경과 행 삭제. 미발행(PENDING)·실패 행은 보존.
-- [ ] **P18.** 테스트: 만료 행 삭제 / 미만료·PENDING 보존 / **floor 미만 설정 시 부팅 실패(fail-fast)** 단위테스트 + floor 4입력 조합별 `max` 계산 테스트(Codex P2 #4) + floor 설정키가 base 에만 있고 프로파일 override 가 ADR-0007(연결정보=프로파일·정책=base) 위반 안 함을 검증 + ShedLock 단일 실행 통합테스트(서비스 1곳 대표).
-- [ ] **P19.** 빌드/검증: `./gradlew build test` 그린. ADR-0012 D5 floor 식 충족을 plan/audit 에 기록(L-008/011 종결).
+> **서비스×잡 소유 매트릭스 (Codex 4차 P1 #1 — 오배선 차단, 소유표 §2:29-33 근거)**: cleanup 잡은 **자기 스키마에 해당 테이블을 소유한 서비스에만** 뜬다. 5 스키마 분리 후 notification 에 outbox cleanup 이 뜨거나 user 에 processed cleanup 이 뜨는 오배선을 계획 단계에서 차단.
+>
+> | 서비스 | processed cleanup (P16) | outbox cleanup (P17) | ShedLock lock-name |
+> |---|---|---|---|
+> | product | ✅ | ✅ | `processedEventsCleanupJob` / `outboxEventsCleanupJob` |
+> | order | ✅ | ✅ | 〃 |
+> | payment | ✅ | ✅ | 〃 |
+> | notification | ✅ | ❌ (outbox_events 미소유) | `processedEventsCleanupJob` |
+> | user | ❌ (둘 다 미소유) | ❌ | (잡 없음) |
+>
+> 각 cleanup bean 은 자기 서비스 datasource(자기 스키마)만 접근. lock-name 은 잡별 상수(스키마 격리로 잡 인스턴스가 서비스마다 독립 → 서비스 접두 불요, 기존 `@SchedulerLock(name="${app.outbox.lock-name:...}")` 패턴 준수).
+>
+> **bean 활성화 메커니즘 결정(Codex 2회차 P2 #3 — 택1 확정, ADR-0007 조건부활성 §49-55)**: cleanup 잡/스케줄러 클래스는 **소유 서비스 모듈에만 물리 배치**(기존 `global/outbox/*` 서비스별 복제 패턴 일관 — auto-config/`@ConditionalOnProperty` 도입 대신 물리 부재로 매트릭스 성립). user 모듈엔 잡 클래스 자체가 없어 **user=0 자연 성립**, notification 은 processed cleanup 클래스만 배치. floor 검증만 common 공유(아래 P16). → 컨텍스트 테스트는 "존재해야 할 잡 클래스가 스캔돼 bean 화됐는가 / 없어야 할 곳엔 부재인가"를 물리 배치 기준으로 판정.
+>
+> **오배선 방지 검증(P18)**: 5개 서비스 ApplicationContext 테스트로 "매트릭스대로의 cleanup 잡 bean 만 존재"(user=0·notification=processed only) 확인.
+
+- [ ] **P16.** `processed_events` retention 스케줄러(ShedLock 잡, **product/order/payment/notification** — 매트릭스): 보존기간 `app.idempotency.retention` 경과 행 삭제. **floor 가드 = fail-fast(경고 아님, Codex P2 #4)**: `retention < max(floor 입력)` 이면 **부팅 실패**(`@PostConstruct`/`@Validated` ConfigurationProperties). floor 입력 설정키(전부 `application.yml` base — 동작 정책, ADR-0007): `app.idempotency.floor.kafka-topic-retention`·`max-consumer-downtime`·`dlq-replay-window`·`backfill-replay-window`. D5 식 = 이 4값의 `max`. 기본값은 base 에 명시(예: 7d/24h/7d/7d → floor 7d), `retention` 기본은 floor 이상. **Kafka topic retention 입력의 SSOT 연결(Codex 4차 P1 #3)**: `floor.kafka-topic-retention` 은 실제 토픽 설정과 자동 동기화되지 않는 **수동 선언값**이다 → fail-fast 는 4 floor 입력 간 `max ≤ retention` 만 잡고, 입력값 자체가 실제 토픽 retention 이상인지는 **audit 판정으로 명시**(smoke/운영에서 topic `retention.ms` 조회 ≥ `floor.kafka-topic-retention`; 불일치는 운영 드리프트로 plan/audit 기록, §5 PR3).
+    - **floor 검증 구현 위치 고정(Codex 2회차 P1 #1 — 교차필드 불변식)**: D5 는 `max(4 floor 창) ≤ retention` 이라는 **교차필드 불변식**이지 단순 필드 제약이 아니다 → `common` 에 단일 typed `@ConfigurationProperties`(4 floor + `retention` 을 `Duration` 으로) + **`@AssertTrue` cross-field validator**(4 `Duration` 의 `max` 계산 후 `retention` 이상 검증)로 정의. 5서비스 중복 정의·기본값/`Duration` 파싱/비교 로직 드리프트 차단. cleanup 잡 소유 4서비스(product/order/payment/notification)만 `@EnableConfigurationProperties`/`@Import` 로 활성 → **부팅 시 fail-fast**. user 는 미활성(floor 검증 없음). (스케줄러 잡 클래스 자체는 소유 서비스 물리 배치 — 매트릭스 note.)
+    - **대량 삭제 배치 계약(Codex 2회차 P1 #2)**: unbounded 단일 `DELETE` 금지(큰 테이블 장기 락·긴 트랜잭션·스케줄러 중첩·consumer 의 `processed_events` 기록경로 간섭). `cutoff` 은 **실행 시작 시 1회 계산**, `app.idempotency.cleanup.batch-size`·`max-batches-per-run`(base 기본값, 동작 정책=ADR-0007) 으로 **작은 batch 반복 삭제**(P17 outbox 삭제도 동일 배치 계약 공유). 삭제 기준 컬럼(`processed_events` 처리시각·`outbox_events.published_at`) 인덱스 존재 확인/필요 시 추가(§4 영향파일).
+- [ ] **P17.** `outbox_events` cleanup 스케줄러(ShedLock 잡, **product/order/payment** — 매트릭스, notification/user 제외): **predicate = `status = PUBLISHED AND published_at < cutoff`** 로만 삭제(`cutoff = now - app.outbox.retention`). **PENDING·FAILED·`published_at IS NULL` 행은 보존**(OutboxEventStatus 는 PENDING/PUBLISHED/FAILED 3종 — grep 확정, FAILED=retry 초과 `docs/04-design-deep-dive.md:165-169`). 미발행/실패 유실 금지(Codex 4차 P1 #2).
+- [ ] **P18.** 테스트:
+    - 만료(cutoff 이전) PUBLISHED 행 삭제 / 미만료 PUBLISHED 보존.
+    - **PENDING 보존 + FAILED 보존(Codex 4차 P1 #2 — retry 초과 실패행 유실 회귀) + `published_at IS NULL` 보존**(predicate 가 status 만 보고 삭제하지 않도록).
+    - **floor 미만 설정 시 부팅 실패(fail-fast)** 단위테스트 + floor 4입력 조합별 `max` 계산 테스트(Codex P2 #4) + **base 값(`7d`/`24h` 등) `Duration` 바인딩·파싱 검증**(common typed properties + `@AssertTrue` cross-field, Codex 2회차 P1 #1).
+    - **대량 삭제 배치 테스트(Codex 2회차 P1 #2)**: 만료 행 > `batch-size` 일 때 **다중 batch 반복 삭제** + 미만료 보존 + `cutoff` 실행 시작 1회 고정(반복 중 신규 행 미삭제).
+    - **정책키 base-only 검증(Codex P2 #4 확장)**: `app.idempotency.retention`·`app.outbox.retention`·`app.idempotency.floor.*` 전부 base `application.yml` 소유이며 `application-local.yml`/`application-k8s.yml` 에 override 부재(grep) — ADR-0007(정책=base·연결정보=프로파일) 준수.
+    - **서비스×잡 매트릭스 검증(Codex 4차 P1 #1)**: 5개 서비스 ApplicationContext 테스트로 cleanup 잡 bean 이 매트릭스대로만 존재(user=0·notification=processed only).
+    - ShedLock 단일 실행 통합테스트(발행 서비스 1곳 대표).
+- [ ] **P19.** 빌드/검증: `./gradlew build test` 그린. ADR-0012 D5 floor 식 충족 + Kafka topic retention ≥ floor 입력 audit 판정(P16)을 plan/audit 에 기록(L-008/011 종결).
 
 ## 4. 영향 파일
 
 **신규(PR1)**: `common/src/main/resources/db/migration/V13__drop_cross_domain_fks.sql`.
 **신규(PR2)**: 5× `<svc>/src/main/resources/db/migration/V1__init_<svc>.sql` · k8s mysql init ConfigMap(`k8s/base/infra/mysql/`) · (compose init SQL) · `docs/adr/0016-*.md`(예약 모델 = 별도 stock_reservations 테이블, ADR-0012 Partially Superseded — P14).
-**신규(PR3)**: 발행/소비 서비스별 retention/cleanup 스케줄러 클래스(`<svc>/.../infrastructure/...` 또는 global 복제 패턴) + 테스트.
+**신규(PR3)**: (a) retention/cleanup 스케줄러 잡 클래스 — **소유 서비스 모듈에 물리 배치**(processed=product/order/payment/notification · outbox=product/order/payment, `<svc>/.../infrastructure/...` global 복제 패턴, user 없음 — 매트릭스 note) · (b) `common` 단일 typed floor `@ConfigurationProperties` + `@AssertTrue` cross-field validator(4 `Duration` max ≤ retention, fail-fast) — 소유 4서비스가 `@EnableConfigurationProperties`/`@Import` 로 활성 · (c) 필요 시 삭제 기준 컬럼 인덱스 마이그레이션(`processed_events` 처리시각·`outbox_events.published_at`) + 테스트(매트릭스 컨텍스트·FAILED/PENDING/NULL 보존·배치 다중삭제·floor Duration 파싱/max·정책키 base-only·ShedLock). **수정(PR3)**: base `application.yml`(`app.idempotency.retention`·`app.outbox.retention`·`app.idempotency.floor.*`·`app.idempotency.cleanup.batch-size`·`max-batches-per-run` — 정책=base, 소유 서비스별).
 **수정(PR2)**: 5× `application.yml`(flyway.enabled:true) · 5× `application-k8s.yml`·`application-local.yml`(URL/계정 per-schema) · 5× k8s `secret.yml`(DB 자격증명 분화) · `k8s/base/infra/mysql/mysql.yml`(단일 DB 제거·init) · order-service B5 주석/특권 제거 · OutboxPolling 코드+테스트(allowlist 제거) · `build.gradle`(flyway 플러그인/태스크 제거) · `scripts/docker-health-smoke.sh`(flyway 스텝 제거) · `docker-compose.yml`(mysql init) · k8s 비-order deployment(initContainer 게이트 제거) · `docs/adr/0012-phase4-db-event-saga-contract.md`(**status→`Partially Superseded by ADR-0016`** + 무효화 범위, update-log 아님 — P14) · `docs/adr/README.md`(**인덱스: ADR-0012 status 갱신 + ADR-0016 행 추가** — Codex 3차 P2#2) · `docs/05-data-design.md`·`docs/02-architecture.md` · (이미지 검증 시 필요하면) `Dockerfile` COPY 컨텍스트([[project_multimodule_dockerfile_context]] — 마이그레이션 위치 이동분).
 **삭제(PR2)**: `common/src/main/resources/db/migration/` 전체(V1~V13) · `build.gradle` flywayMigrateShared 블록.
 **불변**: 도메인 로직(엔티티/서비스) · 이벤트 토폴로지(토픽/consumer group) · common payload DTO · Dockerfile(COPY 컨텍스트는 마이그레이션 위치 이동분 확인 — [[project_multimodule_dockerfile_context]]).
@@ -151,14 +177,15 @@ peel 선례로 각 서비스 통합테스트는 이미 `@TestPropertySource(flyw
     - order-service 가 더 이상 타 서비스 선행 마이그레이터 아님(독립 cold-start).
   - smoke: 각 `<svc>:ci` 가 flyway 이미지 스텝 없이 자기 스키마 마이그레이션·헬스 그린. CI 이미지 매트릭스 그린.
   - poller(B8b): 각 서비스 outbox poller 가 allowlist 없이 자기 스키마 PENDING 만 발행(타 스키마 미접근 = 물리 격리). 중복 발행 0.
-- **PR3**: 만료 `processed_events`/`outbox_events` 행 삭제 + 미만료/PENDING 보존(단위테스트). floor 미만 설정 시 가드 발화. ShedLock 단일 실행(통합테스트 1곳). `./gradlew build test` 그린.
+- **PR3**: 만료 `processed_events`/`outbox_events`(PUBLISHED+`published_at`<cutoff) 행 삭제 + 미만료/PENDING/**FAILED**/`published_at IS NULL` 보존(단위테스트). floor 미만 설정 시 가드 발화(부팅 실패). **정책키 base-only** grep(retention·outbox.retention·floor.* 프로파일 override 0, ADR-0007). **서비스×잡 매트릭스** 컨텍스트 테스트(user=0·notification=processed only). **다중 batch 삭제**(만료>batch-size)·`cutoff` 실행 시작 1회 고정(Codex 2회차 P1 #2). **Kafka topic retention ≥ `floor.kafka-topic-retention`** audit 판정(토픽 `retention.ms` 조회 비교, Codex 4차 P1 #3). ShedLock 단일 실행(통합테스트 1곳). `./gradlew build test` 그린.
 
 ## 6. 완료 조건
 
 - 5 스키마(`peekcart_<svc>`) + 5 계정 물리 분리, 각 서비스 자기 Flyway 이력으로 자기 테이블만 마이그레이션·`validate` 부팅. 교차 FK 6개 제거(ID 참조 대체).
 - B5 전환기 단일 마이그레이터(order-service)·`:common/db/migration`·`flywayMigrateShared` 소멸. B8b poller allowlist 제거(스키마 분리로 자연 해소).
 - k8s mysql init(5 DB/계정)·per-service DB secret·initContainer 게이트 제거. CI smoke 가 서비스별 자기 스키마로 부팅(flyway 이미지 스텝 소멸).
-- D5 retention/cleanup 스케줄러(processed_events·outbox_events) + floor **fail-fast** 가드(미만 시 부팅 실패) → L-008/011 종결.
+- D5 retention/cleanup 스케줄러(processed_events·outbox_events) + floor **fail-fast** 가드(미만 시 부팅 실패) → L-008/011 종결. 서비스×잡 매트릭스대로만 배선(user=잡 없음·notification=processed only). outbox cleanup 은 `PUBLISHED AND published_at<cutoff` 만 삭제(PENDING/FAILED/NULL 보존).
+- retention 만료 후 동일 eventId replay 는 멱등 보장 밖(새 eventId/운영자 중복 확인) 정책 명문화(§2 트레이드오프). outbox PUBLISHED 삭제 감사보존 트레이드오프 기록.
 - Layer 1 동기화(05-data-design Product outbox/processed·02-architecture DB-per-service).
 - `./gradlew build test` 8모듈 그린 + 물리 격리(GRANT·flyway_schema_history per-schema) 검증.
 - 인스턴스 물리 분리(5 인스턴스)·Gateway(③)·Saga 잔여(④)는 범위 외(후속 명시).

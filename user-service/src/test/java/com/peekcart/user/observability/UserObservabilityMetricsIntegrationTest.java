@@ -9,6 +9,9 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import com.peekcart.support.TestRsaKeys;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -32,6 +35,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @DisplayName("user-service 관측성 계약 회귀 테스트")
 class UserObservabilityMetricsIntegrationTest {
+
+    /** 개인키 커밋 금지(ADR-0013 D2) — 런타임 생성 키쌍으로 서명/검증 키를 주입한다. */
+    @DynamicPropertySource
+    static void jwtKeys(DynamicPropertyRegistry registry) {
+        TestRsaKeys.register(registry);
+    }
 
     @Container
     @ServiceConnection

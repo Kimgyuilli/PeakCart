@@ -40,4 +40,11 @@
   - #4(P2) 테스트 보강 → alg=none·RS256 kid부재·HS256(비레거시) 거부 + JWKS modulus 선행0 트리밍(256B) 검증
 - diff: .cache/diffs/diff-task-impl3-spring-cloud-gateway-1783143202.patch
 - raw: .cache/codex-reviews/diff-task-impl3-spring-cloud-gateway-1783143259.json
-- 검증: 반영분 targeted 테스트 그린(verifier 단위 + user/notification 통합), 전체 build test 재확인 중
+- 검증: 반영분 targeted 테스트 그린(verifier 단위 + user/notification 통합), 전체 build test BUILD SUCCESSFUL(8모듈, 회귀 0)
+
+## 2026-07-04 — /ship (PR #73)
+- drift: `partially_live`(신규/삭제 파일 다수 오탐, blindspot 백로그) — main..HEAD 0 커밋 확인 후 진행
+- precheck: ok(warnings 0)
+- 커밋: 3 partition(docs/feat/test) + /done 1(docs progress) = 4 커밋, untracked 잔여 0
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/73
+- /done applied: TASKS ③ 🔲→🔄(PR1 인라인) · PHASE4 PR1 이력 추가. ADR-0013 Accepted 유지(D1/D2 부분 구현). Layer1 미변경(RS256 full 상태는 gateway 완료 후)

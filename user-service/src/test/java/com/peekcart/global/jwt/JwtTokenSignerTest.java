@@ -2,10 +2,11 @@ package com.peekcart.global.jwt;
 
 import com.peekcart.global.auth.TokenClaims;
 import com.peekcart.global.auth.TokenIssuer;
+import com.peekcart.support.TestRsaKeys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.FileSystemResource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,13 +16,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * RS256 발급 서명 + kid 헤더 + 왕복 검증 + 서명 latency 측정 (ADR-0013 D1/D2, 구현 ③ PR1 P2/P5).
- * dev 키쌍(classpath)으로 발급한 토큰을 common-auth verifier 가 kid 로 검증한다.
+ * 키 자료를 커밋하지 않기 위해 런타임 생성 키쌍({@link TestRsaKeys})으로 발급하고 verifier 가 kid 로 검증한다.
  * latency 는 KMS 격상(D2 후속) 판단 근거로 p50/p95 를 기록한다(측정만, 전환 미결정).
  */
 @DisplayName("JwtTokenSigner RS256 발급 + latency 측정")
 class JwtTokenSignerTest {
 
-    private static final String KID = "peekcart-dev-2026";
+    private static final String KID = TestRsaKeys.KID;
 
     private JwtTokenSigner signer;
     private JwtTokenVerifier verifier;
@@ -30,11 +31,11 @@ class JwtTokenSignerTest {
     void setUp() {
         JwtAuthProperties authProps = new JwtAuthProperties(
                 "peekcart-secret-key-must-be-at-least-256-bits-long-xxxxxxxxxxxxxxx", 1_800_000, 604_800_000);
+        // 런타임 생성 키쌍(임시 파일) — 개인키를 저장소에 커밋하지 않는다(ADR-0013 D2)
         JwtKeyProperties keyProps = new JwtKeyProperties(
                 KID,
-                // 개인키는 :common testFixtures(test-scope, 산출물 비포함) — 공개키(common main)와 동일 키쌍
-                new ClassPathResource("keys/jwt-test-private.pem"),
-                List.of(new JwtKeyProperties.PublicKeyEntry(KID, new ClassPathResource("keys/dev-jwt-public.pem"))),
+                new FileSystemResource(TestRsaKeys.privateKeyFile()),
+                List.of(new JwtKeyProperties.PublicKeyEntry(KID, new FileSystemResource(TestRsaKeys.publicKeyFile()))),
                 false);
 
         signer = new JwtTokenSigner(authProps, keyProps);

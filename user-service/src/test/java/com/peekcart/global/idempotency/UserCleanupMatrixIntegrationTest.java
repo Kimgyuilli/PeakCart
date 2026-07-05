@@ -7,6 +7,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.ApplicationContext;
+import com.peekcart.support.TestRsaKeys;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -26,12 +29,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @TestPropertySource(properties = {
         "spring.flyway.enabled=true",
-        "spring.flyway.locations=classpath:db/migration",
-        // 개인키는 산출물 비포함 → 테스트는 :common testFixtures 키로 서명(ADR-0013 D2)
-        "app.jwt.rs256.private-key-location=classpath:keys/jwt-test-private.pem"
+        "spring.flyway.locations=classpath:db/migration"
 })
 @DisplayName("서비스×잡 매트릭스 — user (cleanup 잡 0)")
 class UserCleanupMatrixIntegrationTest {
+
+    /** 개인키 커밋 금지(ADR-0013 D2) — 런타임 생성 키쌍으로 서명/검증 키를 주입한다. */
+    @DynamicPropertySource
+    static void jwtKeys(DynamicPropertyRegistry registry) {
+        TestRsaKeys.register(registry);
+    }
 
     @Container
     @ServiceConnection

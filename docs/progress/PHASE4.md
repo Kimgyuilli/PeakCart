@@ -557,3 +557,28 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **프로세스**: `/plan`(Codex 2 loop: PR3 재검토 5→3건 — 매트릭스/outbox FAILED 보존/kafka-retention SSOT → 2회차 floor 구현위치·대량삭제 배치·활성화 메커니즘, 전부 반영) → `/work`(diff single 리뷰 1 loop, 0 P0/0 P1/**3 P2**[5서비스 매트릭스·outbox 다중 batch·base-only 정적 가드] 자동통과분 전부 반영·검증) → `/ship`([PR #72](https://github.com/Kimgyuilli/PeakCart/pull/72), 3 커밋). consistency precheck ok.
 
 **다음**: 구현 ③ Spring Cloud Gateway(선행 ADR-0013). 후속 비차단: 인스턴스 물리 분리(URL 교체 가역 승격)·k8s 실배포 rollout 검증·D-002 격리 재측정.
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR1 (RS256/JWKS dual-validation) — [#73](https://github.com/Kimgyuilli/PeakCart/pull/73)
+
+> ADR-0013 D1/D2 의 크립토 기반. HS256 **대칭키** 공유 → RS256 **비대칭키**: User 만 개인키 서명, 모든 서비스가 공개키(kid)로 검증. Gateway 중앙 검증·header-trust 는 PR3, 본 PR 은 서비스 in-process 검증을 유지하며 RS256 을 얹는다(전환기 dual-validation).
+
+**작업 (P1~P5)**:
+- **P1** `JwtKeyProperties`(`app.jwt.rs256`) + `PemKeyLoader`(PKCS#8/SPKI PEM→RSA) + `RsaPublicKeyRegistry`(kid→공개키, JWKS 원본). common-auth `@EnableConfigurationProperties` 확장.
+- **P2** `JwtTokenSigner`(User 전속) RS256 서명 + JWT 헤더 `kid`. 발급은 RS256 단일.
+- **P3** `JwtTokenVerifier` dual-validation — jjwt `keyLocator` 로 헤더 `alg`/`kid` 검사: RS256 → registry kid 선택(미등록 거부), 전환기 **HS512** fallback(레거시 alg 정확 한정, 기본 off), 그 외(none/HS256/HS384) allow-list 거부.
+- **P4** User JWKS endpoint `/.well-known/jwks.json`(kty/use/alg/kid/n/e, base64url 선행0 트리밍) + permitAll.
+- **P5** 테스트: verifier 8종(RS256 왕복·미등록 kid·위조·kid부재·HS512 on/off·HS256 거부·none)·JWKS 스키마·서명 latency p50/p95.
+
+**핵심 결정**:
+- **fallback = HS512 정확 한정**(Codex work P1 #1): 512bit 시크릿이라 레거시 토큰은 실제 HS512(HS256 아님, plan-verify-against-code) → allow-list 과확장(`startsWith("HS")`) 방지.
+- **fallback 기본 off**(Codex work P1 #2): base yml `hs256-fallback-enabled: false`(RS256 단일). 전환 배포·전환 테스트만 명시 활성화(bounded), PR4 에서 제거.
+- **개인키 산출물 비포함**(Codex work P1 #3, ADR-0013 D2): 개인키를 main resources 에서 제거 → 테스트는 `:common` testFixtures(test-scope), 공개키는 `:common` main(비밀 아님, JWKS 공개). 로컬 dev=gitignored 파일 마운트, k8s CSI=PR3.
+- 기존 HS 서명 통합테스트는 dual-validation 으로 재작성 없이 그린(fallback opt-in 전환창 시뮬레이션).
+
+**검증**: `./gradlew build test` 8모듈 BUILD SUCCESSFUL(회귀 0).
+
+**프로세스**: `/plan`(Codex 2 loop: 6→2 수렴 — JWKS 운영조건·refresh 데이터 처분·NetworkPolicy 검증·ADR immutable(S9 기존재)·B11·KMS latency → 2차 P6 근거·B5 키위치) → `/work`(PR1 diff single 리뷰 1 loop, 4건[P1×3 보안 posture·P2×1 테스트] 전량 반영·재검증) → `/ship`([PR #73](https://github.com/Kimgyuilli/PeakCart/pull/73), 3 커밋 docs/feat/test). consistency precheck ok.
+
+**다음**: PR2 Refresh Token Reuse Detection(D4 — family_id/status 상태전이·family deny Redis) → PR3 Gateway 모듈+header-trust(D3) → PR4 관측성 S9+HS 제거(D5).

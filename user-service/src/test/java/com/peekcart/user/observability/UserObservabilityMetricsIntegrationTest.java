@@ -27,7 +27,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = {
         "management.endpoint.health.probes.enabled=true",
         "spring.flyway.enabled=true",
-        "spring.flyway.locations=classpath:db/migration"
+        "spring.flyway.locations=classpath:db/migration",
+        // 개인키는 산출물 비포함 → 테스트는 :common testFixtures 키로 서명(ADR-0013 D2)
+        "app.jwt.rs256.private-key-location=classpath:keys/jwt-test-private.pem"
 })
 @Testcontainers
 @DisplayName("user-service 관측성 계약 회귀 테스트")

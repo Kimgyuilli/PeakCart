@@ -48,7 +48,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Import(IntegrationTestConfig.class)
 @TestPropertySource(properties = {
         "spring.flyway.enabled=true",
-        "spring.flyway.locations=classpath:db/migration"
+        "spring.flyway.locations=classpath:db/migration",
+        // 전환기 HMAC(HS512) fallback 검증 — bounded 전환창 시뮬레이션(게이트 h). 기본값은 false(RS256 단일).
+        "app.jwt.rs256.hs256-fallback-enabled=true"
 })
 @DisplayName("Notification 보안 통합 테스트")
 class NotificationSecurityIntegrationTest {

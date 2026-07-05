@@ -49,7 +49,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @TestPropertySource(properties = {
         "spring.flyway.enabled=true",
-        "spring.flyway.locations=classpath:db/migration"
+        "spring.flyway.locations=classpath:db/migration",
+        // 개인키는 산출물 비포함 → 테스트는 :common testFixtures 키로 서명(ADR-0013 D2)
+        "app.jwt.rs256.private-key-location=classpath:keys/jwt-test-private.pem",
+        // 전환기 HMAC(HS512) fallback 검증 — bounded 전환창 시뮬레이션(게이트 h)
+        "app.jwt.rs256.hs256-fallback-enabled=true"
 })
 @DisplayName("user-service 보안 통합 테스트")
 class UserSecurityIntegrationTest {

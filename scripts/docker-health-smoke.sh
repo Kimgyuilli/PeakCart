@@ -32,6 +32,7 @@ COMPOSE=(docker compose -p "$COMPOSE_PROJECT_NAME")
 cleanup() {
     docker rm -f "$APP_CONTAINER" >/dev/null 2>&1 || true
     "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+    rm -rf "${SMOKE_KEY_DIR:-}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -72,6 +73,18 @@ for _ in {1..60}; do
 done
 "${COMPOSE[@]}" exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null
 
+# RS256 서명 개인키 런타임 주입(구현 ③ PR1): User(발급) 컨테이너는 부팅 시 개인키를 요구(fail-fast).
+# 개인키는 이미지에 포함하지 않으므로(ADR-0013 D2) smoke 는 throwaway 키를 런타임 생성·마운트해
+# operator 주입을 시뮬레이션한다. 검증 공개키는 이미지 classpath 에 있어 발급 서비스가 아닌 컨테이너는 무시한다.
+# (부팅 health 만 확인하므로 이 키가 공개키와 짝일 필요는 없다 — 토큰 왕복은 단위/통합 테스트가 검증.)
+# 초기 cleanup 이후에 생성해야 삭제되지 않는다(SMOKE_KEY_DIR 은 trap cleanup 에서만 정리).
+SMOKE_KEY_DIR="${SMOKE_KEY_DIR:-$(mktemp -d)}"
+mkdir -p "$SMOKE_KEY_DIR"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$SMOKE_KEY_DIR/jwt-private.pem" 2>/dev/null
+# 컨테이너 non-root 유저가 마운트를 traverse·read 할 수 있게 (mktemp -d 는 700) 디렉토리/파일 권한 개방
+chmod 755 "$SMOKE_KEY_DIR"
+chmod 644 "$SMOKE_KEY_DIR/jwt-private.pem"
+
 echo "[D-012/L-015] starting app container"
 # 자격증명 런타임 주입(GP-2 work #2/#3): k8s 프로파일은 SLACK_WEBHOOK_URL(notification)·TOSS_*(payment)
 # 를 no-default 로 강제(fail-fast). committed Secret 에는 placeholder 를 두지 않으므로(operator/external
@@ -85,6 +98,8 @@ docker run -d \
     -e SLACK_WEBHOOK_URL="${SMOKE_SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/smoke}" \
     -e TOSS_SECRET_KEY="${SMOKE_TOSS_SECRET_KEY:-test_sk_smoke}" \
     -e TOSS_WEBHOOK_SECRET="${SMOKE_TOSS_WEBHOOK_SECRET:-test_webhook_smoke}" \
+    -v "${SMOKE_KEY_DIR}:/smoke-keys:ro" \
+    -e JWT_PRIVATE_KEY_LOCATION="file:/smoke-keys/jwt-private.pem" \
     "$IMAGE" >/dev/null
 
 echo "[D-012/L-015] waiting for /actuator/health"

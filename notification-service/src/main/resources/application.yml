@@ -49,6 +49,13 @@ app:
     secret: ${JWT_SECRET:peekcart-secret-key-must-be-at-least-256-bits-long-xxxxxxxxxxxxxxx}
     access-token-expiry: 1800000    # 30분 (ms) — 검증 전용 서비스이나 단일 계약(JwtAuthProperties) 바인딩
     refresh-token-expiry: 604800000 # 7일 (ms)
+    # RS256 검증 계약 (ADR-0013 D1) — 검증 전용(개인키 없음). k8s 는 공개키 파일 마운트 오버라이드(구현 ③ PR3).
+    rs256:
+      active-kid: peekcart-dev-2026
+      hs256-fallback-enabled: false
+      public-keys:
+        - kid: peekcart-dev-2026
+          location: classpath:keys/dev-jwt-public.pem
   # processed_events 멱등성 보존 정책 (ADR-0012 D5 · 구현 ② PR3) — 동작 정책이므로 base 소유(ADR-0007).
   # notification 은 소비 전용(outbox 미소유) → outbox retention 없음.
   idempotency:

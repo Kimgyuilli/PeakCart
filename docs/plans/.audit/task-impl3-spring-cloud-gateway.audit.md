@@ -106,3 +106,9 @@
 - 검증: :user-service:test RefreshTokenReuseIntegrationTest BUILD SUCCESSFUL
 - raw: .cache/codex-reviews/diff-task-impl3-spring-cloud-gateway-1783305262.json
 - tokens: 59,514 (work 누적 135,943)
+
+## 2026-07-06 — /ship (PR #74)
+- precheck: ok(warnings 0)
+- 커밋: 3 partition(feat/test/docs) + /done 1(docs progress) = 4 커밋
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/74
+- /done applied: TASKS ③ PR2 인라인(🔄 유지, PR3/PR4 대기) · PHASE4 PR2 이력 추가. ADR-0013 Accepted 유지(D4 구현). REQUIRES_NEW→noRollbackFor 전환은 구현 디테일(progress 기록, 신규 ADR 불요). Layer1 미변경(header-trust 전환은 PR3).

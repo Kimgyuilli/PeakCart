@@ -61,7 +61,7 @@ class JwtTokenVerifierTest {
     private String rs256Token(String kid, RSAPrivateKey signingKey) {
         return Jwts.builder()
                 .header().keyId(kid).and()
-                .subject("7").claim("role", "USER")
+                .subject("7").claim("role", "USER").claim("family_id", "family-7")
                 .issuedAt(new Date()).expiration(new Date(System.currentTimeMillis() + 60_000))
                 .signWith(signingKey, Jwts.SIG.RS256)
                 .compact();
@@ -101,11 +101,20 @@ class JwtTokenVerifierTest {
     }
 
     @Test
-    @DisplayName("RS256 + 등록된 kid: 클레임을 파싱한다")
+    @DisplayName("RS256 + 등록된 kid: 클레임(family_id 포함)을 파싱한다")
     void rs256_knownKid_parses() {
         TokenClaims claims = verifier(false).parseToken(rs256Token(KID, privateKey));
         assertThat(claims.userId()).isEqualTo(7L);
         assertThat(claims.role()).isEqualTo("USER");
+        assertThat(claims.familyId()).isEqualTo("family-7");
+    }
+
+    @Test
+    @DisplayName("family_id 부재 토큰: familyId=null 로 매핑한다(레거시 안전)")
+    void tokenWithoutFamilyId_mapsNull() {
+        TokenClaims claims = verifier(true).parseToken(hs512Token());
+        assertThat(claims.userId()).isEqualTo(7L);
+        assertThat(claims.familyId()).isNull();
     }
 
     @Test

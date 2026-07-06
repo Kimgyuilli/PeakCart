@@ -46,16 +46,18 @@ class JwtFilterTest {
         return request;
     }
 
+    private static final String FAMILY_ID = "family-uuid-0001";
+
     private TokenClaims claims() {
-        return new TokenClaims(7L, "USER", Instant.now().plusSeconds(3600));
+        return new TokenClaims(7L, "USER", FAMILY_ID, Instant.now().plusSeconds(3600));
     }
 
     @Test
-    @DisplayName("검증 성공 + blacklist miss: SecurityContext 에 인증을 설정한다")
+    @DisplayName("검증 성공 + blacklist/deny miss: SecurityContext 에 인증을 설정한다")
     void validToken_notBlacklisted_setsAuthentication() throws Exception {
         JwtFilter filter = new JwtFilter(jwtTokenVerifier, tokenBlacklistLookupPort);
         given(jwtTokenVerifier.parseToken(TOKEN)).willReturn(claims());
-        given(tokenBlacklistLookupPort.isBlacklisted(TOKEN)).willReturn(false);
+        given(tokenBlacklistLookupPort.isBlacklistedOrFamilyDenied(TOKEN, FAMILY_ID)).willReturn(false);
         FilterChain chain = mock(FilterChain.class);
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -67,16 +69,31 @@ class JwtFilterTest {
     }
 
     @Test
-    @DisplayName("blacklist hit(또는 fail-closed true): 인증을 설정하지 않는다")
+    @DisplayName("blacklist/family-deny hit(또는 fail-closed true): 인증을 설정하지 않는다")
     void blacklistedToken_doesNotAuthenticate() throws Exception {
         JwtFilter filter = new JwtFilter(jwtTokenVerifier, tokenBlacklistLookupPort);
         given(jwtTokenVerifier.parseToken(TOKEN)).willReturn(claims());
-        given(tokenBlacklistLookupPort.isBlacklisted(TOKEN)).willReturn(true);
+        given(tokenBlacklistLookupPort.isBlacklistedOrFamilyDenied(TOKEN, FAMILY_ID)).willReturn(true);
         FilterChain chain = mock(FilterChain.class);
 
         filter.doFilter(bearerRequest(), new MockHttpServletResponse(), chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(chain, times(1)).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("family_id 부재 레거시 토큰: family deny 미조회로 blacklist 만 검사해 통과한다")
+    void legacyTokenWithoutFamilyId_checksBlacklistOnly() throws Exception {
+        JwtFilter filter = new JwtFilter(jwtTokenVerifier, tokenBlacklistLookupPort);
+        given(jwtTokenVerifier.parseToken(TOKEN))
+                .willReturn(new TokenClaims(7L, "USER", null, Instant.now().plusSeconds(3600)));
+        given(tokenBlacklistLookupPort.isBlacklistedOrFamilyDenied(TOKEN, null)).willReturn(false);
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(bearerRequest(), new MockHttpServletResponse(), chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         verify(chain, times(1)).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 

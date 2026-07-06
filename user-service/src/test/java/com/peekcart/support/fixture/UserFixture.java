@@ -1,6 +1,8 @@
 package com.peekcart.support.fixture;
 
+import com.peekcart.global.auth.TokenHasher;
 import com.peekcart.user.domain.model.RefreshToken;
+import com.peekcart.user.domain.model.RefreshTokenStatus;
 import com.peekcart.user.domain.model.User;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -52,17 +54,48 @@ public class UserFixture {
         return user;
     }
 
+    public static final String DEFAULT_FAMILY_ID = "family-uuid-0001";
+
     /**
-     * 만료되지 않은 RefreshToken을 생성한다.
+     * 만료되지 않은 ACTIVE RefreshToken을 생성한다. (원문 → token_hash 로 저장)
      */
-    public static RefreshToken refreshToken(Long userId, String tokenValue) {
-        return RefreshToken.create(userId, tokenValue, LocalDateTime.now().plusDays(7));
+    public static RefreshToken activeRefreshToken(Long userId, String rawToken) {
+        return RefreshToken.issue(userId, DEFAULT_FAMILY_ID, TokenHasher.sha256Hex(rawToken),
+                LocalDateTime.now().plusDays(7));
     }
 
     /**
-     * 이미 만료된 RefreshToken을 생성한다.
+     * 이미 만료된 ACTIVE RefreshToken을 생성한다.
      */
-    public static RefreshToken expiredRefreshToken(Long userId, String tokenValue) {
-        return RefreshToken.create(userId, tokenValue, LocalDateTime.now().minusDays(1));
+    public static RefreshToken expiredRefreshToken(Long userId, String rawToken) {
+        return RefreshToken.issue(userId, DEFAULT_FAMILY_ID, TokenHasher.sha256Hex(rawToken),
+                LocalDateTime.now().minusDays(1));
+    }
+
+    /**
+     * ROTATED 상태의 RefreshToken을 생성한다. (grace 재제시 시나리오용)
+     */
+    public static RefreshToken rotatedRefreshToken(Long userId, String rawToken, Long replacedByTokenId,
+                                                   LocalDateTime graceUntil) {
+        RefreshToken token = activeRefreshToken(userId, rawToken);
+        ReflectionTestUtils.setField(token, "status", RefreshTokenStatus.ROTATED);
+        ReflectionTestUtils.setField(token, "replacedByTokenId", replacedByTokenId);
+        ReflectionTestUtils.setField(token, "graceUntil", graceUntil);
+        return token;
+    }
+
+    /**
+     * REVOKED 상태의 RefreshToken을 생성한다. (family 무효화 재제시 시나리오용)
+     */
+    public static RefreshToken revokedRefreshToken(Long userId, String rawToken) {
+        RefreshToken token = activeRefreshToken(userId, rawToken);
+        ReflectionTestUtils.setField(token, "status", RefreshTokenStatus.REVOKED);
+        return token;
+    }
+
+    /** 지정한 id 를 설정한 RefreshToken 을 반환한다. */
+    public static RefreshToken withId(RefreshToken token, Long id) {
+        ReflectionTestUtils.setField(token, "id", id);
+        return token;
     }
 }

@@ -50,7 +50,7 @@ class JwtTokenSignerTest {
     @Test
     @DisplayName("발급 토큰은 RS256(kid) 서명이며 verifier 가 kid 로 검증한다")
     void issue_rs256_verifiedByKid() {
-        TokenIssuer.IssuedTokens tokens = signer.issue(42L, "USER");
+        TokenIssuer.IssuedTokens tokens = signer.issue(42L, "USER", "family-42");
 
         // JWT 헤더(첫 세그먼트)에 kid 가 실려야 한다
         String headerJson = new String(java.util.Base64.getUrlDecoder()
@@ -60,6 +60,7 @@ class JwtTokenSignerTest {
         TokenClaims claims = verifier.parseToken(tokens.accessToken());
         assertThat(claims.userId()).isEqualTo(42L);
         assertThat(claims.role()).isEqualTo("USER");
+        assertThat(claims.familyId()).isEqualTo("family-42");
     }
 
     @Test
@@ -68,12 +69,12 @@ class JwtTokenSignerTest {
         int warmup = 20;
         int iterations = 200;
         for (int i = 0; i < warmup; i++) {
-            signer.issue(1L, "USER");
+            signer.issue(1L, "USER", "family-1");
         }
         List<Long> nanos = new ArrayList<>(iterations);
         for (int i = 0; i < iterations; i++) {
             long start = System.nanoTime();
-            signer.issue(1L, "USER");
+            signer.issue(1L, "USER", "family-1");
             nanos.add(System.nanoTime() - start);
         }
         Collections.sort(nanos);

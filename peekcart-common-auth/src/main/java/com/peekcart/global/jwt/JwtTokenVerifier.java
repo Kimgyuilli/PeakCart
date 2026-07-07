@@ -63,6 +63,7 @@ public class JwtTokenVerifier {
             return new TokenClaims(
                     Long.parseLong(claims.getSubject()),
                     claims.get("role", String.class),
+                    claims.get("family_id", String.class),
                     claims.getExpiration().toInstant()
             );
         } catch (JwtException | IllegalArgumentException e) {

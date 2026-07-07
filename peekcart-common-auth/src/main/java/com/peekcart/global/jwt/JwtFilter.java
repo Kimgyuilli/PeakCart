@@ -35,7 +35,7 @@ public class JwtFilter extends OncePerRequestFilter {
         if (token != null) {
             try {
                 TokenClaims claims = jwtTokenVerifier.parseToken(token);
-                if (!tokenBlacklistLookupPort.isBlacklisted(token)) {
+                if (!tokenBlacklistLookupPort.isBlacklistedOrFamilyDenied(token, claims.familyId())) {
                     UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                             claims.userId(), null, List.of(new SimpleGrantedAuthority("ROLE_" + claims.role()))
                     );

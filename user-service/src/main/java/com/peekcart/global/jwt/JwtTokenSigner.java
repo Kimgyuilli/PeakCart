@@ -38,11 +38,12 @@ public class JwtTokenSigner implements TokenIssuer {
     }
 
     @Override
-    public IssuedTokens issue(Long userId, String role) {
+    public IssuedTokens issue(Long userId, String role, String familyId) {
         String accessToken = Jwts.builder()
                 .header().keyId(keyProperties.activeKid()).and()
                 .subject(String.valueOf(userId))
                 .claim("role", role)
+                .claim("family_id", familyId)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + properties.accessTokenExpiry()))
                 .signWith(privateKey, Jwts.SIG.RS256)

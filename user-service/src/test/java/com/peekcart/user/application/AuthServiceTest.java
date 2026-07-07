@@ -2,8 +2,10 @@ package com.peekcart.user.application;
 
 import com.peekcart.global.auth.TokenBlacklistPort;
 import com.peekcart.global.auth.TokenClaims;
+import com.peekcart.global.auth.TokenHasher;
 import com.peekcart.global.auth.TokenIssuer;
 import com.peekcart.global.auth.TokenParseException;
+import com.peekcart.global.jwt.JwtAuthProperties;
 import com.peekcart.global.jwt.JwtTokenVerifier;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.support.ServiceTest;
@@ -16,9 +18,9 @@ import com.peekcart.user.domain.repository.RefreshTokenRepository;
 import com.peekcart.user.domain.repository.UserRepository;
 import com.peekcart.user.presentation.dto.request.LoginRequest;
 import com.peekcart.user.presentation.dto.request.SignupRequest;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -31,12 +33,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.never;
 
 @ServiceTest
 @DisplayName("AuthService 단위 테스트")
 class AuthServiceTest {
 
-    @InjectMocks AuthService authService;
+    AuthService authService;
 
     @Mock UserRepository userRepository;
     @Mock RefreshTokenRepository refreshTokenRepository;
@@ -47,26 +50,44 @@ class AuthServiceTest {
 
     private static final String ACCESS_TOKEN = "access.token.value";
     private static final String REFRESH_TOKEN_VALUE = "refresh-token-uuid";
+    private static final String REFRESH_TOKEN_HASH = TokenHasher.sha256Hex(REFRESH_TOKEN_VALUE);
+    private static final long ACCESS_TTL_MS = 1_800_000L;
+    // record 는 mock 대상이 아님 — 실제 값으로 주입(reuse deny TTL = accessTokenExpiry/1000)
+    private final JwtAuthProperties jwtAuthProperties = new JwtAuthProperties(
+            "peekcart-secret-key-must-be-at-least-256-bits-long-xxxxxxxxxxxxxxx", ACCESS_TTL_MS, 604_800_000L);
+
+    @BeforeEach
+    void setUp() {
+        authService = new AuthService(userRepository, refreshTokenRepository, tokenBlacklistPort,
+                tokenIssuer, jwtTokenVerifier, passwordEncoder, jwtAuthProperties);
+    }
 
     private TokenIssuer.IssuedTokens issuedTokens() {
         return new TokenIssuer.IssuedTokens(ACCESS_TOKEN, REFRESH_TOKEN_VALUE, LocalDateTime.now().plusDays(7));
     }
 
+    /** save() 가 id 가 채워진 영속 토큰을 반환하도록 스텁한다(issueInFamily 가 newTokenId 를 읽음). */
+    private void stubIssue() {
+        given(tokenIssuer.issue(anyLong(), anyString(), anyString())).willReturn(issuedTokens());
+        given(refreshTokenRepository.save(any(RefreshToken.class)))
+                .willAnswer(inv -> UserFixture.withId(inv.getArgument(0), 100L));
+    }
+
     private TokenClaims tokenClaims(long userId, Instant expiration) {
-        return new TokenClaims(userId, "USER", expiration);
+        return new TokenClaims(userId, "USER", UserFixture.DEFAULT_FAMILY_ID, expiration);
     }
 
     // ── signup ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("signup: 정상 가입 시 TokenResult를 반환한다")
+    @DisplayName("signup: 정상 가입 시 새 family 로 TokenResult를 반환한다")
     void signup_success() {
         SignupRequest request = new SignupRequest("new@example.com", "password123", "홍길동");
         User savedUser = UserFixture.userWithId();
         given(userRepository.existsByEmail(request.email())).willReturn(false);
         given(passwordEncoder.encode(request.password())).willReturn(UserFixture.DEFAULT_PASSWORD_HASH);
         given(userRepository.save(any(User.class))).willReturn(savedUser);
-        given(tokenIssuer.issue(anyLong(), anyString())).willReturn(issuedTokens());
+        stubIssue();
 
         TokenResult result = authService.signup(request);
 
@@ -90,18 +111,18 @@ class AuthServiceTest {
     // ── login ─────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("login: 올바른 인증 정보면 기존 토큰을 삭제하고 TokenResult를 반환한다")
+    @DisplayName("login: 올바른 인증 정보면 기존 토큰을 무효화하고 TokenResult를 반환한다")
     void login_success() {
         User user = UserFixture.userWithId();
         LoginRequest request = new LoginRequest(UserFixture.DEFAULT_EMAIL, "password123");
         given(userRepository.findByEmail(request.email())).willReturn(Optional.of(user));
         given(passwordEncoder.matches(anyString(), anyString())).willReturn(true);
-        given(tokenIssuer.issue(anyLong(), anyString())).willReturn(issuedTokens());
+        stubIssue();
 
         TokenResult result = authService.login(request);
 
         assertThat(result.accessToken()).isEqualTo(ACCESS_TOKEN);
-        then(refreshTokenRepository).should().deleteByUserId(user.getId());
+        then(refreshTokenRepository).should().revokeAllByUserId(user.getId());
         then(refreshTokenRepository).should().save(any(RefreshToken.class));
     }
 
@@ -134,7 +155,7 @@ class AuthServiceTest {
     // ── logout ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("logout: 유효한 토큰이면 블랙리스트 등록 후 리프레시 토큰을 삭제한다")
+    @DisplayName("logout: 유효한 토큰이면 블랙리스트 등록 후 회원 토큰을 무효화한다")
     void logout_success() {
         Instant expiration = Instant.now().plusSeconds(3600);
         given(jwtTokenVerifier.parseToken(ACCESS_TOKEN)).willReturn(tokenClaims(1L, expiration));
@@ -142,7 +163,7 @@ class AuthServiceTest {
         authService.logout(ACCESS_TOKEN);
 
         then(tokenBlacklistPort).should().addToBlacklist(eq(ACCESS_TOKEN), anyLong());
-        then(refreshTokenRepository).should().deleteByUserId(1L);
+        then(refreshTokenRepository).should().revokeAllByUserId(1L);
     }
 
     @Test
@@ -159,29 +180,38 @@ class AuthServiceTest {
     // ── refresh ───────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("refresh: DB에 토큰이 있으면 로테이션하고 TokenResult를 반환한다")
-    void refresh_tokenInDb_rotatesToken() {
+    @DisplayName("refresh: 알 수 없는 토큰 해시면 USR-004 예외가 발생한다")
+    void refresh_unknownTokenHash_throwsUSR004() {
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
+                .isInstanceOf(UserException.class)
+                .extracting(e -> ((UserException) e).getErrorCode())
+                .isEqualTo(ErrorCode.USR_004);
+    }
+
+    @Test
+    @DisplayName("refresh: ACTIVE 토큰이면 원자적으로 로테이션하고 TokenResult를 반환한다")
+    void refresh_activeToken_rotates() {
         User user = UserFixture.userWithId();
-        RefreshToken storedToken = UserFixture.refreshToken(user.getId(), REFRESH_TOKEN_VALUE);
-        given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(storedToken));
+        RefreshToken active = UserFixture.activeRefreshToken(user.getId(), REFRESH_TOKEN_VALUE);
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(active));
         given(userRepository.findById(user.getId())).willReturn(Optional.of(user));
-        given(refreshTokenRepository.deleteByToken(REFRESH_TOKEN_VALUE)).willReturn(true);
-        given(tokenIssuer.issue(anyLong(), anyString())).willReturn(issuedTokens());
+        stubIssue();
+        given(refreshTokenRepository.rotateActive(eq(REFRESH_TOKEN_HASH), eq(100L), any(), any())).willReturn(1);
 
         TokenResult result = authService.refresh(REFRESH_TOKEN_VALUE);
 
         assertThat(result.accessToken()).isEqualTo(ACCESS_TOKEN);
-        then(tokenBlacklistPort).should().addGracePeriod(eq(REFRESH_TOKEN_VALUE), eq(user.getId()), eq(10L));
-        then(refreshTokenRepository).should().deleteByToken(REFRESH_TOKEN_VALUE);
+        then(refreshTokenRepository).should().rotateActive(eq(REFRESH_TOKEN_HASH), eq(100L), any(), any());
     }
 
     @Test
-    @DisplayName("refresh: 만료된 토큰이면 USR-005 예외가 발생한다")
-    void refresh_expiredToken_throwsUSR005() {
+    @DisplayName("refresh: ACTIVE 이지만 만료된 토큰이면 USR-005 예외가 발생한다")
+    void refresh_expiredActive_throwsUSR005() {
         User user = UserFixture.userWithId();
-        RefreshToken expiredToken = UserFixture.expiredRefreshToken(user.getId(), REFRESH_TOKEN_VALUE);
-        given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(expiredToken));
-        given(refreshTokenRepository.deleteByToken(REFRESH_TOKEN_VALUE)).willReturn(true);
+        RefreshToken expired = UserFixture.expiredRefreshToken(user.getId(), REFRESH_TOKEN_VALUE);
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(expired));
 
         assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
                 .isInstanceOf(UserException.class)
@@ -190,13 +220,14 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("refresh: 동시 요청으로 토큰이 이미 삭제된 경우 USR-004 예외가 발생한다")
-    void refresh_concurrentRotation_throwsUSR004() {
+    @DisplayName("refresh: ACTIVE 로테이션 동시 경쟁에서 패배(affected=0)하면 USR-004 예외가 발생한다")
+    void refresh_activeConcurrentLost_throwsUSR004() {
         User user = UserFixture.userWithId();
-        RefreshToken storedToken = UserFixture.refreshToken(user.getId(), REFRESH_TOKEN_VALUE);
-        given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(storedToken));
+        RefreshToken active = UserFixture.activeRefreshToken(user.getId(), REFRESH_TOKEN_VALUE);
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(active));
         given(userRepository.findById(user.getId())).willReturn(Optional.of(user));
-        given(refreshTokenRepository.deleteByToken(REFRESH_TOKEN_VALUE)).willReturn(false);
+        stubIssue();
+        given(refreshTokenRepository.rotateActive(eq(REFRESH_TOKEN_HASH), anyLong(), any(), any())).willReturn(0);
 
         assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
                 .isInstanceOf(UserException.class)
@@ -205,29 +236,99 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("refresh: DB에 없지만 그레이스 피리어드가 유효하면 고아 토큰을 정리하고 새 토큰을 발급한다")
-    void refresh_gracePeriodActive_cleansUpAndIssuesNewToken() {
+    @DisplayName("refresh: ROTATED 토큰을 grace 내 재제시(consume 성공)하면 새 토큰 발급 + 기존 replacement 강제 로테이션")
+    void refresh_rotatedWithinGrace_reissuesAndForceRotates() {
         User user = UserFixture.userWithId();
-        given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
-        given(tokenBlacklistPort.consumeGracePeriod(REFRESH_TOKEN_VALUE)).willReturn(Optional.of(user.getId()));
+        RefreshToken rotated = UserFixture.rotatedRefreshToken(
+                user.getId(), REFRESH_TOKEN_VALUE, 55L, LocalDateTime.now().plusSeconds(5));
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(rotated));
+        given(refreshTokenRepository.consumeGraceOnce(eq(REFRESH_TOKEN_HASH), any())).willReturn(1);
         given(userRepository.findById(user.getId())).willReturn(Optional.of(user));
-        given(tokenIssuer.issue(anyLong(), anyString())).willReturn(issuedTokens());
+        given(refreshTokenRepository.forceRotate(eq(55L), eq(100L), any())).willReturn(1);
+        stubIssue();
 
         TokenResult result = authService.refresh(REFRESH_TOKEN_VALUE);
 
         assertThat(result.accessToken()).isEqualTo(ACCESS_TOKEN);
-        then(refreshTokenRepository).should().deleteByUserId(user.getId());
+        // 기존 replacement(55L)를 새 토큰(100L)으로 강제 로테이션 → family 내 ACTIVE 1개
+        then(refreshTokenRepository).should().forceRotate(eq(55L), eq(100L), any());
+        then(refreshTokenRepository).should(never()).revokeFamily(anyString());
     }
 
     @Test
-    @DisplayName("refresh: DB에 없고 그레이스 피리어드도 만료되면 USR-004 예외가 발생한다")
-    void refresh_gracePeriodExpired_throwsUSR004() {
-        given(refreshTokenRepository.findByToken(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
-        given(tokenBlacklistPort.consumeGracePeriod(REFRESH_TOKEN_VALUE)).willReturn(Optional.empty());
+    @DisplayName("refresh: grace 성공했으나 replacement 가 이미 전이됨(forceRotate=0)이면 보수적으로 family 무효화 후 USR-004")
+    void refresh_graceForceRotateMiss_revokesFamily() {
+        User user = UserFixture.userWithId();
+        RefreshToken rotated = UserFixture.rotatedRefreshToken(
+                user.getId(), REFRESH_TOKEN_VALUE, 55L, LocalDateTime.now().plusSeconds(5));
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(rotated));
+        given(refreshTokenRepository.consumeGraceOnce(eq(REFRESH_TOKEN_HASH), any())).willReturn(1);
+        given(userRepository.findById(user.getId())).willReturn(Optional.of(user));
+        given(refreshTokenRepository.forceRotate(eq(55L), eq(100L), any())).willReturn(0);
+        stubIssue();
 
         assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
                 .isInstanceOf(UserException.class)
                 .extracting(e -> ((UserException) e).getErrorCode())
                 .isEqualTo(ErrorCode.USR_004);
+
+        then(refreshTokenRepository).should().revokeFamily(UserFixture.DEFAULT_FAMILY_ID);
+        then(tokenBlacklistPort).should().denyFamily(UserFixture.DEFAULT_FAMILY_ID, ACCESS_TTL_MS / 1000);
+    }
+
+    @Test
+    @DisplayName("refresh: ROTATED 토큰을 grace 초과 재제시(consume 실패)하면 reuse — family revoke + deny 후 USR-004")
+    void refresh_rotatedReuse_revokesFamilyAndDenies() {
+        User user = UserFixture.userWithId();
+        RefreshToken rotated = UserFixture.rotatedRefreshToken(
+                user.getId(), REFRESH_TOKEN_VALUE, 55L, LocalDateTime.now().minusSeconds(5));
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(rotated));
+        given(refreshTokenRepository.consumeGraceOnce(eq(REFRESH_TOKEN_HASH), any())).willReturn(0);
+
+        assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
+                .isInstanceOf(UserException.class)
+                .extracting(e -> ((UserException) e).getErrorCode())
+                .isEqualTo(ErrorCode.USR_004);
+
+        then(refreshTokenRepository).should().revokeFamily(UserFixture.DEFAULT_FAMILY_ID);
+        // deny TTL = accessTokenExpiry/1000 = 1800s
+        then(tokenBlacklistPort).should().denyFamily(UserFixture.DEFAULT_FAMILY_ID, ACCESS_TTL_MS / 1000);
+    }
+
+    @Test
+    @DisplayName("refresh: 이미 REVOKED 된 family 토큰 재제시도 reuse — family deny 재기록 후 USR-004")
+    void refresh_revokedToken_reDeniesFamilyAndThrowsUSR004() {
+        User user = UserFixture.userWithId();
+        RefreshToken revoked = UserFixture.revokedRefreshToken(user.getId(), REFRESH_TOKEN_VALUE);
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(revoked));
+
+        assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
+                .isInstanceOf(UserException.class)
+                .extracting(e -> ((UserException) e).getErrorCode())
+                .isEqualTo(ErrorCode.USR_004);
+
+        // REVOKED 재제시도 reuse 경로 — revoke(idempotent) + deny 재기록으로 family access token 차단 보장
+        then(refreshTokenRepository).should().revokeFamily(UserFixture.DEFAULT_FAMILY_ID);
+        then(tokenBlacklistPort).should().denyFamily(UserFixture.DEFAULT_FAMILY_ID, ACCESS_TTL_MS / 1000);
+    }
+
+    @Test
+    @DisplayName("refresh: reuse 감지 시 Redis deny write 가 실패해도 DB family 무효화는 유지된다")
+    void refresh_reuseWithRedisFailure_stillRevokesFamily() {
+        User user = UserFixture.userWithId();
+        RefreshToken rotated = UserFixture.rotatedRefreshToken(
+                user.getId(), REFRESH_TOKEN_VALUE, 55L, LocalDateTime.now().minusSeconds(5));
+        given(refreshTokenRepository.findByTokenHash(REFRESH_TOKEN_HASH)).willReturn(Optional.of(rotated));
+        given(refreshTokenRepository.consumeGraceOnce(eq(REFRESH_TOKEN_HASH), any())).willReturn(0);
+        org.mockito.BDDMockito.willThrow(new RuntimeException("redis down"))
+                .given(tokenBlacklistPort).denyFamily(anyString(), anyLong());
+
+        assertThatThrownBy(() -> authService.refresh(REFRESH_TOKEN_VALUE))
+                .isInstanceOf(UserException.class)
+                .extracting(e -> ((UserException) e).getErrorCode())
+                .isEqualTo(ErrorCode.USR_004);
+
+        // Redis 실패가 전파돼 revoke 를 롤백시키지 않아야 한다(예외 격리)
+        then(refreshTokenRepository).should().revokeFamily(UserFixture.DEFAULT_FAMILY_ID);
     }
 }

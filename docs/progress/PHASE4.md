@@ -582,3 +582,28 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **프로세스**: `/plan`(Codex 2 loop: 6→2 수렴 — JWKS 운영조건·refresh 데이터 처분·NetworkPolicy 검증·ADR immutable(S9 기존재)·B11·KMS latency → 2차 P6 근거·B5 키위치) → `/work`(PR1 diff single 리뷰 1 loop, 4건[P1×3 보안 posture·P2×1 테스트] 전량 반영·재검증) → `/ship`([PR #73](https://github.com/Kimgyuilli/PeakCart/pull/73), 3 커밋 docs/feat/test). consistency precheck ok.
 
 **다음**: PR2 Refresh Token Reuse Detection(D4 — family_id/status 상태전이·family deny Redis) → PR3 Gateway 모듈+header-trust(D3) → PR4 관측성 S9+HS 제거(D5).
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR2 (Refresh Token Reuse Detection) — [#74](https://github.com/Kimgyuilli/PeakCart/pull/74)
+
+> ADR-0013 D4. 삭제 기반 rotation 은 탈취된 refresh token 재사용을 감지 못한다. `family_id`/`status` 상태전이로 전환해 reuse 를 감지하고, 감지 시 family 전체 무효화 + Redis family deny 로 이미 발급된 access token 까지 차단한다. 전환기(Gateway PR3 이전)라 검증은 리소스 서비스 in-process 유지.
+
+**작업 (P6~P10)**:
+- **P6** `V2` 마이그레이션: 평문 `token`(+unique) 드롭 → `token_hash`(sha256, unique)·`family_id`·`status`(ACTIVE/ROTATED/REVOKED)·`grace_until`·`replaced_by_token_id`. 그린필드라 기존 row 전량 무효화. CHAR→VARCHAR(Hibernate validate 는 String 을 VARCHAR 로 기대).
+- **P7** `RefreshToken` 상태전이 엔티티(+`RefreshTokenStatus`) 평문 미저장. 동시성 전이는 조건부 벌크 UPDATE(affected rows)로 원자성 — `rotateActive`/`consumeGraceOnce`/`forceRotate`/`revokeFamily`/`revokeAllByUserId`(삭제 기반 `deleteByToken` affected 판정을 상태전이로 이전).
+- **P8** `AuthService.refresh` 재작성: ACTIVE 원자 로테이션(grace 부여)·ROTATED grace 1회 소비 vs 초과 reuse·REVOKED reuse. reuse 진입 3경로(grace 초과·forceRotate miss·REVOKED)를 `detectReuse`(family revoke+deny) 단일화. Redis grace(`addGracePeriod`/`consumeGracePeriod`) 제거→DB `grace_until`.
+- **P9** `TokenIssuer.issue` 시그니처에 `familyId`→access token `family_id` claim. Redis `auth:deny:family:<id>` write(User)/read(전환기 common-auth `JwtFilter`+`RedisTokenBlacklistLookupAdapter`, PR3 Gateway 이관). family_id 부재 레거시 토큰은 family deny 미조회(blacklist 만).
+- **P10** 단위 10종 + 통합 6종(Testcontainers MySQL/Redis): 마이그레이션 스키마·grace 원자성·동시 로테이션 1건만·grace 성공 ACTIVE 1개·forceRotate miss 결정적 family 무효화·reuse→revoke→deny.
+
+**핵심 결정**:
+- **reuse 무효화 커밋 보존**: 요청은 USR-004 거부하되 family 무효화는 커밋 필수. `REQUIRES_NEW` 는 outer refresh 트랜잭션 행 락과 **self-deadlock**(lock wait timeout) → 폐기. `RefreshTokenReuseException` + `@Transactional(noRollbackFor)` 로 무효화만 커밋, 다른 거부 경로(동시 loser INSERT·만료) 롤백 유지.
+- **grace 성공 ACTIVE 1개**: 평문 미저장이라 첫 replacement 를 반환 불가 → 새 발급 + 기존 replacement force-rotate. `forceRotate != 1`(replacement 가 이미 전이됨)이면 ACTIVE 2개 위험 → 보수적 family revoke(방금 INSERT 한 새 토큰도 함께 REVOKED, noRollbackFor 커밋).
+- **Redis deny 격리**: `detectReuse` 내 `denyFamily` try/catch — Redis 실패가 DB revoke 를 롤백시키지 않음. deny 미기록은 access TTL bounded, blacklist read fail-closed 로 최종 안전.
+- **family_id 부재 계약**: claim 부재 ≠ Redis 조회 실패 → blacklist 만 검사(`auth:deny:family:null` 오조회·NPE·레거시 전면 401 방지).
+
+**검증**: `:peekcart-common-auth:test :user-service:test` BUILD SUCCESSFUL(회귀 0). order-service 전체빌드 실패는 컨테이너 리소스 경합(단독 그린, D-019 계열).
+
+**프로세스**: `/plan`(Codex 3 loop: 4→2→2 — grace 원자성/deny 키 계약/token_hash unique → 전환기 enforcement(a)안·ACTIVE 1개 불변식 → family_id 부재 계약·force-rotation 비순환, 전량 반영) → `/work`(diff single 2 loop: 3 P1[forceRotate 가드·Redis 격리·REVOKED 합류] → 1 P2[결정적 회귀테스트] 전량 반영. REQUIRES_NEW→noRollbackFor 전환은 통합테스트 self-deadlock 실측으로 확정) → `/ship`([PR #74](https://github.com/Kimgyuilli/PeakCart/pull/74), 3 커밋 feat/test/docs). consistency precheck ok.
+
+**다음**: PR3 Gateway 모듈 + header-trust 전환(D3, family deny read 를 Gateway 로 이관) → PR4 관측성 S9 + HS512 fallback 제거(D5).

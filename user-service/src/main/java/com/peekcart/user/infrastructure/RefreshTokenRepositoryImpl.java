@@ -5,6 +5,7 @@ import com.peekcart.user.domain.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
@@ -17,22 +18,37 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenRepository {
     private final RefreshTokenJpaRepository refreshTokenJpaRepository;
 
     @Override
-    public Optional<RefreshToken> findByToken(String token) {
-        return refreshTokenJpaRepository.findByToken(token);
+    public Optional<RefreshToken> findByTokenHash(String tokenHash) {
+        return refreshTokenJpaRepository.findByTokenHash(tokenHash);
     }
 
     @Override
-    public boolean deleteByToken(String token) {
-        return refreshTokenJpaRepository.deleteByToken(token) > 0;
+    public RefreshToken save(RefreshToken refreshToken) {
+        return refreshTokenJpaRepository.save(refreshToken);
     }
 
     @Override
-    public void deleteByUserId(Long userId) {
-        refreshTokenJpaRepository.deleteByUserId(userId);
+    public int rotateActive(String tokenHash, Long newTokenId, LocalDateTime rotatedAt, LocalDateTime graceUntil) {
+        return refreshTokenJpaRepository.rotateActive(tokenHash, newTokenId, rotatedAt, graceUntil);
     }
 
     @Override
-    public void save(RefreshToken refreshToken) {
-        refreshTokenJpaRepository.save(refreshToken);
+    public int consumeGraceOnce(String tokenHash, LocalDateTime now) {
+        return refreshTokenJpaRepository.consumeGraceOnce(tokenHash, now);
+    }
+
+    @Override
+    public int forceRotate(Long tokenId, Long newTokenId, LocalDateTime rotatedAt) {
+        return refreshTokenJpaRepository.forceRotate(tokenId, newTokenId, rotatedAt);
+    }
+
+    @Override
+    public void revokeFamily(String familyId) {
+        refreshTokenJpaRepository.revokeFamily(familyId);
+    }
+
+    @Override
+    public void revokeAllByUserId(Long userId) {
+        refreshTokenJpaRepository.revokeAllByUserId(userId);
     }
 }

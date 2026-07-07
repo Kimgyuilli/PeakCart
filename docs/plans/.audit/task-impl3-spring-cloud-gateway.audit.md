@@ -48,3 +48,67 @@
 - 커밋: 3 partition(docs/feat/test) + /done 1(docs progress) = 4 커밋, untracked 잔여 0
 - PR: https://github.com/Kimgyuilli/PeakCart/pull/73
 - /done applied: TASKS ③ 🔲→🔄(PR1 인라인) · PHASE4 PR1 이력 추가. ADR-0013 Accepted 유지(D1/D2 부분 구현). Layer1 미변경(RS256 full 상태는 gateway 완료 후)
+
+## 2026-07-06 09:15 — GP-2 (loop 1, PR2 스코프)
+- 리뷰 run: plan:20260706T000419Z:aebee036-ef1f-43d5-915d-0fa3b13651c0:1
+- 항목: 4건 (P0:0, P1:2, P2:2)
+- 사용자 선택: [2] 전체 반영
+- 반영 내역:
+  - #1(P1) grace 1회성 원자 소비 불명확(Redis GETDEL→DB 대체 시 이중 발급) → P7 `consumeGraceOnce(tokenHash, now)` 조건부 UPDATE(affected rows=1) 명시 + P8 조회-후-판단 금지 + P10 병렬 2요청 중 1건만 성공 동시성 테스트
+  - #2(P1) family deny Redis 키 계약 부재(ADR-0014 D1-c) → P9 키 스펙 명시: `auth:deny:family:<familyId>`(blacklist 신키 동일 네임스페이스 계열)·원문 금지·TTL ≥ access 최대 잔여·User write/Gateway read·miss=통과·조회실패=fail-closed(PR3) + P10 deny 어댑터 키 계약 테스트
+  - #3(P2) §5 PR2 검증 범위 부족(:user-service 만) → `:peekcart-common-auth:test :user-service:test` 확장 + P10 verifier/JwtFilter family_id 회귀 명시
+  - #4(P2) uk_refresh_tokens_token 드롭 후 대체 unique 부재 → P6 `token_hash CHAR(64) NOT NULL`+`uk_refresh_tokens_token_hash` UNIQUE·해시=TokenHasher.sha256Hex 재사용(실존 확인) + P10 unique index 존재 검증
+- 착수 보강(사전, code-verified): P6 마이그레이션 V2·평문 token/uk 드롭·fk 유지 / P7 repository 재정의 / P8 Redis grace 경로 제거·login/logout deleteByUserId→REVOKED 전환 / P9 TokenIssuer.issue 시그니처 seam·TokenClaims 전파
+- raw: .cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1783296259.json
+- tokens: 159,843
+
+## 2026-07-06 09:20 — GP-2 (loop 2, PR2 스코프)
+- 리뷰 run: plan:20260706T001229Z:aebee036-ef1f-43d5-915d-0fa3b13651c0:2
+- 항목: 2건 (P0:0, P1:1, P2:1) — loop1 4건 반영분(deny 키 계약·unique) 닫힘 확인
+- 사용자 선택: [2] 전체 반영, P1 은 (a)안
+- 반영 내역:
+  - #1(P1) 전환기 deny read 경로 부재(PR3 전까지 "즉시 차단" 미동작, ADR-0013 D4) → **(a)안**: P9 common-auth `TokenBlacklistLookupPort`/adapter family deny 확장 + `JwtFilter` family_id 전달(hit=401·miss=통과·조회실패=fail-closed). B1 표 확장(PR2)→이동(PR3) 정정, §4·완료조건 동기화 — PR3 이관 대상과 동일 행이라 버려지는 작업 아님
+  - #2(P2) grace 성공 후 상태 불변식 미결정(family 내 ACTIVE 2개 가능) → P7 consumeGraceOnce 성공 시 같은 트랜잭션에서 기존 replacement ROTATED 처리 → ACTIVE 정확히 1개 + P10 테스트(replacement 재제시 거부 포함)
+- raw: .cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1783296749.json
+- tokens: 94,672 (누적 254,515)
+
+## 2026-07-06 09:28 — GP-2 (loop 3, PR2 스코프 — 사용자 요청 추가 루프)
+- 리뷰 run: plan:20260706T002238Z:aebee036-ef1f-43d5-915d-0fa3b13651c0:3
+- 항목: 2건 (P0:0, P1:2, P2:0) — loop 2 반영분(전환기 enforcement·grace 불변식)의 신규 계약 표면 검증. fail-closed 는 현행 어댑터가 이미 fail-closed 라 posture 변화 아님 확인
+- 사용자 선택: [2] 전체 반영
+- 반영 내역:
+  - #1(P1) family_id 부재 레거시 토큰 계약 없음(NPE·auth:deny:family:null·레거시 전면 401 위험) → P9: absent/null/blank 면 blacklist 만 검사·family deny=miss 취급(claim 부재 ≠ 조회 실패), 신규 발급은 family_id 필수 + P10 레거시(RS/HS fallback) 회귀 테스트
+  - #2(P1) grace-success force-rotation 순환 위험 + supersede 된 replacement 의 access token 처분 미정의 → P7: ROTATED-without-grace(grace_until 미부여/≤now, consumeGraceOnce 재성공 순환 금지)·replaced_by_token_id 단방향(자기참조 금지)·access token 은 TTL 까지 bounded overlap 수용(jti blacklist 과설계 미채택) + P10 비순환 확증 테스트
+- raw: .cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1783297358.json
+- tokens: 71,450 (누적 325,965)
+- attempts 3/3 소진 — 추가 루프는 사용자 명시 확인 필요
+
+## 2026-07-06 11:30 — GW-2 (work loop 1, PR2 구현 diff)
+- 리뷰 run: work:20260706T020953Z:a0de8369-43ea-438e-8cc0-d9e676f7e355:1 (single, diff 1671L)
+- 항목: 3건 (P0:0, P1:3, P2:0)
+- 사용자 선택: [2] 전체 반영 (3건 모두 plan P7/P8 불변식과 정합하는 실제 갭)
+- 반영 내역:
+  - #1(P1) forceRotate affected-rows 무시 → raw0 grace ↔ raw1 정상 refresh 동시 시 ACTIVE 2개 가능(plan "ACTIVE 1개" 위반) → forceRotate!=1 이면 보수적으로 detectReuse(family revoke+deny) 후 USR-004. INSERT 한 새 토큰도 revoke 로 함께 REVOKED(noRollbackFor 커밋). 통합테스트 graceAndReplacementRefreshConcurrent_neverTwoActive(activeCount<=1) 추가
+  - #2(P1) denyFamily(Redis) 실패 시 예외가 RefreshTokenReuseException 아님 → noRollbackFor 미적용 → DB revoke 롤백 → detectReuse 내 denyFamily try/catch 로깅(예외 격리). deny 미기록은 access TTL bounded + blacklist read fail-closed 로 최종 안전. 단위테스트 refresh_reuseWithRedisFailure_stillRevokesFamily 추가
+  - #3(P1) REVOKED 재제시가 deny 미기록(plan P8 "이미 revoked family 재제시"=reuse 정의 이탈) → REVOKED status 도 detectReuse 경로로 합류(revoke idempotent + deny 재기록). 테스트 refresh_revokedToken → deny 검증으로 보강
+- 리팩터: revokeFamilyAndDeny → detectReuse(예외 반환 헬퍼)로 통합, 3개 reuse 진입점(ROTATED 초과·forceRotate miss·REVOKED) 단일화. @Slf4j 추가
+- 검증: :peekcart-common-auth:test :user-service:test BUILD SUCCESSFUL(회귀 0)
+- diff: .cache/diffs/diff-task-impl3-spring-cloud-gateway-1783303116.patch
+- raw: .cache/codex-reviews/diff-task-impl3-spring-cloud-gateway-1783303825.json
+- tokens: 76,429
+
+## 2026-07-06 11:38 — GW-2 (work loop 2, 재리뷰)
+- 리뷰 run: work:20260706T023349Z:a0de8369-43ea-438e-8cc0-d9e676f7e355:2 (single, diff 1780L)
+- 항목: 1건 (P0:0, P1:0, P2:1) — loop1 반영분 트랜잭션/롤백 semantics 정합 확인, 테스트 갭 1건
+- 사용자 선택: [2] 전체 반영
+- 반영 내역:
+  - #1(P2) graceAndReplacementRefreshConcurrent 는 swallow+activeCount<=1 이라 "forceRotate miss → 새 토큰까지 family 전체 REVOKED 커밋" 불변식을 직접 고정 못함 → 결정적 통합테스트 graceSuccessButReplacementAlreadyRotated_revokesWholeFamily 추가(raw0 grace 유효 + raw1 사전 ROTATED → forceRotate=0 결정적 진입 → activeCount=0·non-REVOKED=0·deny 기록 검증)
+- 검증: :user-service:test RefreshTokenReuseIntegrationTest BUILD SUCCESSFUL
+- raw: .cache/codex-reviews/diff-task-impl3-spring-cloud-gateway-1783305262.json
+- tokens: 59,514 (work 누적 135,943)
+
+## 2026-07-06 — /ship (PR #74)
+- precheck: ok(warnings 0)
+- 커밋: 3 partition(feat/test/docs) + /done 1(docs progress) = 4 커밋
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/74
+- /done applied: TASKS ③ PR2 인라인(🔄 유지, PR3/PR4 대기) · PHASE4 PR2 이력 추가. ADR-0013 Accepted 유지(D4 구현). REQUIRES_NEW→noRollbackFor 전환은 구현 디테일(progress 기록, 신규 ADR 불요). Layer1 미변경(header-trust 전환은 PR3).

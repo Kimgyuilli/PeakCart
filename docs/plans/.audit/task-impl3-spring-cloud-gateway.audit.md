@@ -215,3 +215,13 @@
 - `image-contract-lint` matrix 6/6 인식(gateway 매니페스트는 PR3b → `IMAGE_CONTRACT_TRANSITION=1` 게이트)
 - diff: `.cache/diffs/diff-task-impl3-spring-cloud-gateway-1784805374.patch`
 - 종료: work.done. 재리뷰 없음(work 3/3 소진) — 검증은 빌드·테스트·스모크로 대체. 다음: `/ship`
+
+## 2026-07-23 — /ship (PR #75)
+
+- dry-run → execute. precheck **ok**(warnings 0) → GS-1 자동 통과
+- **GS-0 drift 오탐 확인**: `hpx_diff_absorption_status` 가 `git status --porcelain` 과 diff 파일 경로를 대조하는데, untracked 는 디렉토리로 접혀(`?? gateway/`) 신규 19파일이 unmatched → `partially_live`. 실제로는 브랜치 커밋 0개로 흡수분 없음(양성 확인 후 진행). **신규 디렉토리를 만드는 모든 PR 에서 재발** — `-uall` 사용으로 고쳐야 함(harness 후속, 본 PR 범위 밖).
+- 커밋: 4 partition(feat/test/chore/docs) + /done 1(docs progress) = **5 커밋**
+- PR: https://github.com/Kimgyuilli/PeekCart/pull/75
+- /done applied: TASKS ③ 행에 PR3a 인라인(**🔄 유지** — PR3b/c/d·PR4 대기) · PHASE4 PR3a 이력 추가(핵심 결정 6·후속 3 명시).
+  ADR-0013 **Accepted 유지**(D1/D3 구현이지 결정 변경 아님) · ADR-0014 D2-c exit 은 PR3c 소관 · Layer1(02/04) 미변경(header-trust 완료 후 = 계획 P21)
+- 후속 필수: **PR3b 에서 gateway k8s 매니페스트 추가 후 ci.yml 의 `IMAGE_CONTRACT_TRANSITION=1` 제거**(full 6/6 강제)

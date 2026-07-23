@@ -294,3 +294,12 @@
 **검증**: CI policy lint **7종 전부 그린**(namespace·image-contract **full 6/6**·gateway-exposure·self-test **13/13**·servicemonitor 5 유지·observability-ssot·observability-promql) · `kubectl kustomize` 양 overlay 렌더 · `./gradlew build` BUILD SUCCESSFUL(gateway 66 테스트 0 실패, 가드 5종) · `docker build SERVICE=gateway` + `docker-health-smoke.sh gateway:ci` passed.
 
 **미확보(명시)**: 실 클러스터 canary 증적 — PR3c GKE 보안 smoke 세션에 합류(계획 §7 · P30 정직성 게이트). 렌더 성공을 canary 통과로 기록하지 않음.
+
+## 2026-07-24 — /ship (PR #76)
+
+- drift: `all_live` (GS-0 미발동) · precheck: **ok**(warnings 0, GS-1 자동 통과)
+- 선행 조치: `/work` 중 상태 확인용 `git add -A` 로 19파일이 staged 상태였음 → **`git reset` 후 partition 별 명시 add** (그대로 커밋했으면 첫 커밋이 staged 전체를 삼켜 분할이 무너짐)
+- 커밋: **6 partition** — feat(k8s) 10파일 / feat(gateway) 2 / test(gateway) 1 / chore(ci) 2 / **fix(ci) 1**(promql lint 정정은 신규 기능이 아니라 기존 구현 근사의 버그 수정이라 분리) / docs(plan) 4. 잔여 untracked 0
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/76
+- /done applied: TASKS ③ 행에 PR3b 인라인(**🔄 유지** — PR3c/3d·PR4 대기) · PHASE4 PR3b 이력 추가(핵심 결정 6·미확보 1 명시)
+- **ADR 무변경**: ADR-0013 Accepted 유지(D3 구현이지 결정 변경 아님) · **ADR-0015 무변경**(SM/관측성 6 확장은 PR4 소관 — 결정 (가)) · promql lint 정정은 S6.d **문언대로의 구현 교정**이라 계약 변경 아님 · Layer1(02/04) 미변경(외부 노출 단일화 완료는 PR3c 이후)

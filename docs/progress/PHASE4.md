@@ -635,3 +635,32 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **후속(명시)**: gateway k8s 매니페스트 부재로 `IMAGE_CONTRACT_TRANSITION=1` 재설정 — **PR3b 에서 매니페스트 추가 후 제거 필수**(full 6/6). 계정 차원 rate limit 미구현(body-caching 필요, `?email` 쿼리 성분은 회피 가능해 제거하고 IP 단독으로 축소). conformance golden vector 미구현(servlet 가드가 `:common` testFixtures 의존을 막아 리소스 파일로 재설계 필요).
 
 **다음**: PR3b(k8s gateway + NetworkPolicy + ClusterIP 환원 + ServiceMonitor) → PR3c(header-trust 전환 + ADR-0014 D2-c exit) → PR3d(Authorization 중단 + verifier 삭제) → PR4(관측성 S9 + HS512 제거).
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3b (gateway k8s 배포 표면) — [#76](https://github.com/Kimgyuilli/PeakCart/pull/76)
+
+> ADR-0013 D3. PR3a 가 gateway 모듈을 코드로 완성했으나 k8s 매니페스트가 없어 배포 표면이 비어 있었고, 그 때문에 `IMAGE_CONTRACT_TRANSITION=1` 전환기 게이트가 CI 에 남아 있었다(5/6 SUSPENDED). 본 PR 은 gateway 를 클러스터에 올릴 수 있게 만들고 그 꼬리를 닫는다. **트래픽 전환은 하지 않는다** — 5서비스 직접 경로는 canary 롤백 경로라 살려 둔다(제거는 PR3c). **ADR 변경 없음.**
+
+**작업 (P24~P30)**:
+- **P24·P26** base `k8s/base/services/gateway/{deployment(+Service),configmap}.yml` + overlay(minikube NodePort **30080** — 구 단일앱 진입점 승계 / gke Internal LB · deployment patch×2 · `images[]` **6번째** · **gateway HPA** minReplicas 2).
+- **P25** `gateway/src/main/resources/application-k8s.yml` 신설 = k8s 연결값(업스트림 5·JWKS·Redis) **단독 소유**(ADR-0007). 라우트 uri 는 리스트 요소라 프로파일 override 불가 → base placeholder 를 `${app.gateway.upstream.<svc>-uri}` **정규 계층형 키**로 교정(환경변수 표기법을 프로퍼티 이름으로 고착시키던 형태 제거). JWKS 는 스칼라라 placeholder 없이 프로파일이 직접 override.
+- **P27** `IMAGE_CONTRACT_TRANSITION` 제거 → **full 6/6** + **`scripts/gateway-exposure-lint.sh` 신설**(+ CI policy step 등록, self-test 포함).
+- **P28·P29** 롤아웃 runbook(계획 §7 — 배포 전 digest/revision 기록·probe 4종·canary 3단계 임계·**역순 rollback**)·gke README 외부 노출 절.
+- **P30** `K8sProfileConnectionPropertiesTest` 신설(연결키 8종 origin + 라우트 9개 placeholder 연결).
+
+**핵심 결정**:
+- **ServiceMonitor 미생성(결정 가)**: `servicemonitor-selector-lint` canonical 은 도메인 5 **정확 일치**이고 ADR-0015 S5/S6.d 가 그 집합을 계약으로 고정 → gateway SM 을 넣으면 selector-lint + scrape-absent 5 equality + alert regex 5-set 이 동시에 깨져 **ADR 계약 변경** 동반. 관측성 6 확장은 PR4 에서 ADR 과 일괄. PR4 계약 선고정: `gateway-metrics` Service labels `{app: gateway, monitoring-role: metrics}` ↔ SM matchLabels 동일 두 키(공용 `app=gateway` 만 쓰면 SM 이 public Service 까지 매칭해 lint 실패).
+- **Service 8080 단일·probe 8081(결정 나/다)**: overlay 가 이 Service 를 NodePort/LB 로 patch 하므로 8081 을 함께 선언하면 **LB 가 `/actuator/prometheus` 를 게시** — PR3a 의 포트 분리가 k8s 층에서 무효화된다. probe 는 `management.server.port` 를 따라 8081(도메인 5서비스는 8080이라 복사 시 함정).
+- **Secret 미생성(결정 라)**: 소비 비밀 0(RS256 개인키=user-service 전용·HS512 off). 빈 Secret 대신 lint 가 **이름이 아니라 참조**로 부재 강제.
+- **gateway HPA = 단일 HPA 원칙의 명시적 예외(결정 마)**: 도메인 확장 정책이 아니라 인프라 가용성 — 단일 진입점 replica 1 은 인증 경로 전체 SPOF.
+- **`observability-promql-lint` 정정**: S6.d "SM 이 매칭하는 Service" 를 `deployment.yml` **전체 glob** 으로 근사하고 있어 SM 없는 인프라 Service 추가 시 오탐 → **계약이 아니라 구현 근사의 문제**라 ADR 변경 없이 SM matchLabels 기반으로 수정.
+- **렌더 성공 ≠ 계약 검증**: `port: 8080/targetPort: 8081`·Job/CronJob/직접 Pod(hostPort 8081)는 `kubectl kustomize` 를 전부 통과 → 전용 lint 필요. self-test 는 조작 입력 **13종이 의도한 검사에** 걸리는지 **진단 문자열까지 대조**(non-zero 여부만 보면 다른 위반에 걸려도 통과).
+
+**검증**: CI policy lint **7종 전부 그린**(namespace·image-contract **full 6/6**·gateway-exposure·self-test 13/13·servicemonitor **5 유지**·observability-ssot·observability-promql) · `kubectl kustomize` 양 overlay 렌더(양성+음성 3종) · `./gradlew build` BUILD SUCCESSFUL(gateway **66건 0 실패**·가드 5종) · `docker build SERVICE=gateway` + `docker-health-smoke.sh gateway:ci` passed · 신규 테스트 음성 확인(프로파일 키 오타 → BUILD FAILED).
+
+**프로세스**: `/plan`(Codex **3 loop**: timeout→8건→7건→4건, 전량 반영. GP-1 에서 SM/관측성 확장을 PR4 로 이연 결정. loop2 가 내 lint 스펙의 실제 구멍[targetPort]을, loop3 이 우회 경로[CronJob/hostPort]와 내가 만든 문서 SSOT 붕괴를 적발 — attempts 4/3 은 사용자 승인으로 상한 초과) → `/work`(코드 723줄 single 리뷰, **7건[P1:3/P2:4] 전량 반영**. **CI red 를 리뷰어가 발견** — 로컬에서 lint 4종만 돌리고 관측성 2종을 건너뛴 누락) → `/ship`([PR #76](https://github.com/Kimgyuilli/PeakCart/pull/76), 6 커밋). consistency precheck ok.
+
+**미확보(명시)**: 실 클러스터 canary 증적 — runbook 은 작성했으나 미실행. 상시 클러스터 부재로 실 probe(보호/공개/spoof·오류율)는 **PR3c 의 GKE 보안 smoke 세션에서 NetworkPolicy 음성·양성과 함께 1회** 수행한다. **렌더 성공을 canary 통과로 기록하지 않음** → PR3c 진입 조건("100% 전환 유지")은 본 PR 머지로 충족되지 않는다.
+
+**다음**: PR3c(5서비스 ClusterIP 환원 + NetworkPolicy + header-trust 전환 + ADR-0014 D2-c exit + **GKE 보안 smoke = canary 증적 합류**) → PR3d(Authorization 중단·verifier 삭제) → PR4(관측성 S9 + `gateway-metrics`/SM + lint 6 + HS512 제거).

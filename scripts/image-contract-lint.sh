@@ -42,7 +42,10 @@ CI="${REPO_ROOT}/.github/workflows/ci.yml"
 # 서비스가 빠지면 전체가 줄어 full-green" 인 순환 false-green 이 생긴다. 본 배열 vs CI matrix 를
 # 대조해 CI 가 canonical 과 어긋나면 그 자체를 위반으로 잡는다.
 CANONICAL_SERVICES=(notification-service user-service product-service order-service payment-service)
-SERVICES=("${CANONICAL_SERVICES[@]}")
+# 인프라 컴포넌트 — *도메인* 서비스가 아니므로 canonical 5(ADR-0010 §5)와 분리해 둔다.
+# 이미지/배포 계약은 동일하게 적용되므로 SERVICES(=검증 대상 전체)에는 합류시킨다. (구현 ③ PR3a)
+INFRA_SERVICES=(gateway)
+SERVICES=("${CANONICAL_SERVICES[@]}" "${INFRA_SERVICES[@]}")
 
 # CI 의 images / publish matrix.service 목록을 각각 추출해 canonical 과 정확히 일치하는지 검증.
 extract_matrix() {
@@ -61,20 +64,22 @@ if not m:
     sys.exit(0)
 for line in m.group(1).splitlines():
     t = line.strip().lstrip('-').strip()
-    if t.endswith('-service'):
+    # `-service` 접미사로 거르면 인프라 컴포넌트(gateway)가 조용히 무시돼 matrix 대조가
+    # false-green 이 된다 → 식별자 형태면 전부 뽑고, 대조는 호출측 SERVICES 가 판정한다.
+    if re.fullmatch(r'[\w-]+', t):
         print(t)
 PY
 }
 
 matrix_violation=0
-canon_sorted="$(printf '%s\n' "${CANONICAL_SERVICES[@]}" | sort | tr '\n' ' ')"
+canon_sorted="$(printf '%s\n' "${SERVICES[@]}" | sort | tr '\n' ' ')"
 for job in images publish; do
     got="$(extract_matrix "$job" | sort | tr '\n' ' ')"
     if [[ -z "$got" ]]; then
         echo "[D-015] ci.yml '$job' job 의 matrix.service 를 추출할 수 없음 — ci.yml 구조 변경?" >&2
         matrix_violation=1
     elif [[ "$got" != "$canon_sorted" ]]; then
-        echo "[D-015] ci.yml '$job' matrix.service 가 canonical 5서비스와 불일치:" >&2
+        echo "[D-015] ci.yml '$job' matrix.service 가 canonical(도메인 ${#CANONICAL_SERVICES[@]} + 인프라 ${#INFRA_SERVICES[@]})와 불일치:" >&2
         echo "  expected: ${canon_sorted}" >&2
         echo "  got($job): ${got}" >&2
         matrix_violation=1

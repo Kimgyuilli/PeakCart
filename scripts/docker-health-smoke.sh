@@ -27,6 +27,9 @@ fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-peekcart-smoke}"
 APP_CONTAINER="${APP_CONTAINER:-peekcart-smoke-app}"
 APP_PORT="${APP_PORT:-18080}"
+# gateway 는 actuator 를 별도 관리 포트(컨테이너 8081)에 둔다 — 그 포트를 호스트로 노출해 health 를 확인한다.
+# 다른 이미지는 8081 을 열지 않으므로 매핑만 되고 사용되지 않는다.
+MGMT_PORT="${MGMT_PORT:-18081}"
 COMPOSE=(docker compose -p "$COMPOSE_PROJECT_NAME")
 
 cleanup() {
@@ -94,6 +97,7 @@ docker run -d \
     --name "$APP_CONTAINER" \
     --network "${COMPOSE_PROJECT_NAME}_default" \
     -p "${APP_PORT}:8080" \
+    -p "${MGMT_PORT}:8081" \
     -e SPRING_PROFILES_ACTIVE=k8s \
     -e SLACK_WEBHOOK_URL="${SMOKE_SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/smoke}" \
     -e TOSS_SECRET_KEY="${SMOKE_TOSS_SECRET_KEY:-test_sk_smoke}" \
@@ -102,9 +106,27 @@ docker run -d \
     -e JWT_PRIVATE_KEY_LOCATION="file:/smoke-keys/jwt-private.pem" \
     "$IMAGE" >/dev/null
 
-echo "[D-012/L-015] waiting for /actuator/health"
+# health 경로/포트는 이미지 성격에 따라 다르다 (구현 ③ PR3a).
+#   도메인 5서비스: 앱 포트(8080)의 루트 /actuator/health — smoke 망에 MySQL/Redis/Kafka 가 실제로
+#                   떠 있어 의존성 연결까지 검증하는 것이 의미 있다.
+#   gateway:        관리 포트(8081)의 /actuator/health/liveness.
+#                   (a) gateway 는 actuator 를 외부 노출 포트에서 분리해 별도 관리 포트에 둔다
+#                       (외부 진입점이라 /actuator/prometheus 가 인터넷에 노출되면 안 됨).
+#                   (b) gateway 의 *readiness* 는 User JWKS 도달성에 달려 있는데 smoke 망에는
+#                       user-service 가 없다(설계상). 루트 health 는 readinessState 를 집계하므로
+#                       항상 503 이 되어, 프로세스는 정상인데 이미지가 불량으로 판정된다.
+#                       smoke 가 확인할 것은 "이미지가 부팅되고 프로세스가 살아 있는가" = liveness.
+#                   JWKS 적재 후 readiness 전이는 gateway 테스트 + PR3b k8s readinessProbe 가 검증한다.
+HEALTH_PATH="${HEALTH_PATH:-/actuator/health}"
+HEALTH_HOST_PORT="$APP_PORT"
+if [[ "$IMAGE" == gateway:* || "$IMAGE" == *"peekcart-gateway"* ]]; then
+    HEALTH_PATH="/actuator/health/liveness"
+    HEALTH_HOST_PORT="$MGMT_PORT"
+fi
+
+echo "[D-012/L-015] waiting for :${HEALTH_HOST_PORT}${HEALTH_PATH}"
 for _ in {1..90}; do
-    if [[ "$(curl -fsS -o /dev/null -w '%{http_code}' "http://localhost:${APP_PORT}/actuator/health" || true)" == "200" ]]; then
+    if [[ "$(curl -fsS -o /dev/null -w '%{http_code}' "http://localhost:${HEALTH_HOST_PORT}${HEALTH_PATH}" || true)" == "200" ]]; then
         echo "[D-012/L-015] health smoke passed"
         exit 0
     fi

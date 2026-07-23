@@ -1,7 +1,7 @@
-# PeekCart 서비스 이미지 — 단일 Dockerfile + ARG SERVICE (PR3a, ADR-0011 §이미지 계약)
+# PeekCart 이미지 — 단일 Dockerfile + ARG SERVICE (ADR-0011 §이미지 계약)
 #
-# 5개 서비스(notification/user/product/order/payment)를 하나의 Dockerfile 로 빌드한다.
-#   docker build --build-arg SERVICE=<service> -t peekcart-<service>:<tag> .
+# 도메인 5서비스(notification/user/product/order/payment) + 인프라 gateway 를 하나의 Dockerfile 로 빌드한다.
+#   docker build --build-arg SERVICE=<service|gateway> -t peekcart-<service>:<tag> .
 #
 # 멀티모듈 빌드 컨텍스트(B5, memory: project_multimodule_dockerfile_context):
 #   gradle 설정 단계가 settings.gradle 의 전 모듈을 평가하므로, 대상 서비스만이 아니라
@@ -28,6 +28,7 @@ COPY user-service/build.gradle user-service/build.gradle
 COPY product-service/build.gradle product-service/build.gradle
 COPY order-service/build.gradle order-service/build.gradle
 COPY payment-service/build.gradle payment-service/build.gradle
+COPY gateway/build.gradle gateway/build.gradle
 RUN chmod +x gradlew && ./gradlew :${SERVICE}:dependencies --no-daemon >/dev/null 2>&1 || true
 
 # 전 모듈 소스 (settings.gradle include 정합 — 설정 단계가 전 모듈 평가)
@@ -39,6 +40,7 @@ COPY user-service/ user-service/
 COPY product-service/ product-service/
 COPY order-service/ order-service/
 COPY payment-service/ payment-service/
+COPY gateway/ gateway/
 RUN ./gradlew :${SERVICE}:bootJar -x test --no-daemon
 
 # Stage 2: Runtime

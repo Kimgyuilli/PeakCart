@@ -1,0 +1,84 @@
+// gateway — Spring Cloud Gateway (ADR-0013 D3 · 구현 ③ PR3a)
+//
+// [B6/보강 e] :common 의존 금지. common/build.gradle 이 spring-boot-starter-web(servlet MVC)·JPA·Kafka 를
+// `api` 로 전이 노출하므로, 의존하면 WebFlux 런타임에 servlet 스택이 유입된다. 응답 DTO/에러코드는
+// gateway-local 로 정의한다(assertGatewayHasNoServletDeps 가드로 강제).
+//
+// 도메인 서비스가 아니라 *인프라 게이트웨이* → canonical 도메인 5(ADR-0010 §5)와 분리해 취급한다.
+
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+}
+
+ext {
+    springCloudVersion = '2025.0.0'
+}
+
+bootJar {
+    archiveFileName = 'gateway.jar'
+}
+
+jar {
+    enabled = false
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
+dependencies {
+    // Spring Cloud Gateway (WebFlux 서버) — 라우팅 + RequestRateLimiter
+    implementation 'org.springframework.cloud:spring-cloud-starter-gateway-server-webflux'
+
+    // Redis(reactive) — blacklist/family deny 조회 + RequestRateLimiter 백엔드
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
+
+    // JWKS fetch(WebClient) — starter-webflux 는 gateway 가 전이로 가져온다
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+
+    // 관측성 — actuator/prometheus (S4 노출 정책은 gateway-local SecurityConfig 소유)
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    // JWT 검증 — RS256(JWKS) + 전환기 HS512 fallback
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // Structured Logging (logback-spring.xml)
+    implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    // 라우팅/필터 E2E — 업스트림 스텁
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    // Redis 통합(deny/rate limit)
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    afterEvaluate {
+        classDirectories = files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: [
+                    '**/dto/**',
+                    '**/config/**',
+                    '**/GatewayApplication*'
+            ])
+        })
+    }
+}

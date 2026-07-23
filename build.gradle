@@ -180,6 +180,46 @@ tasks.register('assertNoOrderProductSourceCoupling') {
 	}
 }
 
+// ===== [구현 ③ PR3a] gateway 의 servlet/:common 유입 금지 (ADR-0013 D3 · 계획 B6/보강 e) =====
+// gateway 는 WebFlux(reactive) 다. :common 이 spring-boot-starter-web(servlet MVC)·JPA·Kafka 를 `api` 로
+// 전이 노출하므로, gateway 가 :common 을 의존하면 servlet 스택이 유입돼 Boot 가 MVC 로 부팅한다.
+// project 의존(정적)과 실제 런타임 classpath(전이) 양쪽을 검사한다.
+tasks.register('assertGatewayHasNoServletDeps') {
+	group = 'verification'
+	description = 'gateway 모듈의 :common 의존 및 servlet(MVC) 클래스 전이 유입을 빌드 실패로 검출한다.'
+	def gatewayProject = findProject(':gateway')
+	if (gatewayProject != null) {
+		dependsOn ':gateway:classes'
+	}
+	doLast {
+		if (gatewayProject == null) {
+			println 'assertGatewayHasNoServletDeps: gateway 모듈 없음 — skip'
+			return
+		}
+		def violations = []
+		// (a) 정적 project 의존 — :common 계열 금지 (gateway 전용 DTO 사용)
+		gatewayProject.configurations.each { cfg ->
+			cfg.dependencies.withType(ProjectDependency).each { dep ->
+				violations << "gateway (${cfg.name}) -> ${dep.path} : gateway 는 servlet 노출 모듈을 의존할 수 없다".toString()
+			}
+		}
+		// (b) 런타임 classpath 전이 — servlet API / MVC 마커 클래스 유입 금지
+		def forbiddenJars = ['spring-webmvc', 'jakarta.servlet-api', 'tomcat-embed-core', 'spring-boot-starter-web-']
+		gatewayProject.configurations.getByName('runtimeClasspath').resolve().each { File f ->
+			forbiddenJars.each { marker ->
+				if (f.name.startsWith(marker) || f.name == "${marker}.jar") {
+					violations << "gateway runtimeClasspath 에 servlet 아티팩트 유입: ${f.name}".toString()
+				}
+			}
+		}
+		if (!violations.isEmpty()) {
+			throw new GradleException(
+					"gateway servlet 유입 위반 (WebFlux 전용이어야 함, 계획 B6):\n  " + violations.join('\n  '))
+		}
+		println 'assertGatewayHasNoServletDeps: OK (project 의존 0 · servlet 아티팩트 유입 없음)'
+	}
+}
+
 tasks.register('assertNoOrderPaymentSourceCoupling') {
 	group = 'verification'
 	description = 'src/main 의 order↔payment 도메인 패키지 상호 참조를 빌드 실패로 검출한다 (Order/Payment peel 선행 strangler).'
@@ -207,6 +247,7 @@ tasks.register('assertNoOrderPaymentSourceCoupling') {
 }
 
 // build 시 자동 검증 (전체 그린 게이트에 포함)
+// 가드를 여기 연결하지 않으면 CI(`./gradlew build`)가 실행하지 않아 false-green 이 된다.
 tasks.named('check') {
-	dependsOn 'assertNoServiceProjectDeps', 'assertNoDuplicateGlobalFqcn', 'assertNoOrderProductSourceCoupling', 'assertNoOrderPaymentSourceCoupling'
+	dependsOn 'assertNoServiceProjectDeps', 'assertNoDuplicateGlobalFqcn', 'assertNoOrderProductSourceCoupling', 'assertNoOrderPaymentSourceCoupling', 'assertGatewayHasNoServletDeps'
 }

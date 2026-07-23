@@ -1,0 +1,192 @@
+# gateway — Spring Cloud Gateway (ADR-0013 D3 · 구현 ③ PR3a)
+#
+# [ADR-0007] 라우트 predicate / rate limit 파라미터 / 알고리즘 allow-list 는 "동작 규약" 이므로 base 에 둔다.
+# 환경마다 달라지는 것은 업스트림 URI·Redis 연결뿐이라 환경변수 placeholder 로만 주입한다.
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # 라우트 정본 (계획 P11) — placeholder 금지, 실제 controller prefix 대조로 확정.
+          # 주의: order 는 /api/v1/cart (단수) + /api/v1/orders, product 는 /api/v1/products + /api/v1/admin/products.
+          # RequestRateLimiter 는 rate-limiter=failClosedRedisRateLimiter 를 명시한다 — SCG 기본
+          # RedisRateLimiter 는 Redis 오류를 allowed=true 로 삼켜 fail-OPEN 이다(ADR-0013 D3 위반).
+          routes:
+            # --- user-service: 인증 전(signup/login/refresh)은 IP 키, 나머지(logout 등)는 userId 키 ---
+            #     /api/v1/auth/** 를 통째로 pre-auth 로 묶으면 인증 API 인 logout 까지 IP 기준이 된다.
+            - id: user-auth-preauth
+              uri: ${USER_SERVICE_URI:http://user-service:8080}
+              predicates:
+                - Path=/api/v1/auth/signup,/api/v1/auth/login,/api/v1/auth/refresh
+                - Method=POST
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@preAuthKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 10
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+            - id: user-auth
+              uri: ${USER_SERVICE_URI:http://user-service:8080}
+              predicates:
+                - Path=/api/v1/auth/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 40
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+            - id: user-users
+              uri: ${USER_SERVICE_URI:http://user-service:8080}
+              predicates:
+                - Path=/api/v1/users/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 40
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+
+            # --- product-service (admin 을 먼저 둬야 /products/** 에 흡수되지 않는다) ---
+            - id: product-admin
+              uri: ${PRODUCT_SERVICE_URI:http://product-service:8080}
+              predicates:
+                - Path=/api/v1/admin/products/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 40
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+            - id: product-catalog
+              uri: ${PRODUCT_SERVICE_URI:http://product-service:8080}
+              predicates:
+                - Path=/api/v1/products/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@ipKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 100
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+
+            # --- order-service (cart 는 단수) ---
+            - id: order-cart
+              uri: ${ORDER_SERVICE_URI:http://order-service:8080}
+              predicates:
+                - Path=/api/v1/cart/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 40
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+            - id: order-orders
+              uri: ${ORDER_SERVICE_URI:http://order-service:8080}
+              predicates:
+                - Path=/api/v1/orders/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 40
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+
+            # --- payment-service ---
+            - id: payment
+              uri: ${PAYMENT_SERVICE_URI:http://payment-service:8080}
+              predicates:
+                - Path=/api/v1/payments/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 40
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+
+            # --- notification-service ---
+            - id: notification
+              uri: ${NOTIFICATION_SERVICE_URI:http://notification-service:8080}
+              predicates:
+                - Path=/api/v1/notifications/**
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@failClosedRedisRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    fail-closed-rate-limiter.burstCapacity: 40
+                    fail-closed-rate-limiter.windowSeconds: 1
+                    deny-empty-key: true
+
+          # /.well-known/jwks.json · /swagger-ui/** · /api-docs/** 는 라우트가 없다 → 외부 404.
+          # JWKS 는 Gateway 가 내부적으로만 fetch 한다(계획 P11 · 공개 경로 SSOT).
+
+app:
+  gateway:
+    jwt:
+      # 공개키 정본 = User JWKS (ADR-0013 D1). 로컬 미러 금지.
+      jwks-uri: ${JWKS_URI:http://user-service:8080/.well-known/jwks.json}
+      jwks-timeout: PT2S
+      jwks-refresh-cooldown: PT10S
+      jwks-refresh-interval: PT5M
+      # 전환기 HMAC fallback — 레거시 토큰의 실제 alg 는 HS512(HS256 아님).
+      # 기본 off(RS256 단일). PR4 P22 에서 제거한다.
+      hs512-fallback-enabled: false
+      hs512-secret: ${JWT_SECRET:}
+    # 공개 경로 SSOT (method + path) — 계획 §"공개 경로 SSOT".
+    # method 까지 고정해 관리형 POST 가 무인증으로 새지 않게 한다.
+    # 주의: 여기 매칭돼도 Bearer 토큰이 *제시되면* 반드시 검증한다(만료/위조/deny → 401).
+    public:
+      endpoints:
+        - POST /api/v1/auth/signup
+        - POST /api/v1/auth/login
+        - POST /api/v1/auth/refresh
+        - GET /api/v1/products
+        - GET /api/v1/products/**
+        - POST /api/v1/payments/webhook
+
+# actuator 는 별도 관리 포트로 분리한다(계획 공개 경로 SSOT "외부 미노출").
+# gateway 는 외부 진입점이라 8080 이 인터넷에 노출된다 — 같은 포트에 prometheus 를 두면
+# 라우트가 없어도 gateway 자신의 handler 로 직접 접근된다(GW-2 c2:7/c3:5).
+# k8s Service 는 8080 만 노출하고 ServiceMonitor 가 8081 을 scrape 한다(P17/PR3b).
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+logging:
+  level:
+    com.peekcart.gateway: INFO

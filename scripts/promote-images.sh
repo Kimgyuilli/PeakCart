@@ -27,12 +27,15 @@ DRY_RUN=0
 
 # Canonical 5서비스(ADR-0010 §5) — image-contract-lint 와 동일 ground-truth.
 CANONICAL_SERVICES=(notification-service user-service product-service order-service payment-service)
+# 인프라 컴포넌트(도메인 서비스 아님) — 승격 계약은 동일. (구현 ③ PR3a)
+INFRA_SERVICES=(gateway)
+ALL_IMAGES=("${CANONICAL_SERVICES[@]}" "${INFRA_SERVICES[@]}")
 
 usage() {
     cat <<'USAGE'
 promote-images.sh — D-016 image promotion (GHCR → Artifact Registry), per-service.
 
-CI 가 5개 서비스 이미지를 GHCR 로 push 한다. GKE 는 AR 에서 pull 하므로 GHCR → AR 승격이 필요하다.
+CI 가 도메인 5서비스 + gateway 이미지를 GHCR 로 push 한다. GKE 는 AR 에서 pull 하므로 GHCR → AR 승격이 필요하다.
 crane 우선(레지스트리간 직접 복사, content digest 보존). 없으면 docker pull/tag/push 폴백.
 승격 후 AR digest(sha256)를 산출하고, gke overlay 에 digest 를 고정하는 kustomize 명령을 출력한다
 (L-016a digest 고정 · mutable latest 탈피). 완전 자동 트리거는 후속 non-blocking.
@@ -44,7 +47,7 @@ Usage:
 Options:
   --project <id>   Artifact Registry 프로젝트 ID (실행 시 필수, --dry-run 은 선택)
   --tag <tag>      GHCR 원본 태그 (기본 latest). crane 은 content digest 를 보존해 복사한다.
-  --service <svc>  단일 서비스만 승격 (canonical 5 중 하나)
+  --service <svc>  단일 이미지만 승격 (도메인 5 + gateway 중 하나)
   --dry-run        실제 승격 없이 GHCR→AR 매핑만 출력
   -h, --help       본 도움말
 USAGE
@@ -64,13 +67,13 @@ done
 
 if [[ -n "$ONLY_SERVICE" ]]; then
     # shellcheck disable=SC2076
-    if [[ ! " ${CANONICAL_SERVICES[*]} " =~ " ${ONLY_SERVICE} " ]]; then
-        echo "[D-016] --service '$ONLY_SERVICE' 는 canonical 5서비스가 아님: ${CANONICAL_SERVICES[*]}" >&2
+    if [[ ! " ${ALL_IMAGES[*]} " =~ " ${ONLY_SERVICE} " ]]; then
+        echo "[D-016] --service '$ONLY_SERVICE' 는 승격 대상이 아님 (도메인: ${CANONICAL_SERVICES[*]} / 인프라: ${INFRA_SERVICES[*]})" >&2
         exit 1
     fi
     SERVICES=("$ONLY_SERVICE")
 else
-    SERVICES=("${CANONICAL_SERVICES[@]}")
+    SERVICES=("${ALL_IMAGES[@]}")
 fi
 
 if [[ "$DRY_RUN" -eq 0 && -z "$PROJECT" ]]; then

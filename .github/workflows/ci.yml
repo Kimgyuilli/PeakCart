@@ -50,6 +50,13 @@ jobs:
         # image-contract-lint 가 ci↔base↔gke 3-way 를 full 5/5 로 강제한다.
         # PR3c: observability-ssot/promql lint 재활성 — root 단일 yml 전제를 per-service ground truth
         # (5서비스 application.yml + k8s Service metadata.name)로 재작성 완료(ADR-0015).
+        #
+        # 구현 ③ PR3a: gateway 이미지가 CI matrix 에 합류(도메인 5 + 인프라 1 = 6). gateway 의 k8s
+        # 매니페스트는 PR3b(P17) 소관이라 아직 없다 → image-contract-lint 가 5/6 로 떨어진다.
+        # silent false-green 을 막기 위해 스크립트가 요구하는 명시적 전환기 flag 를 다시 세운다.
+        # **PR3b 에서 gateway base/gke 매니페스트 추가 후 이 env 를 반드시 제거할 것**(full 6/6 강제).
+        env:
+          IMAGE_CONTRACT_TRANSITION: '1'
         run: |
           bash scripts/kustomize-namespace-lint.sh
           bash scripts/image-contract-lint.sh
@@ -87,12 +94,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 도메인 5서비스(ADR-0010 §5) + 인프라 게이트웨이 1 = 6 (구현 ③ PR3a).
+        # 주의: image-contract-lint 의 matrix 추출은 연속된 '- item' 행만 읽는다 — 항목 사이에
+        # 주석을 끼우면 그 뒤가 잘려 canonical 대조가 조용히 어긋난다.
         service:
           - notification-service
           - user-service
           - product-service
           - order-service
           - payment-service
+          - gateway
 
     steps:
       - uses: actions/checkout@v4
@@ -127,12 +138,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 도메인 5서비스(ADR-0010 §5) + 인프라 게이트웨이 1 = 6 (구현 ③ PR3a).
+        # 주의: image-contract-lint 의 matrix 추출은 연속된 '- item' 행만 읽는다 — 항목 사이에
+        # 주석을 끼우면 그 뒤가 잘려 canonical 대조가 조용히 어긋난다.
         service:
           - notification-service
           - user-service
           - product-service
           - order-service
           - payment-service
+          - gateway
 
     steps:
       - name: Download image artifact

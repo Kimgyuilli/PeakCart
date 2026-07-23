@@ -607,3 +607,31 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **프로세스**: `/plan`(Codex 3 loop: 4→2→2 — grace 원자성/deny 키 계약/token_hash unique → 전환기 enforcement(a)안·ACTIVE 1개 불변식 → family_id 부재 계약·force-rotation 비순환, 전량 반영) → `/work`(diff single 2 loop: 3 P1[forceRotate 가드·Redis 격리·REVOKED 합류] → 1 P2[결정적 회귀테스트] 전량 반영. REQUIRES_NEW→noRollbackFor 전환은 통합테스트 self-deadlock 실측으로 확정) → `/ship`([PR #74](https://github.com/Kimgyuilli/PeakCart/pull/74), 3 커밋 feat/test/docs). consistency precheck ok.
 
 **다음**: PR3 Gateway 모듈 + header-trust 전환(D3, family deny read 를 Gateway 로 이관) → PR4 관측성 S9 + HS512 fallback 제거(D5).
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3a (Gateway shadow 배포) — [#75](https://github.com/Kimgyuilli/PeakCart/pull/75)
+
+> ADR-0013 D3. PR3 는 단일 PR 로 실행 불가 — 롤아웃 ④(header-trust 배포)와 ⑤(Authorization 중단·verifier 삭제)를 **하나의 이미지로 구분 배포할 수 없고 역순 롤백도 불가능**하다. 계획에 **PR3a~d 실행 분할**을 신설하고 그 첫 단계를 수행. Gateway 는 검증하되 `Authorization` 을 **그대로 전달**해 구버전 서비스(`JwtFilter`)와 병행 동작한다.
+
+**작업 (P11~P13·P16)**:
+- **P11** `gateway` 모듈(WebFlux) 신설 + **라우트 정본** 확정 — placeholder 금지, 실 controller prefix 대조: auth/users→user, products/**admin**/products→product, **cart(단수)**/orders→order, payments→payment, notifications→notification. JWKS(`/api/v1` 밖)·swagger·api-docs 는 외부 라우트 미노출.
+- **P12** reactive 인증 필터 3단계: 외부 `X-User-*` **항상 strip**(공개 경로 포함) → 서명/만료(RS256 via **User JWKS 정본**, 전환기 HS512) → blacklist/family deny(PR2 키 계약 그대로) → 신뢰 헤더 주입(+ 검증된 userId 를 exchange attribute 로). **응답 행렬**: 401(서명·만료·exp부재·unknown kid·deny) / 429(초과) / 503(JWKS·Redis 장애) / readiness=false(cold start usable key 0).
+- **P13** route-class별 RateLimiter — 인증 후 **검증된** userId, 인증 전/공개 IP.
+- **P16** Dockerfile gateway COPY + CI matrix 6 + canonical **도메인 5(ADR-0010 §5) / 인프라 1** 분리(`image-contract-lint`·`promote-images`).
+
+**핵심 결정**:
+- **gateway ≠ `:common` 소비자**: `common/build.gradle` 이 `spring-boot-starter-web`(servlet)·JPA·Kafka 를 **`api` 로 전이 노출** → 의존 시 WebFlux 런타임에 MVC 유입(Boot 가 MVC 로 부팅). 응답 DTO 는 gateway-local, 가드(`assertGatewayHasNoServletDeps`, `check` 연결)+`GatewayReactiveBootstrapTest` 로 이중 고정.
+- **JWKS 는 merge 아닌 snapshot 교체**: `put` 누적이면 User 가 침해 키를 내려도 재시작 전까지 계속 수용 → 성공·비어있지 않은 응답만 통째 교체, 실패/빈 응답에만 LKG 유지.
+- **fail-closed RateLimiter 자체 구현**: SCG 기본 `RedisRateLimiter` 는 Redis/Lua 오류를 삼켜 `allowed=true`(fail-**open**) → ADR-0013 D3 미충족. 고정 윈도우 카운터로 대체하고 오류 전파 → 503. `deny-empty-key` 는 빈 키만 처리라 대체 불가.
+- **readiness ≠ health**: JWKS 미확보를 `HealthIndicator` DOWN 으로 내면 루트 `/actuator/health` 까지 503 → **이미지 스모크가 통과 불가**(스모크 망에 user-service 없음). liveness(프로세스 생존)/readiness(트래픽 수용) 분리, 스모크는 gateway 한정 liveness.
+- **actuator 관리 포트(8081) 분리**: gateway 는 외부 진입점이라 8080 동일 포트면 `/actuator/prometheus` 가 라우트 없이도 직접 노출.
+- **인증 필터 order = -100**: 라우트 필터(order 1..n)보다 **먼저** 실행돼야 RateLimiter 가 검증 전 위조 `X-User-Id` 를 키로 쓰지 않는다.
+
+**검증**: `./gradlew clean build` BUILD SUCCESSFUL(14m6s, 가드 2종 실행 확인) · gateway 테스트 **56건 0 실패** · `docker build SERVICE=gateway` OK(539MB) · `docker-health-smoke.sh gateway:ci` passed · `image-contract-lint` matrix 6/6.
+
+**프로세스**: `/plan`(Codex 3 loop: timeout → 13건 → 8건, 전량 반영. loop2 가 자기모순 3건 적발 — conformance 대상이 같은 PR 에서 삭제됨·family-less 계약 충돌·JWKS 기대값 404/200 불일치) → `/work`(diff 2536L>2000 → **3-chunk split 전량 리뷰**, 15건→중복제거 12건[P1 10/P2 5] 전량 반영. 필터 순서 역전·`exp` 부재 무기한 토큰·폐기 kid 잔존·Redis fail-open 이 실제 보안 결함) → `/ship`([PR #75](https://github.com/Kimgyuilli/PeakCart/pull/75), 4 커밋). consistency precheck ok.
+
+**후속(명시)**: gateway k8s 매니페스트 부재로 `IMAGE_CONTRACT_TRANSITION=1` 재설정 — **PR3b 에서 매니페스트 추가 후 제거 필수**(full 6/6). 계정 차원 rate limit 미구현(body-caching 필요, `?email` 쿼리 성분은 회피 가능해 제거하고 IP 단독으로 축소). conformance golden vector 미구현(servlet 가드가 `:common` testFixtures 의존을 막아 리소스 파일로 재설계 필요).
+
+**다음**: PR3b(k8s gateway + NetworkPolicy + ClusterIP 환원 + ServiceMonitor) → PR3c(header-trust 전환 + ADR-0014 D2-c exit) → PR3d(Authorization 중단 + verifier 삭제) → PR4(관측성 S9 + HS512 제거).

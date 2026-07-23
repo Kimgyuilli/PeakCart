@@ -112,3 +112,106 @@
 - 커밋: 3 partition(feat/test/docs) + /done 1(docs progress) = 4 커밋
 - PR: https://github.com/Kimgyuilli/PeakCart/pull/74
 - /done applied: TASKS ③ PR2 인라인(🔄 유지, PR3/PR4 대기) · PHASE4 PR2 이력 추가. ADR-0013 Accepted 유지(D4 구현). REQUIRES_NEW→noRollbackFor 전환은 구현 디테일(progress 기록, 신규 ADR 불요). Layer1 미변경(header-trust 전환은 PR3).
+
+## 2026-07-23 — GP-2 (plan, PR3 loop 1)
+
+- 대상: PR3 (Gateway 모듈 + header-trust). P11~P18 + 착수 보강 블록. PR1/PR2(P1~P10) 완료분 리뷰 제외
+- 사전 code-verify(계획은 ADR 아닌 현재 코드로 검증): PR2 산출물 반영 보정 4건을 계획서에 선반영
+  - (a) PR2 가 심은 표면(`isBlacklistedOrFamilyDenied`·`TokenClaims.familyId`·`RsaPublicKeyRegistry`) → Gateway reactive 재구현 대상
+  - (b) `LoginUser.accessToken` seam 파손 — 유일 소비자 `AuthController.logout`
+  - (c) 슬라이스 8개는 `@WithMockLoginUser`(SecurityContext 직접)라 header-trust 무영향 → 재작성 실범위 = 통합 2개 + JwtFilterTest
+  - (d) canonical 고정 목록이 image-contract-lint / promote-images 2곳
+- attempt 1: **timeout**(300s, stdout 공백). stderr 에 items:[] 응답만 — 미채택
+- attempt 2: ok — **13건 (P0:0 / P1:10 / P2:3)**, tokens 미파싱
+- 사용자 선택: **[2] 전체 반영 (13/13)**
+
+### 반영 내역
+
+| # | sev | 지적 | 반영 |
+|---|---|---|---|
+| 1 | P1 | `common/build.gradle:12-14` 가 servlet/JPA/kafka 를 `api` 전이 노출 → WebFlux 경계 불성립 | P11 `:common` 의존 금지·gateway-local DTO, P19 REACTIVE 부팅+servlet 부재 검증, 가드 추가 |
+| 2 | P1 | 라우트 정본 부재(`/api/v1/{domain}` placeholder) — 실경로는 auth/users·admin/products·cart(단수) 분기, JWKS 는 `/api/v1` 밖 | P11 명시 라우트 표 + JWKS 외부 미노출·api-docs 미노출, P19 양성/오라우팅 음성 |
+| 3 | P1 | 공개 경로 무헤더 401 충돌(signup/login/refresh·상품 GET·webhook permitAll) | P14 "헤더 부재 시 체인 계속, SecurityConfig 가 판정", P12 공개 경로 JWT 미요구(strip 은 유지), P19 무헤더 양성/보호 401 |
+| 4 | P1 | family_id 부재 토큰·레거시 `bl:` dual-read 가 PR3 이관 계약에 미연결 | P12 null family→blacklist-only·`bl:` 유지, P19 회귀, P22 제거 게이트 |
+| 5 | P1 | 알고리즘 오기 — 계획 "HS256" vs 실제 `JwtTokenVerifier:90-95` **HS512 정확 한정** | P12/P19/P22/P23 및 §1·§6 를 HS512 로 정정 |
+| 6 | P1 | ADR-0014 D2-c 는 **PR3** 에서 servlet 검증 제거 요구인데 P21/P22 가 PR4 존속 전제 → ADR 충돌 | P14 에 삭제 목록(JwtFilter/verifier/lookup/configurer + JJWT·Redis 의존) 승격, PR4 범위 축소 주석 |
+| 7 | P1 | 공개키 소스 미결정(JWKS vs registry 미러), CSI 마운트 대상 모호, 드리프트 방지 부재 | 보강(a) JWKS 정본 확정·미러 폐기, P17 개인키 user-service 전용/Gateway 미마운트, P19 conformance 테스트 |
+| 8 | P2 | logout seam 방향은 정합하나 `LoginUser` nullable 대안이 열려 있음 | 보강(b)·P14 `LoginUser(userId,role,familyId)`·`logout(userId,familyId)` 로 계약 확정, nullable 폐기 |
+| 9 | P1 | minikube NodePort×5 / GKE Internal LB×5 잔존 + Prometheus 직접 scrape 가 Gateway-only 정책과 충돌 | P17 ClusterIP 환원(patch 10개 제거) + NetworkPolicy monitoring scrape 예외, P19 음성/양성 |
+| 10 | P1 | GKE 필수 exit 가 실행 절차 없이 선언만 | P19 보안 smoke 스크립트/수동 승인 job(enforcement→배포→probe→증적→cleanup), 미실행 시 PR3 미완료 |
+| 11 | P1 | 무중단 롤아웃 순서 부재(Gateway 선배포=401 / 서비스 선전환=헤더 위조) | **신규 P18** 5단계 롤아웃 + rollback 조건, 기존 P18(테스트)→P19, PR4 P19~P22→P20~P23 |
+| 12 | P2 | fail-closed 결정은 기존재(지적 해소). 단 401/503 병기·blast radius 미기록 | P12 응답 계약 401/429/503 분리, P13 blast radius 운영 문서화, §2 트레이드오프 보강 |
+| 13 | P2 | `servicemonitor-selector-lint.sh:93` canonical 5 **동등 비교** → 6번째 monitor 가 lint 실패 | P17 Gateway ServiceMonitor + 도메인5/인프라1 분리 정본, P23 negative test |
+
+- 구조 변경 신호(신규 모듈·경계 이동) → PLAN-BLINDSPOTS B1 역의존 스윕 §2 기존재 + 보강 블록으로 PR2 반영분 보정
+- GP-1: auto-pass (ADR-0013 Accepted 선행 — 신규 ADR 불요)
+- raw: `.cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1784798208.json`
+- run_id: `plan:20260723T091555Z:c5ed8b64-2b89-4355-b519-67c89d96d1ee:2`
+- 13/13 반영 후 lint OK(P1~P23 연속). **단 반영이 새 계약 표면을 대량 추가**(P18 신설·응답계약·삭제목록·PR4 재번호·공개경로 bypass 시맨틱) → 수렴 조건(새 표면 무추가 + P1=0) 미충족이라 3회차 속행
+
+## 2026-07-23 — GP-2 (plan, PR3 loop 2)
+
+- 목적: 전체 재검토가 아니라 **2회차 반영으로 신규 생성된 계약 표면 검증**(프롬프트를 변경분에 한정)
+- attempt 3: ok — **8건 (P0:0 / P1:5 / P2:3)**, tokens 미파싱
+- 사용자 선택: **[2] 전체 반영 (8/8)**
+- **해소 확인**(재지적 아님): 헤더 완전 부재 시 보호 경로는 `JwtSecurityConfigurer:41-44` `anyRequest().authenticated()` 로 **fail-safe** — 2회차에서 우려한 조용한 익명 통과 없음. P1~P23 연속·유일, PR4 참조 P20~P23 정상 갱신 확인
+
+### 반영 내역
+
+| # | sev | 지적 | 반영 |
+|---|---|---|---|
+| 1 | P1 | family-less 토큰 계약 모순 — P12 수용 vs P14 familyId 고정 → `auth:deny:family:null` 오기록 또는 혼재 401 | P12 **시한부 수용**(PR3a~c 한정) + PR3d 진입 게이트 "마지막 family-less 발급 + access TTL 경과" 증명 → 수용 제거·`LoginUser.familyId` non-null 불변식. P19 보호API/logout/혼재Pod 회귀 |
+| 2 | P1 | P18 단계별 배포 산출물 경계 없음 — 단일 이미지로 ④/⑤ 구분 불가, ⑤ 이후 롤백 실패 | **PR3a~d 실행 분할 표 신설**(단계·주항목·진입조건·롤백) + P18 에 실제 진입조건 값·`maxUnavailable=0`·단계별 태그·역순 rollback 강제 기입 |
+| 3 | P1 | "common-auth identity-only" 미성립 — `JwtTokenSigner`가 `JwtAuthProperties`/`JwtKeyProperties`/`PemKeyLoader`, `JwkController:3`이 `RsaPublicKeyRegistry` 의존 → 일괄 삭제 시 컴파일 불가 | P14 에 **클래스별 move/delete/retain 표** + 과잉삭제 방지(User JJWT·Redis write / Product Redis 캐시 유지) |
+| 4 | P1 | 부분·중복·형식오류 헤더 미정의 → 권한 위조 또는 500 | P14 **3-state 계약**(전부 없음=anonymous 통과 / 정확히 하나씩=인증 / 그 외=401) + 값 검증 규칙, P19 음성 매트릭스 |
+| 6 | P1 | conformance 대상(`JwtTokenVerifier`)이 같은 PR 에서 삭제 → 최종 head 에서 완료조건 동시 만족 불가 | **golden vector 방식**: PR3a differential → fixture 동결 → PR3d 이후 Gateway 단독 conformance. §5 동기화 |
+| 5 | P2 | allowlist method+path SSOT 부재(Product 는 method 무관 permitAll), JWKS 기대값 모순(404 vs 200) | **공개 경로 SSOT 표 신설**(method+path+Gateway/서비스/기대), Product GET 한정, JWKS 외부404↔내부200 분리 |
+| 7 | P2 | JWKS 503 ↔ last-known-good 분기점 없음 | P12 **응답 행렬 확정**(known kid+LKG 정상+alert / unknown+refresh성공후미존재 401 / unknown+refresh실패 503 / cold start usable 0 → readiness=false), P19 parameterized |
+| 8 | P2 | P3/P5 에 HS256 잔존 — "전반 정정" 설명과 모순 | P3/P5 → HS512 정정, §2 배경의 "HS256 대칭키" 도 사실 정정, **P22 에 ADR-0013 Update Log(`fix(adr):`) 작업 추가**(결정변경 아닌 사실오류 → 새 ADR 불요, `:65` 대안비교는 원문 유지) |
+
+- raw: `.cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1784799939.json`
+- run_id: `plan:20260723T094453Z:93de8826-c20d-4ed2-9882-d361655c41df:3`
+- tokens: 별도 파싱
+- 종료: 8/8 반영 후 lint OK(P1~P23 연속) → plan.done. **attempt 3 = 권장 상한 도달** — 추가 루프는 상한 초과 확인 필요
+- 다음: `/work` (실행은 PR3a 부터)
+
+## 2026-07-23 — GW-2 (work, PR3a loop 1)
+
+- 브랜치: `feat/impl3-pr3a-gateway-shadow` (main sync 후 분기, PR2 #74 머지분 반영)
+- 구현: **PR3a = P11(모듈+라우트 정본)·P12(reactive 검증 필터)·P13(RateLimiter)·P16(Dockerfile/CI/canonical)**. P14/P15(header-trust)·P17(k8s)는 PR3c/PR3b 소관이라 미착수.
+- diff 2536L > 2000 → 사용자 승인 하에 **3-chunk split 전량 리뷰**(누락 scope 0). 예산 초과(work 3/3, cycle 6) 명시 승인.
+- 리뷰 run: c1 `work:...:1:c1`(2건) · c2 `work:...:2:c2`(7건) · c3 `work:...:3:c3`(6건) — aggregate ok
+- 항목: 15건(중복 제거 **12건**) — P0:0 / P1:10 / P2:5. tokens 124,455 + 140,898 + 143,009
+- 사용자 선택: **[2] 전체 반영** (G 는 축소안)
+
+### 반영 내역
+
+| 키 | sev | 지적 | 반영 |
+|---|---|---|---|
+| A | P1 | 인증 필터가 `LOWEST_PRECEDENCE-100` 이라 route filter(RequestRateLimiter)보다 **나중** 실행 → 검증·strip 전 **위조 `X-User-Id` 가 rate-limit 키**로 사용 | order **-100**(route filter order 1 보다 앞) + 검증된 userId 를 `AUTHENTICATED_USER_ID_ATTR` 로 전달, `userKeyResolver` 는 헤더 대신 attribute 만 신뢰 |
+| B | P1 | `exp` 없는 토큰이 무기한 유효(jjwt 는 exp 존재 시에만 만료 검사) | `getExpiration()==null` → `InvalidTokenException`(401) + 회귀 테스트 |
+| C | P1 | JWKS 갱신이 `cache.put` 만 해서 **폐기/침해 kid 가 재시작까지 잔존** | `AtomicReference<Map>` **snapshot 통째 교체**(성공·비어있지 않은 응답만), 실패/빈 응답에만 LKG 유지 + 제거 kid 무효화 테스트 |
+| D | P1 | SCG 기본 `RedisRateLimiter` 는 Redis 오류를 `allowed=true` 로 삼켜 **fail-OPEN**(ADR-0013 D3 위반). `deny-empty-key` 로는 못 덮음 | `FailClosedRedisRateLimiter` 자체 구현(고정 윈도우 INCR, 오류 전파) + `@Primary` 로 기본값도 fail-closed → 필터가 **503** 매핑 |
+| E | P1 | `onErrorResume` 가 `chain.filter` 이후 업스트림 오류까지 삼켜 **401 오분류**, 공개 경로 체인 **이중 호출** | 오류 처리를 **인증 Mono 로 한정**, 다운스트림은 전파(RateLimiter 장애만 503 변환) + 회귀 2종 |
+| F | P1 | Boot 가 ApplicationReady 에 ACCEPTING 게시 → 내 REFUSING 을 덮어써 키 0개인데 ready | `@EventListener(ApplicationReadyEvent) @Order(LOWEST_PRECEDENCE)` 로 **Boot 이후 확정** + 기동 시 1회 적재 대기 |
+| G | P1 | preAuth 키가 `?email` 쿼리 — 실제 login/signup 은 email 이 **JSON body** → 쿼리만 바꿔 버킷 회피 | **축소 반영**: 조작 가능한 쿼리 성분 제거 → **IP 단독**. 계정 차원은 body-caching 필요라 계획 P13 에 **후속 항목**으로 명시 |
+| H | P1 | gateway 는 외부 진입점인데 8080 동일 포트에 actuator 노출(`/actuator/prometheus` 직접 접근) | **management.server.port=8081 분리** + smoke/PR3b scrape 경로 조정 |
+| c2:4 | P2 | 공개 경로에서 만료·위조·**deny hit** 토큰까지 익명 통과 → 로그아웃/reuse 무효화 우회 | 토큰이 *제시되면* 공개 경로여도 검증 → 401. 무토큰만 익명 통과 |
+| c2:5 | P2 | `/api/v1/auth/**` 전체가 pre-auth 키 → 인증 API 인 logout 포함 | signup/login/refresh 전용 라우트 분리(POST 한정), 나머지는 userId 키 |
+| c2:6 | P2 | `assertGatewayHasNoServletDeps` 가 `check` 미연결 → CI `./gradlew build` 가 가드를 안 돌림(false-green) | `check.dependsOn` 에 추가. **clean build 로 실제 실행 확인** |
+| c3:6 | P2 | `inFlight` 캐시 미해제 → 회전 직후 새 kid 가 cooldown 동안 401 | `doFinally` 로 해제 + "완료 fetch 재사용 금지" 테스트 |
+
+### 리뷰 전 자체 발견 (CI 파손)
+
+- **`/actuator/health` 503 → gateway 이미지 smoke 타임아웃**: JWKS 미도달(smoke 망에 user-service 없음) → readiness DOWN → 루트 health 집계 DOWN. 컨테이너 실행으로 재현 확인.
+  처분: readiness 는 **트래픽 게이팅** 의미이므로 유지하고, smoke 는 gateway 한정 **관리 포트(8081) liveness** 로 분기(도메인 5서비스는 루트 health 유지 — 실제 MySQL/Redis/Kafka 연결 검증이 유효).
+- 부트스트랩 테스트가 `NoUniqueBeanDefinitionException`(KeyResolver 3개 / RateLimiter 2개)을 2회 포착 → `@Primary` 로 해소. 테스트가 없었으면 런타임 부팅 실패.
+
+### 검증
+
+- `./gradlew clean build` **BUILD SUCCESSFUL (14m6s)** — 전 모듈 그린, `assertGatewayHasNoServletDeps`·`assertNoServiceProjectDeps` 실행 확인
+- gateway 테스트 **42 → 56건**, 0 실패
+- `docker build --build-arg SERVICE=gateway` **OK** (539MB) · `docker-health-smoke.sh gateway:ci` **passed**(`:18081/actuator/health/liveness`)
+- `image-contract-lint` matrix 6/6 인식(gateway 매니페스트는 PR3b → `IMAGE_CONTRACT_TRANSITION=1` 게이트)
+- diff: `.cache/diffs/diff-task-impl3-spring-cloud-gateway-1784805374.patch`
+- 종료: work.done. 재리뷰 없음(work 3/3 소진) — 검증은 빌드·테스트·스모크로 대체. 다음: `/ship`

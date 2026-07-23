@@ -166,12 +166,63 @@
 - [ ] **P22.** **HS512** fallback 제거(overlap 만료 후, dual-validation 종료): **Gateway 검증기 RS256 단일화**(common-auth verifier 는 P14 에서 이미 삭제됨) + `JwtAuthProperties.secret`·HMAC 잔재 sweep. **레거시 `bl:<raw-token>` dual-read 제거**도 여기서 — access token 최대 TTL 경과 증명을 게이트로(보강 a). **ADR-0013 사실 정정(loop2 #8)**: `0013:10,14,29,30` 이 레거시를 "HS256" 으로 기술하나 실제 서명은 **HS512**(512bit secret) — *결정 변경이 아닌 사실 오류*라 README 규칙대로 **`## Update Log` 추가 + `fix(adr):` 커밋**으로 정정(Why 와 구현 사실 분리, 새 ADR 불요). `:65` 의 알고리즘 대안 비교(HS256 vs RS256 vs ES256)는 결정 근거라 **원문 유지**.
 - [ ] **P23.** PR4 테스트: 메트릭 counter 통합테스트(사유 태그별), observability lint **negative**(총계 6 불일치·**Gateway ServiceMonitor 누락**·selector 불일치·escaped-quote 잔존 false-green 차단), HS512 제거 후 부팅/검증 회귀(Gateway).
 
+### PR3b 세부 — gateway k8s 배포 표면 (P17 분해)
+
+> **id 배치 주의**: `hpx_plan_lint` 가 stable id 의 **파일 등장 순서**를 P1..Pn 연속으로 강제한다(`.claude/scripts/lib/sync.sh:38-45`). 기존 P20~P23(PR4)의 번호를 바꾸면 PHASE4/audit 의 인용이 깨지므로, PR3b 세부는 문서 말미에 **P24~P30** 으로 잇는다. 실행 순서는 PR3b → PR3c → PR3d → PR4 그대로다.
+>
+> **범위 정본 = §PR3 실행 분할표**(PR3b = gateway 매니페스트 + 외부 노출 + canary, PR3c = 5서비스 ClusterIP 환원 + NetworkPolicy + header-trust). `docs/TASKS.md:43` 의 "PR3b(k8s/NetworkPolicy·노출 단일화)" 축약 서술은 분할표에 맞춰 정정한다 — **5서비스 직접 경로가 살아 있어야 canary 롤백이 성립**하므로 ClusterIP 환원을 PR3b 로 당기면 롤백 경로가 사라진다.
+
+**PR3b 진입 시 확정한 결정 (코드 grep 검증)**
+
+- **(가) gateway ServiceMonitor·관측성 lint 6 은 PR4 이연** — `scripts/servicemonitor-selector-lint.sh:95` 의 `CANONICAL` 은 도메인 5 **정확 일치**(extra 도 위반)이고, ADR-0015 §Decision S5 가 그 집합을, S6.d 가 "expected-service set = SM 이 매칭하는 Service name 집합" 을 계약으로 고정했다. gateway SM 을 지금 넣으면 selector-lint(D5-V5) + scrape-absent equality 5 rule + S6.a/b regex 5-set 이 **동시에** 깨져 ADR-0015 계약 변경(신규 ADR)을 동반한다. → PR3b 는 SM 을 만들지 않고 **ADR 무변경**으로 끝내며, SM·alert·lint 6 확장은 PR4(P21)에서 ADR 과 함께 일괄한다. PR3b 는 selector-lint 가 그대로 5 로 그린임을 **확증**한다(gateway Service 는 SM 없는 Service 로 남고, 이는 mysql/redis/kafka Service 와 동일한 무해 케이스).
+- **(나) Service 는 8080 단일 포트 — 관리 포트 8081 미노출**: gke overlay 가 gateway Service 를 `type: LoadBalancer` 로 patch 하는데, Service 에 8081 을 함께 선언하면 **LB 가 관리 포트까지 노출**해 PR3a 가 포트 분리로 막은 `/actuator/prometheus` 인터넷 노출이 k8s 층에서 되살아난다. 컨테이너는 8081 을 열되(probe·후속 scrape) Service 는 8080 만 게시한다. scrape 용 `gateway-metrics` ClusterIP Service 는 SM 과 함께 PR4 에서 신설.
+  - **PR4 로 넘기는 계약(리뷰 #7 → 2차 #6 으로 확정)**: `gateway-metrics` 는 `app: gateway` **만으로 선택되면 안 된다** — `servicemonitor-selector-lint.sh` 가 SM 이 매칭한 **모든** Service 에 endpoint port 존재를 요구하므로, 공용 label 만 쓰면 SM 이 public gateway Service(8080, 8081 없음)까지 매칭해 실패한다. → PR4(P21) 인수조건으로 **고정**: `gateway-metrics` Service labels = `{app: gateway, monitoring-role: metrics}`, ServiceMonitor `selector.matchLabels` = **동일한 두 키(논리곱)**, canonical 6 확장과 SM `metadata.name` 도 그때 함께 확정. **Secret 부재 계약(결정 라)은 PR4 에서도 유지** — PR4 가 뒤집는 것은 SM 기대값(5→6) 하나뿐이다(2차 리뷰 #3).
+- **(다) probe 는 8081** — `gateway/src/main/resources/application.yml` 의 `management.server.port: 8081` 때문에 `/actuator/health/{liveness,readiness}` 는 8081 에만 있다(도메인 5서비스는 8080). readiness 는 JWKS usable key ≥1 을 반영하므로(`JwksReadinessConfig`) cold start 시 트래픽 미수신이 k8s 층에서 그대로 성립한다.
+- **(라) Secret 매니페스트 미생성**: 현재 gateway 가 소비하는 비밀이 없다 — HS512 fallback 은 base 에서 off 이고 `JWT_SECRET` 은 빈 기본값, RS256 **개인키는 user-service Pod 전용**(보강 a, gateway 미마운트). P17 의 "secret" 항목은 **의도적 미이행**(빈 Secret 은 speculative). 전환 배포에서 fallback 을 켜야 할 때만 Secret 을 신설한다.
+- **(마) gateway HPA 는 order-service 단일 HPA 원칙의 명시적 예외**: `k8s/overlays/gke/hpa.yml` 이 "5서비스 균일 HPA 기각" 을 못박았으나, gateway 는 **전 트래픽 단일 진입점(SPOF)** 이라 §2 트레이드오프가 HA 를 요구한다. 도메인 서비스 확장 정책이 아니라 인프라 컴포넌트 가용성 결정으로 분리 기록.
+
+- [ ] **P24.** gateway base 매니페스트 — `k8s/base/services/gateway/{deployment.yml(Deployment+Service), configmap.yml}` + `k8s/base/kustomization.yml` 등록(2 리소스). 디렉터리명은 **`gateway`**(`-service` 접미사 없음) — `scripts/image-contract-lint.sh:47` 의 `INFRA_SERVICES=(gateway)` 가 `k8s/base/services/${svc}/deployment.yml` 로 직결. image = `ghcr.io/kimgyuilli/peekcart-gateway:latest`(D-015 3-way 정본). 컨테이너 포트 8080(+8081), probe 3종은 **8081**(결정 다), `replicas: 1`(base), resources 는 도메인 서비스 patch 와 같은 축.
+  - **`envFrom.configMapRef.name: gateway-config` 필수(리뷰 #1, P1)**: 도메인 서비스 선례(`k8s/base/services/user-service/deployment.yml:33-37`)와 달리 이 배선을 빠뜨리면 `SPRING_PROFILES_ACTIVE=k8s` 가 주입되지 않아 **application-k8s.yml 이 통째로 비활성**되고 Redis 가 `localhost` 기본값으로 붙는다. 렌더도 부팅 테스트도 못 잡는 false-green → P30 에서 **참조 존재를 구조적으로 assert**.
+  - **식별자 계약 고정(리뷰 #6)**: Deployment/Service `metadata.name: gateway`, 컨테이너 `name: gateway`, ConfigMap `metadata.name: gateway-config`. strategic merge 는 gvk+`metadata.name`, 컨테이너는 `name` 이 merge key라 하나라도 어긋나면 patch 가 조용히 무시되거나 **두 번째 컨테이너가 생긴다**.
+  - **`strategy.rollingUpdate.maxUnavailable: 0`**(+`maxSurge: 1`) 명시 — §6 롤아웃 공통 조건을 Deployment 필드로 실체화(리뷰 #8).
+- [ ] **P25.** gateway ConfigMap + k8s 프로파일 — ConfigMap 은 도메인 서비스와 동형으로 `SPRING_PROFILES_ACTIVE: k8s` 만 담고, **k8s 연결 정보는 `gateway/src/main/resources/application-k8s.yml` 이 단독 소유**(ADR-0007: 연결 정보=프로파일, 라우트 predicate·rate limit·alg allow-list=base).
+  - **소유 범위(리뷰 #2, P1)**: k8s yml 이 Redis 뿐 아니라 **업스트림 URI 5종·JWKS URI 도 명시 선언**한다 — `spring.data.redis.{host,port}` + 라우트가 참조하는 업스트림 키 5종 + `app.gateway.jwt.jwks-uri`. base 기본값은 **로컬 실행 편의**로 남기되, "k8s 에서 실제로 쓰이는 값" 의 소유자는 프로파일로 일원화한다(base 기본값이 k8s 정본을 겸하던 애매함 제거).
+  - **placeholder 키를 정규 계층형으로 교정(2차 리뷰 #1)**: 현재 base 는 `uri: ${USER_SERVICE_URI:http://user-service:8080}` — 프로파일이 이 값을 소유하려면 `USER_SERVICE_URI:` 라는 **환경변수 표기법을 프로퍼티 이름으로 고착**시켜야 한다(동작은 하지만 비정규). → base 의 placeholder 이름만 `${app.gateway.upstream.user-uri:http://user-service:8080}` 류로 바꾸고(5종 + `jwks-uri` 는 이미 정규 키) `application-k8s.yml` 이 그 키를 채운다. 환경변수 override 는 `APP_GATEWAY_UPSTREAM_USER_URI` 로 그대로 가능(SystemEnvironmentPropertySource 완화 매핑). **라우트 목록 구조는 base 에 그대로 둔다** — 프로파일로 옮기면 라우트 전체가 복제된다. 기존 테스트가 `*_SERVICE_URI` 를 참조하지 않음은 확인함(`gateway/src/test` 는 `app.gateway.jwt.jwks-uri` 만 사용).
+- [ ] **P26.** overlay patch — minikube: `patches/gateway-service.yml`(NodePort **30080** — minikube kustomization 주석의 "외부 노출 30080" 을 gateway 가 승계, 기존 30081~30085 와 무충돌) + `patches/gateway-deployment.yml`(`imagePullPolicy: Never`). gke: `patches/gateway-service.yml`(Internal LB annotation, 5서비스와 동일) + `patches/gateway-deployment.yml`(resources 상향) + `images[]` **6번째 entry**(`ghcr.io/kimgyuilli/peekcart-gateway` → `.../peekcart/gateway`) + `hpa.yml` 에 gateway HPA 추가(**minReplicas: 2**, maxReplicas 4, CPU 60%, `scaleTargetRef.name: gateway`, 결정 마). 양 overlay `kustomization.yml` patches 목록 등록. 모든 patch 의 `metadata.name`·컨테이너 `name` 은 P24 식별자 계약과 동일(리뷰 #6).
+- [ ] **P27.** CI 계약 — (a) `IMAGE_CONTRACT_TRANSITION` 제거 → **full 6/6**: `.github/workflows/ci.yml:55-59` 의 env 와 전환기 주석 삭제. 제거 후 `scripts/image-contract-lint.sh` 가 `checked_manifests == 6` 로 "full" 을 출력해야 한다(5/6 이면 실패 — PR3a 가 남긴 꼬리의 종결 지점). (b) **`scripts/gateway-exposure-lint.sh` 신설 + 같은 policy step 에 등록(리뷰 #4, P1)** — 아래 음성 조건은 `kubectl kustomize` 가 성공으로 통과시키므로 자동 검출이 없다. 렌더 산출 YAML 을 파싱해 위반 시 **non-zero exit**:
+  - **데이터 경로 전체를 고정(2차 리뷰 #2, P1)** — `ports[].port == {8080}` 만 보면 **`port: 8080, targetPort: 8081` 이 통과해 관리 엔드포인트가 LB 8080 으로 공개**된다. 따라서: Service `ports` 정확히 1개 + `port == 8080` **and `targetPort == 8080`**.
+  - **개수·selector 정합 — 이름이 아니라 실제 매칭으로 판정(3차 리뷰 #1, P1)**: `metadata.name` 만 세면 **다른 이름의 Service 가 gateway Pod 를 선택**하거나 **다른 Deployment 가 `app: gateway` Pod 를 추가**하는 우회가 남는다. → 렌더 산출 전체에서 ① **gateway Pod 를 selector 로 선택하는 Service 가 정본 하나뿐** ② **`app: gateway` Pod 를 생성하는 workload 가 정본 Deployment 하나뿐** ③ Deployment `selector.matchLabels` ↔ Pod template labels ↔ Service `selector` 3자 일치 ④ Deployment `containers` **정확히 1개**이고 `name == gateway`(P24 merge key 사고 탐지) ⑤ ConfigMap 1개. PR4 에서 `gateway-metrics` 를 **명시 allow-list** 로만 추가한다.
+  - **호스트 네트워크 우회 차단(3차 리뷰 #1)**: `hostNetwork == false` + 모든 컨테이너의 `hostPort` **부재** — hostPort 8081 은 Service 의 port/targetPort 검사를 통째로 우회해 관리 포트를 노출한다.
+  - **probe 계약**: startup/readiness/liveness 3종의 포트 == **8081** + 경로(`/actuator/health/{liveness,readiness}`) — 결정 (다)를 매니페스트에 고정.
+  - **비밀 미주입은 이름이 아니라 참조로, PodSpec 전체를 대상으로(2차 #3 → 3차 #2 로 확장, P1)**: 이름 prefix 추측은 임의 이름 Secret 을 놓치고, **`containers` 만 순회하면 `initContainers` 를 통한 주입을 놓친다**(initContainer 가 Secret 을 읽어 emptyDir 로 복사 가능하고, native sidecar 는 `restartPolicy: Always` 로 `initContainers` 에 위치해 "컨테이너 1개" 검사에도 안 걸린다). → **PodSpec 전체**에서 `containers` + `initContainers` 의 `env[].valueFrom.secretKeyRef` · `envFrom[].secretRef` 와 `volumes[].secret` · `volumes[].projected.sources[].secret` 이 **전무**함을 검사. gateway 는 initContainer 가 필요 없으므로 **`initContainers` 0개를 계약으로 고정**(가장 단순한 차단). k8s API 를 쓰지 않으므로 `automountServiceAccountToken: false` 도 함께 고정.
+  - **ServiceMonitor 집합은 검사하지 않는다** — `servicemonitor-selector-lint.sh` 의 canonical 정확일치가 이미 소유한 책임이라 중복 검사는 PR4 에서 **두 곳을 동시에 고쳐야 하는 부채**만 만든다. (2차 리뷰 #3)
+  - gateway Deployment 의 `envFrom[].configMapRef.name == gateway-config` **존재** + 해당 ConfigMap 의 `SPRING_PROFILES_ACTIVE == k8s`(1차 리뷰 #1 false-green 차단)
+  - gateway Deployment 의 `strategy.rollingUpdate.maxUnavailable == 0`
+  - minikube 렌더: gateway Service `type == NodePort && nodePort == 30080` / gke 렌더: `type == LoadBalancer` + Internal annotation + `images[]` rewrite 적용 결과가 `.../peekcart/gateway`
+  - **음성 자기검증(조작 입력 정본 — §5·§6 은 이 목록을 복제하지 말고 여기를 참조)**: `targetPort=8081` · Service selector 불일치 · 컨테이너 2개 · **다른 이름의 두 번째 Service 가 gateway Pod 선택** · **다른 이름 Deployment 가 `app: gateway` Pod 생성** · `hostPort: 8081` · `initContainers` 의 `secretKeyRef` 주입 · `projected` Secret volume · `configMapRef` 제거 — **9종** 전부에서 스크립트가 non-zero 여야 한다(vacuous-green 차단, `image-contract-lint` 두 모드 검증 선례).
+  - **검증 소유권 분계(3차 리뷰 #4)**: **Secret 소비 참조 = `gateway-exposure-lint`** / **ServiceMonitor 집합 = `servicemonitor-selector-lint`**. 두 스크립트가 같은 대상을 겹쳐 검사하지 않는다.
+- [ ] **P28.** 롤아웃 runbook(§7 신설) — canary → 100% 전환 절차를 **실행 가능한 명령**으로.
+  - **rollback 은 `kubectl delete -k` 금지(리뷰 #3, P1)**: gateway 전용 kustomization 이 없어 overlay 전체를 대상으로 실행되면 **5서비스 + MySQL/Redis/Kafka(PVC 포함)** 까지 삭제된다 — 롤백이 전면 장애가 된다. 정본 순서는 ① 클라이언트 진입점을 기존 서비스별 NodePort/LB 로 **먼저** 복귀 → ② 필요 시 `kubectl -n peekcart rollout undo deployment/gateway` → ③ 완전 철거가 필요하면 `kubectl -n peekcart delete deployment/gateway service/gateway configmap/gateway-config`(+gke `hpa/gateway`)를 **이름 단위로** 명시. runbook 에 "overlay 전체 delete 금지" 를 경고로 박는다.
+  - **canary 파라미터(리뷰 #8)**: 트래픽 분할은 클라이언트 진입점 전환(요청 비율)로 정의하고 — 진입점 cohort·승격 임계(5xx 비율·p95)·중단 임계·관찰 시간을 수치로 적는다. 단계별 이미지는 **`latest` 금지 — SHA 태그 또는 digest 고정**(`kustomize edit set image ...@sha256:...`, `scripts/promote-images.sh` 가 digest 산출)해야 canary/rollback 버전이 재현된다.
+  - **rollback 을 재현 가능하게(2차 리뷰 #5, P1)**: `rollout undo` 만으로는 대상 revision 이 암묵적이고, undo 뒤 **canary digest 가 그대로인 kustomization 을 다시 apply 하면 즉시 실패 버전으로 복귀**한다. runbook 순서를 ① 배포 **전** known-good digest + `kubectl rollout history` revision 번호 **기록** → ② 진입점 복귀 → ③ `rollout undo --to-revision=<기록값>` 또는 `kubectl -n peekcart set image deployment/gateway gateway=<known-good>@sha256:...` → ④ `rollout status` + **기존 5서비스 진입점 정상성 확인** → ⑤ 로컬 kustomization 도 known-good digest 로 되돌린 뒤에만 재apply — 로 고정한다.
+  - **②의 제어면과 barrier 를 명시(3차 리뷰 #3, P1)**: "진입점 복귀" 를 추상어로 남기지 않는다 — 환경별 실제 수단(minikube = 클라이언트가 치는 NodePort 번호, gke = 사용할 LB 주소)과 cohort 값을 runbook 에 적고, **② 직후 barrier** 를 둔다(기존 5서비스 진입점 도달성 확인 + gateway 잔존 트래픽 0 또는 허용 임계 이하). 전파 전에 gateway 를 undo/철거하면 잔존 트래픽이 실패한다. **기록 위치도 고정**: known-good digest·revision·전환 시각을 타임스탬프 붙은 증적 파일로 남긴다(장애 중 기억에 의존 금지). **완전 철거 시 HPA 를 Deployment 보다 먼저 삭제**하고(HPA 가 replica 를 되살리는 것 방지), 이미지 rollback 중에는 HPA 유지·일시정지 중 어느 쪽인지 명시.
+  - 배포(`kubectl apply -k k8s/overlays/<env>`) → readiness 확인 → 보호/공개/spoof 3종 probe → 전환 → 오류율 확인 → 역순 rollback. PR3c 진입 게이트("100% 전환 유지·혼재 구간 refresh/logout 정상")의 판정 기준을 수치로 적는다.
+- [ ] **P29.** gke README 갱신 — 외부 진입점이 서비스별 5개 LB 에서 **gateway 1개** 로 바뀜(5서비스 LB 는 PR3c 까지 잔존하는 전환기 표면임을 명시). 기존 per-service 노출 안내에 전환기 표식.
+- [ ] **P30.** PR3b 검증(§5 PR3b 항 참조) — 렌더 양성/음성 + lint 3종 + gateway 이미지 smoke 재확인. **canary 실증적은 PR3c GKE 세션에 합류**(아래 결정 참조).
+  - **canary 증적 처분(정직성 게이트)**: 본 repo 에는 앱 레벨 compose e2e 가 없고(`docker-compose.yml` = 인프라 3종만) 상시 클러스터도 없다. 따라서 PR3b 는 **렌더+lint+이미지 smoke** 로 코드 산출물을 닫되, **"canary 통과" 를 렌더 성공으로 대체 기록하지 않는다**. 실 클러스터 probe(보호/공개/spoof·오류율)는 PR3c 의 **GKE 보안 smoke 세션에서 NetworkPolicy 음성·양성과 함께 1회 수행**하고, 그때까지 PR3b 는 "매니페스트 완료 / 전환 증적 미확보" 로 §6 에 남긴다(§5 PR3 의 "렌더-only 대체 금지" 규칙 유지).
+
 ## 4. 영향 파일
 
 - **신규 모듈**: `gateway/**`(build.gradle·routing config·검증 필터·RateLimiter·Dockerfile), `settings.gradle`.
 - **PR1**: `user-service/global/jwt/JwtTokenSigner.java`, `peekcart-common-auth/global/jwt/JwtTokenVerifier.java`·`JwtAuthProperties.java`(→`JwtKeyProperties` 신규), User JWKS controller, **테스트 키쌍 = `:common` testFixtures 리소스**(단일 소유, B5).
 - **PR2**: `user-service` `refresh_tokens` 마이그레이션(V2)·`RefreshToken.java`·`RefreshTokenRepository(Impl/Jpa)`·`AuthService.java`·`TokenBlacklistPort`/deny 확장·`TokenClaims`(family_id)·common-auth `JwtTokenVerifier`(claim 매핑)·`JwtFilter`/`TokenBlacklistLookupPort`/`RedisTokenBlacklistLookupAdapter`(전환기 family deny enforcement)·`JwtTokenSigner`/`TokenIssuer`(issue 시그니처).
-- **PR3**:
+- **PR3b**(실행 분할 — P24~P30):
+  - *신설*: `k8s/base/services/gateway/{deployment.yml,configmap.yml}`(Deployment+Service+ConfigMap), `gateway/src/main/resources/application-k8s.yml`, `k8s/overlays/minikube/patches/gateway-{deployment,service}.yml`, `k8s/overlays/gke/patches/gateway-{deployment,service}.yml`.
+  - *신설(계약 lint)*: `scripts/gateway-exposure-lint.sh`(P27b — 렌더 음성 조건 실행화).
+  - *수정*: `k8s/base/kustomization.yml`(+2 리소스)·`k8s/overlays/{minikube,gke}/kustomization.yml`(patches 등록, gke `images[]` 6번째)·`k8s/overlays/gke/hpa.yml`(gateway HPA 추가)·`.github/workflows/ci.yml`(`IMAGE_CONTRACT_TRANSITION` 제거 + `gateway-exposure-lint` 등록)·`k8s/overlays/gke/README.md`·본 계획서 §7 runbook.
+  - *부분 수정*: `gateway/src/main/resources/application.yml` — **구조는 유지**(라우트 목록·rate limit·alg allow-list 는 동작 규약이라 base 소유)하되 ① 업스트림 placeholder 이름을 정규 계층형 키로 교정(`${USER_SERVICE_URI:..}` → `${app.gateway.upstream.user-uri:..}` 5종, 2차 리뷰 #1), ② `:176` 부근 주석 정정 — 현재 "k8s Service 는 8080 만 노출하고 ServiceMonitor 가 8081 을 scrape 한다(P17/PR3b)" 는 SM 이 PR4 로 이연된 계획과 모순 → "PR3b 는 probe 전용, PR4 의 `gateway-metrics` Service + ServiceMonitor 가 8081 을 scrape" 로 수정(2차 리뷰 #7).
+  - *미포함(의도)*: Secret(소비 비밀 0, 결정 라)·ServiceMonitor(ADR-0015 계약, 결정 가 → PR4)·ServiceAccount(vanilla NetworkPolicy 는 `podSelector` 로 선택하므로 SA 는 정책과 함께 도입, → PR3c)·NetworkPolicy/5서비스 ClusterIP 환원(→ PR3c).
+- **PR3(전체)**:
   - *신설*: `gateway/**`(routing 정본·reactive 검증 필터·RateLimiter·gateway-local DTO·Dockerfile), `peekcart-common-auth/global/security/`(HeaderAuthenticationFilter·HeaderTrustSecurityConfigurer), `k8s/base/services/gateway/**`(deployment/svc/cm/secret/HPA/SA/**ServiceMonitor**)·NetworkPolicy.
   - *삭제(ADR-0014 D2-c exit)*: common-auth `JwtFilter`·`JwtTokenVerifier`·`JwtSecurityConfigurer`·`TokenBlacklistLookupPort`·`RedisTokenBlacklistLookupAdapter`(+`JwtFilterTest`) 및 common-auth/5서비스의 검증용 JJWT·Redis 의존.
   - *수정*: 5서비스 `*SecurityConfig.java`·`LoginUser`/`LoginUserArgumentResolver`/`AuthController.logout`/`AuthService.logout`·`WithMockLoginUserSecurityContextFactory`·통합테스트 2개·`settings.gradle`·CI images 매트릭스·`scripts/image-contract-lint.sh`·`scripts/promote-images.sh`·`scripts/servicemonitor-selector-lint.sh`·**overlay service patch 10개 제거**(minikube NodePort 5·gke LB 5).
@@ -182,6 +233,13 @@
 - **PR1**: `./gradlew :user-service:test :peekcart-common-auth:test` — RS256 왕복·alg 거부·JWKS 스키마 그린. HS256 위조 토큰 401.
 - **PR2**: `./gradlew :peekcart-common-auth:test :user-service:test` — grace 1회/2회 차단·병렬 1건만 성공, reuse→family revoke→Redis deny write 확증(Testcontainers Redis), common-auth `TokenClaims`/parseToken family_id 회귀.
 - **PR3**: `./gradlew build test`(9모듈) — gateway 라우팅(전 prefix 양성 + 오라우팅 음성)·응답 행렬(401/403/429/503+readiness)·fail-closed·헤더 strip/inject·**header-trust 음성 매트릭스(부분·형식오류 401)**·공개 경로 SSOT 표 기준 무헤더 양성 ↔ 보호 경로 401/403·JWKS 404(외부)↔200(내부)·rate limit 429·Redis fault-injection·**conformance golden vector**(PR3a differential → 동결 → PR3d 이후 Gateway 단독)·REACTIVE 부팅+servlet 부재. **단계별 canary**(PR3a~d 진입 조건) 증적. **k8s 음성·양성**(NodePort/LB 부재·Prometheus target up·non-gateway 차단·Gateway SA 성공·webhook Gateway 경유) — minikube CNI 제약 시 **GKE 보안 smoke 스크립트 필수 exit**(enforcement 확인→배포→probe→증적→cleanup, 렌더-only 불충분·미실행 시 PR3 미완료).
+- **PR3b**(P30):
+  - ① 렌더 — `for env in minikube gke; do kubectl kustomize "k8s/overlays/$env"; done`(brace expansion 은 한 명령에 인자 2개를 넘겨 실패한다). **양성**: gateway Deployment/Service/ConfigMap 각 1, gke `images[]` rewrite 가 gateway 에도 적용(`.../peekcart/gateway`), HPA 2건(order-service·gateway), minikube gateway Service `type=NodePort nodePort=30080`.
+  - ② **음성은 산문이 아니라 실행 가능한 assertion** — `scripts/gateway-exposure-lint.sh` 가 렌더 산출을 파싱해 위반 시 non-zero. **검사 조건과 조작 입력 목록의 정본은 P27(b)** — 여기에 재복제하지 않는다(3차 리뷰 #4: 복제본이 어긋나 구현자가 다른 합격 기준을 따를 위험). 소유권 분계도 P27(b) 를 따른다(Secret 소비 참조=본 lint / ServiceMonitor 집합=`servicemonitor-selector-lint`).
+  - ③ CI policy step **lint 전체 재현**(4종 — `ci.yml:62-65`): `image-contract-lint.sh`(env 없이 **full 6/6**, "manifest-checked: 6/6, full" 확인) · `servicemonitor-selector-lint.sh`(**canonical 5 유지 그린** — gateway Service 추가가 SM↔Service 매칭을 깨지 않음을 확증) · `observability-ssot-lint.sh` · `observability-promql-lint.sh`. 여기에 `kustomize-namespace-lint.sh` + 신규 `gateway-exposure-lint.sh`.
+  - ④ 이미지 — `docker build --build-arg SERVICE=gateway -t gateway:ci .`(CI 와 동일 형식) + `bash scripts/docker-health-smoke.sh gateway:ci`(PR3a 계약 회귀 — smoke 가 쓰는 관리 포트 8081 이 매니페스트 probe 포트와 동일함을 확인).
+  - ⑤ `./gradlew :gateway:test` 그린 + **k8s 프로파일 전용 설정 테스트 신설(2차 리뷰 #4, P1)** — `:gateway:test` 는 기본적으로 `application-k8s.yml` 을 **로드하지 않으므로**(CI 는 오히려 `SPRING_PROFILES_ACTIVE=test`) 새 키가 오타여도 base 기본값으로 그린이 된다. → `k8s` 프로파일을 명시 활성화한 테스트에서 **업스트림 5키·JWKS·Redis 가 프로파일 property source 에 실제 존재**함을 assert(값만 비교하면 base 기본값과 같아 무의미 — **property 존재/origin 까지 확인**)하고, 각 `RouteDefinition.uri` 가 그 값으로 해석됐는지 확인.
+  - **canary 실증적은 미포함** — PR3c GKE 세션(P30 정직성 게이트).
 - **PR4**: 메트릭 counter 통합테스트(사유 태그)·observability lint negative(총계 6·Gateway ServiceMonitor 누락)·HS512 제거 회귀. 전 모듈 그린.
 - **가드**: `assertNoServiceProjectDeps`(gateway↔서비스 직접 의존 금지), **gateway↔`:common` 의존 금지 가드**(보강 e), B1b string-level sweep(route path↔서비스 prefix).
 
@@ -192,6 +250,7 @@
 - [ ] Gateway 통해서만 인증 통과, 리소스 서비스 direct ingress 거부(헤더 신뢰·NetworkPolicy·**NodePort/LB 환원**). 외부 유입 X-User-* spoof 제거. 공개 경로는 무헤더로도 통과. (PR3)
 - [ ] Rate limit route-class별 429 + fail-closed(401/429/503 응답 계약 분리). (PR3)
 - [ ] **ADR-0014 D2-c exit**: move/delete/retain 표대로 servlet 검증 컴포넌트 삭제 + 키/서명 클래스 User 이관 + 검증 전용 JJWT·Redis 의존 제거(User 서명·Product 캐시는 유지). (PR3d)
+- [ ] **PR3b**: gateway k8s 배포 표면 완성(base 2 리소스 + overlay patch 4 + gke `images[]` 6 + HPA) 후 **`image-contract-lint` full 6/6**(전환기 flag 제거) · `servicemonitor-selector-lint` 5 유지 · **`gateway-exposure-lint` 그린 + P27(b) 조작 입력 9종 전부에서 실패**(조건·목록의 정본은 P27(b), 여기서 재열거하지 않음). runbook 의 rollback 이 **이름 단위 삭제**(overlay 전체 delete 금지)이고 canary 이미지가 **digest 고정**. **전환 증적은 PR3c GKE 세션까지 미확보로 명시** — 렌더 성공을 canary 통과로 기록 금지. (PR3b)
 - [ ] **무중단 롤아웃 PR3a~d 완주**(단계별 이미지 태그·진입 조건·`maxUnavailable=0`·역순 rollback runbook, 혼재 구간 인증 무중단). (PR3)
 - [ ] **family-less 토큰 소멸 증명 후** 수용 경로 제거 + `LoginUser.familyId` non-null 불변식. (PR3d)
 - [ ] header-trust 3-state 계약(anonymous 통과 / 완전 인증 / 그 외 401) — 부분·형식오류가 500·anonymous 로 새지 않음. (PR3)
@@ -199,3 +258,111 @@
 - [ ] S9 auth_failure 메트릭 + ADR-0009 S9 행 + observability lint 6/6(도메인 5+인프라 1). (PR4)
 - [ ] HS512 fallback + 레거시 `bl:` dual-read 제거 후 9모듈 그린, 인증 회귀 0. (PR4)
 - [ ] 보안 묶음 L-001/002/003/019 종결, ADR-0013 구현 완료.
+
+---
+
+## 7. 롤아웃 runbook — PR3b (canary → 100% 전환)
+
+> 실행 단위는 §PR3 실행 분할표의 **PR3b**. 이 단계에서 5서비스 직접 경로(NodePort/Internal LB)는 **살아 있다** —
+> 그것이 canary 의 롤백 경로다. 직접 경로 제거·NetworkPolicy 는 PR3c.
+>
+> ⚠️ **본 runbook 은 아직 실행되지 않았다.** PR3b 는 매니페스트·lint 까지 코드로 닫고, 실제 클러스터 probe 는
+> PR3c 의 GKE 보안 smoke 세션에서 NetworkPolicy 음성·양성과 함께 1회 수행한다. 렌더 성공을 canary 통과로
+> 기록하지 않는다(§5 PR3 "렌더-only 대체 금지").
+
+### 7-1. 배포 전 기록 (rollback 재현성의 전제)
+
+장애 중에 기억에 의존하지 않도록 **배포 전에** 아래를 증적 파일로 남긴다 —
+`docs/progress/evidence/pr3b-rollout-<YYYYMMDD-HHMM>.md`:
+
+| 항목 | 취득 명령 |
+|---|---|
+| known-good gateway digest | `scripts/promote-images.sh --dry-run` 출력의 `@sha256:...` |
+| 현재 Deployment revision | `kubectl -n peekcart rollout history deployment/gateway` |
+| 전환 전 진입점 상태 | `kubectl -n peekcart get svc -o wide` (5서비스 NodePort/LB 주소) |
+| 전환 시각 | `date -u +%FT%TZ` |
+
+이미지는 **`latest` 금지 — digest 고정**. `latest` 로 배포하면 canary 와 rollback 대상이 같은 태그를 가리켜
+"어느 버전으로 되돌리는가" 가 성립하지 않는다.
+
+```bash
+cd k8s/overlays/gke
+kustomize edit set image \
+  ghcr.io/kimgyuilli/peekcart-gateway=asia-northeast3-docker.pkg.dev/<PROJECT>/peekcart/gateway@sha256:<digest>
+# 편집 결과는 커밋하지 않는다 — operator 로컬 상태(overlay README 규약)
+```
+
+### 7-2. 배포 + readiness
+
+```bash
+kubectl apply -k k8s/overlays/<env>
+kubectl -n peekcart rollout status deployment/gateway --timeout=5m
+kubectl -n peekcart get pods -l app=gateway   # READY 1/1 (gke: HPA minReplicas 2)
+```
+
+readiness=true 는 **JWKS usable key ≥ 1** 을 뜻한다(`JwksReadinessConfig`). cold start 로 공개키를 못 받은
+인스턴스는 트래픽을 받지 않는다 — readiness 가 안 오르면 User JWKS 도달성부터 확인한다.
+
+### 7-3. 전환 전 probe 3종 (gateway 주소 기준)
+
+`GW` = minikube `http://$(minikube ip):30080` / gke = Internal LB 주소.
+
+| # | 목적 | 명령 | 기대 |
+|---|---|---|---|
+| 1 | 공개 경로 무헤더 통과 | `curl -s -o /dev/null -w '%{http_code}' $GW/api/v1/products` | `200` |
+| 2 | 보호 경로 무토큰 거부 | `curl -s -o /dev/null -w '%{http_code}' $GW/api/v1/orders` | `401` |
+| 3 | **spoof 제거** | `curl -s -H 'X-User-Id: 999' -H 'X-User-Role: ADMIN' $GW/api/v1/orders -o /dev/null -w '%{http_code}'` | `401` (외부 헤더는 항상 strip) |
+| 4 | 관리 포트 미노출 | `curl -s -o /dev/null -w '%{http_code}' $GW/actuator/prometheus` | `404` (라우트 없음) |
+
+4번이 200 이면 즉시 중단 — Service 에 8081 이 섞인 것이다(`gateway-exposure-lint` 가 CI 에서 막지만
+운영 클러스터의 수동 patch 는 못 막는다).
+
+### 7-4. canary → 100%
+
+트래픽 분할은 **클라이언트 진입점 전환 비율**로 정의한다(Ingress 가중치 라우팅은 PR3c 이후 도입 시 재작성).
+
+| 단계 | cohort | 관찰 시간 | 승격 조건 | 중단 조건 |
+|---|---|---|---|---|
+| c1 | 내부 검증 클라이언트만 | 15분 | 5xx < 0.5%, p95 < 500ms, 401 급증 없음 | 5xx ≥ 1% 또는 p95 ≥ 1s |
+| c2 | 트래픽 50% | 30분 | 동상 | 동상 |
+| c3 | 100% | 60분 | 동상 + refresh/logout 정상 | 동상 |
+
+c3 를 60분 유지하면 **PR3c 진입 조건("100% 전환 유지")** 충족으로 본다. 증적은 7-1 파일에 이어 적는다.
+
+### 7-5. rollback (역순 — 순서를 지키지 않으면 잔존 트래픽이 실패한다)
+
+> ❌ **`kubectl delete -k k8s/overlays/<env>` 금지.** gateway 전용 kustomization 이 없어 overlay 전체가
+> 대상이 된다 — 5서비스와 MySQL/Redis/Kafka(PVC 포함)까지 삭제되어 롤백이 전면 장애가 된다.
+
+```bash
+# ① 진입점 복귀: 클라이언트를 기존 서비스별 직접 경로로 되돌린다
+#    minikube = NodePort 30081~30085 / gke = 서비스별 Internal LB 주소 (7-1 에 기록해 둔 값)
+
+# ② barrier — 복귀가 전파됐는지 확인한 뒤에만 다음 단계로
+kubectl -n peekcart get svc user-service product-service order-service payment-service notification-service
+for p in 30081 30082 30083 30084 30085; do
+  curl -s -o /dev/null -w "$p=%{http_code}\n" "http://$(minikube ip):$p/actuator/health"
+done
+#    gateway 잔존 트래픽이 0(또는 허용 임계 이하)인지 확인 — 아니면 여기서 대기
+
+# ③ 이미지 되돌리기 (둘 중 하나, 7-1 기록값 사용)
+kubectl -n peekcart rollout undo deployment/gateway --to-revision=<기록한 revision>
+# 또는
+kubectl -n peekcart set image deployment/gateway gateway=<known-good>@sha256:<digest>
+
+# ④ 확인
+kubectl -n peekcart rollout status deployment/gateway --timeout=5m
+
+# ⑤ 로컬 kustomization 도 known-good digest 로 되돌린 뒤에만 재apply
+#    (canary digest 가 남은 채 apply 하면 ③을 무효화하고 즉시 실패 버전으로 복귀한다)
+cd k8s/overlays/gke && kustomize edit set image \
+  ghcr.io/kimgyuilli/peekcart-gateway=<known-good>@sha256:<digest>
+```
+
+**완전 철거 시**: HPA 를 Deployment 보다 **먼저** 삭제한다(HPA 가 replica 를 되살린다).
+이미지 rollback(③) 중에는 HPA 를 그대로 둔다 — HPA 는 replica 수만 조정하고 이미지 revision 은 건드리지 않는다.
+
+```bash
+kubectl -n peekcart delete hpa/gateway              # gke only, Deployment 보다 먼저
+kubectl -n peekcart delete deployment/gateway service/gateway configmap/gateway-config
+```

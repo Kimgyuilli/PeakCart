@@ -1,0 +1,14 @@
+# minikube: NodePort 30080 — 외부 진입점 정본. 5서비스의 30081~30085 는 PR3c 에서 ClusterIP 로
+# 환원될 전환기 표면이고(canary 롤백 경로), 최종 외부 노출은 이 gateway 하나다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: peekcart
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080

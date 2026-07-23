@@ -1,0 +1,23 @@
+# gateway — k8s 프로파일 (ADR-0007: 연결 정보 = 프로파일, 동작 규약 = base)
+#
+# 이 파일이 "k8s 에서 실제로 쓰이는 연결값" 의 단독 소유자다. base(application.yml) 의 동일 값은
+# 로컬 실행 편의 기본값일 뿐이며, 클러스터 동작은 여기 선언으로 결정된다.
+# ConfigMap(gateway-config)은 SPRING_PROFILES_ACTIVE=k8s 스위치만 담는다.
+spring:
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+app:
+  gateway:
+    # 라우트 uri placeholder(${app.gateway.upstream.<svc>-uri:...}) 가 참조하는 값.
+    upstream:
+      user-uri: http://user-service:8080
+      product-uri: http://product-service:8080
+      order-uri: http://order-service:8080
+      payment-uri: http://payment-service:8080
+      notification-uri: http://notification-service:8080
+    jwt:
+      # 공개키 정본 = User JWKS (ADR-0013 D1).
+      jwks-uri: http://user-service:8080/.well-known/jwks.json

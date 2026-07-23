@@ -87,3 +87,4 @@
 > 3-질문 필터에서 "자동화 가능"으로 라우팅된 것들. 만들어지면 위 "승격됨" 으로 이동.
 - **ship: partition 커밋 후 untracked 0 검사** — 디렉토리 pathspec 으로 add 하면 모듈 루트 파일(`*-service/build.gradle`)을 놓칠 수 있음. `/ship` Step 4 말미에 "staged 외 추적 대상 잔여 0" assert. (출처 PR2a-2b, PR2b/c/d 반복)
 - **ship: drift 디텍터 rename 처리** — `hpx_diff_absorption_status` 가 rename 많은 diff 에서 커밋 0건인데 `partially_live` 오판. `git status --porcelain` 의 `R old -> new` 양쪽을 매칭하도록 수정. (출처 PR2a-2b, rename-heavy peel 반복)
+- **work: k8s 리소스 추가 시 CI policy step lint **전부** 실행** — 새 Service/워크로드를 넣으면 그 리소스를 ground truth 로 삼는 lint 가 여럿이라(`servicemonitor-selector` 는 그린인데 `observability-promql` 은 red) 일부만 돌리면 CI red 를 놓친다. `/work` 검증 단계에서 ci.yml `Run CI policy lints` 의 명령 목록을 파싱해 그대로 실행하는 헬퍼. (출처: 구현 ③ PR3b — gateway Service 추가가 promql-lint 의 "SM 매칭 Service" glob 근사를 깨뜨렸고, Codex diff 리뷰가 대신 잡음)

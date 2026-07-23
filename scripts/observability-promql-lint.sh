@@ -13,7 +13,8 @@
 #
 # Ground truth:
 #   application set = 5서비스 <svc>-service/src/main/resources/application.yml :: management.metrics.tags.application
-#   service set     = k8s/base/services/*/deployment.yml :: (kind: Service) metadata.name
+#   service set     = k8s/base/services/*/deployment.yml :: (kind: Service) 중 **ServiceMonitor 가
+#                     매칭하는** 것의 metadata.name (ADR-0015 S6.d). SM 없는 인프라 Service(gateway)는 제외.
 #                     (up{service=} 의 service 라벨은 매칭 Service 이름 — selector app 값 아님, ADR-0015 S6.d)
 #
 # PromQL syntax: promtool check rules (정본). 미설치 시 검증 불가 → exit 2 (false-green 금지).
@@ -70,13 +71,29 @@ for p in sorted(glob.glob("*-service/src/main/resources/application.yml")):
     if val:
         app_set.add(val)
 
+# scrape 대상 = **ServiceMonitor 가 매칭하는** Service 의 metadata.name (ADR-0015 §Decision S6.d).
+# 전체 Service glob 이 아니다 — SM 이 없는 인프라 컴포넌트(gateway, 구현 ③ PR3b)는 scrape 대상이
+# 아니므로 scrape-absent rule 도 가질 수 없다. glob 근사를 쓰면 그런 Service 가 추가되는 순간
+# "alert 에 없다" 며 오탐한다(계약이 아니라 구현 근사의 문제).
+sm_selectors = []
+for p in sorted(glob.glob("k8s/base/services/*/servicemonitor.yml")):
+    with open(p) as f:
+        for d in yaml.safe_load_all(f):
+            if d and d.get("kind") == "ServiceMonitor":
+                sel = ((d.get("spec") or {}).get("selector") or {}).get("matchLabels") or {}
+                if sel:
+                    sm_selectors.append(sel)
+
 svc_set = set()
 for p in sorted(glob.glob("k8s/base/services/*/deployment.yml")):
     with open(p) as f:
         for d in yaml.safe_load_all(f):
             if d and d.get("kind") == "Service":
                 name = (d.get("metadata") or {}).get("name")
-                if name:
+                labels = (d.get("metadata") or {}).get("labels") or {}
+                if not name:
+                    continue
+                if any(all(labels.get(k) == v for k, v in sel.items()) for sel in sm_selectors):
                     svc_set.add(name)
 
 # 발견 집합이 5서비스 정본과 정확히 일치하는지 먼저 검증 (누락 서비스 false-green 차단)

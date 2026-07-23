@@ -22,3 +22,6 @@ patches:
   - path: patches/order-service-service.yml
   - path: patches/payment-service-deployment.yml
   - path: patches/payment-service-service.yml
+  # gateway(인프라) — 외부 진입점 NodePort 30080.
+  - path: patches/gateway-deployment.yml
+  - path: patches/gateway-service.yml

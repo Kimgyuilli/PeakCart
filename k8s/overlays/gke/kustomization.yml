@@ -34,12 +34,15 @@ patches:
   - path: patches/order-service-service.yml
   - path: patches/payment-service-deployment.yml
   - path: patches/payment-service-service.yml
+  # gateway(인프라) — Internal LB 외부 진입점.
+  - path: patches/gateway-deployment.yml
+  - path: patches/gateway-service.yml
   # PVC 는 JSON6902 — base 의 mysql/redis/kafka PVC 3 건에 동일 storageClassName 일괄 적용
   - path: patches/pvc-storageclass.yml
     target:
       kind: PersistentVolumeClaim
 
-# GHCR → Artifact Registry 경로 재작성 (D-016 image promotion). 5서비스 per-image.
+# GHCR → Artifact Registry 경로 재작성 (D-016 image promotion). 도메인 5 + 인프라 gateway 1 = 6.
 # PROJECT_ID 치환은 README 참고 (scripts/promote-images.sh 가 승격·digest 산출).
 images:
   - name: ghcr.io/kimgyuilli/peekcart-notification-service
@@ -56,4 +59,7 @@ images:
     newTag: latest
   - name: ghcr.io/kimgyuilli/peekcart-payment-service
     newName: asia-northeast3-docker.pkg.dev/PROJECT_ID_PLACEHOLDER/peekcart/payment-service
+    newTag: latest
+  - name: ghcr.io/kimgyuilli/peekcart-gateway
+    newName: asia-northeast3-docker.pkg.dev/PROJECT_ID_PLACEHOLDER/peekcart/gateway
     newTag: latest

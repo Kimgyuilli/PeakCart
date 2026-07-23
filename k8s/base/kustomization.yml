@@ -39,3 +39,8 @@ resources:
   - services/payment-service/configmap.yml
   - services/payment-service/secret.yml
   - services/payment-service/servicemonitor.yml
+  # gateway(인프라 컴포넌트, ADR-0013 D3 · 구현 ③ PR3b). 도메인 5와 달리:
+  #   - Secret 없음: 소비하는 비밀이 0 (RS256 개인키는 user-service 전용, HS512 fallback off)
+  #   - ServiceMonitor 없음: scrape 계약(ADR-0015 S5/S6.d) 확장은 PR4 소관
+  - services/gateway/deployment.yml
+  - services/gateway/configmap.yml

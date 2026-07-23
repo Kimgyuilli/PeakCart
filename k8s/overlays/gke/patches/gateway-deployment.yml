@@ -1,0 +1,19 @@
+# GKE: e2-standard-4 기준 resources 상향. strategic merge — container name(gateway) 매칭.
+# replicas 는 HPA(minReplicas 2)가 관리한다 — 여기서 고정하지 않는다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: peekcart
+spec:
+  template:
+    spec:
+      containers:
+        - name: gateway
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi

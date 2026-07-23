@@ -225,3 +225,81 @@
 - /done applied: TASKS ③ 행에 PR3a 인라인(**🔄 유지** — PR3b/c/d·PR4 대기) · PHASE4 PR3a 이력 추가(핵심 결정 6·후속 3 명시).
   ADR-0013 **Accepted 유지**(D1/D3 구현이지 결정 변경 아님) · ADR-0014 D2-c exit 은 PR3c 소관 · Layer1(02/04) 미변경(header-trust 완료 후 = 계획 P21)
 - 후속 필수: **PR3b 에서 gateway k8s 매니페스트 추가 후 ci.yml 의 `IMAGE_CONTRACT_TRANSITION=1` 제거**(full 6/6 강제)
+
+## 2026-07-23 — GP-1 / GP-2 (PR3b 계획, loop 1)
+
+**GP-1(노출, ADR 선행=아니오)**: gateway ServiceMonitor 추가가 ADR-0015 S5(canonical 5 정확일치)·S6.d(absent set) 계약을 깬다는 신호 → 사용자 결정 = **SM·관측성 lint 6 확장을 PR4 로 이연**(PR3b 는 ADR 무변경). 범위 정본 = §PR3 실행 분할표(ClusterIP 환원/NetworkPolicy 는 PR3c) — TASKS.md:43 축약 서술과 불일치했던 것을 분할표로 확정.
+
+**Codex plan 리뷰**
+- attempt 1: **timeout**(exit 124, 300s) — 탐색 과다. raw: .cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1784817351.json (빈 파일)
+- attempt 2: ok, **8건(P0:0 / P1:4 / P2:4)**. run_id: plan:20260723T144125Z:cc2e0b2c-4132-4918-8f51-d9bd68e2967c:2, raw: .cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1784817717.json
+- 사용자 선택: **[2] 전체 반영**
+
+**반영 내역**
+- #1(P1) P24 에 `envFrom.configMapRef=gateway-config` 필수 + P30 구조 assert — 미배선 시 프로파일 미적용→Redis localhost false-green
+- #2(P1) P25 소유 범위 확대 — k8s 연결값(업스트림 URI 5·JWKS·Redis)을 application-k8s.yml 이 단독 소유(ADR-0007), 라우트 정의는 base 유지
+- #3(P1) P28 rollback 에서 `kubectl delete -k` **금지** — overlay 전체(5서비스+MySQL/Redis/Kafka PVC) 삭제 위험 → 진입점 복귀 → rollout undo → 이름 단위 삭제
+- #4(P1) P27(b) `scripts/gateway-exposure-lint.sh` 신설 — 렌더 음성(8081/Secret/SM 부재·configMap 배선·maxUnavailable=0)을 non-zero exit 로 실행화 + 조작 입력 자기검증
+- #5(P2) §5 명령 교정(brace expansion → for loop, `docker build --build-arg SERVICE=gateway`) + CI policy lint **4종** 전체 재현
+- #6(P2) P24/P26 식별자 계약 고정(metadata.name/container name/ConfigMap 이름/scaleTargetRef)
+- #7(P2) 결정(나)에 PR4 `gateway-metrics` 고유 label 계약 기록 — 공용 `app=gateway` 면 SM 이 public Service 까지 매칭해 lint 실패
+- #8(P2) P24 `maxUnavailable=0` 필드화 + P28 canary 파라미터(cohort·임계·관찰시간) + **digest 고정**(latest 금지)
+
+## 2026-07-24 — GP-2 (PR3b 계획, loop 2)
+
+**Codex plan 리뷰 attempt 3**: ok, **신규 7건(P0:0 / P1:4 / P2:3)**. run_id: plan:20260723T145424Z:cc2e0b2c-4132-4918-8f51-d9bd68e2967c:3, raw: .cache/codex-reviews/plan-task-impl3-spring-cloud-gateway-1784818502.json. 사용자 선택 **[2] 전체 반영**.
+> loop1 반영으로 *새로 생긴* 계약 표면(신규 lint 스펙·연결값 소유 규칙·rollback 절차·식별자 계약)만 재검토하도록 프롬프트를 좁힘.
+
+- #1(P2→반영) placeholder 키 정규화: `${USER_SERVICE_URI:..}` → `${app.gateway.upstream.user-uri:..}` 5종. 환경변수 표기법을 프로퍼티 이름으로 고착시키던 문제 제거(env override 는 완화 매핑으로 유지). 기존 테스트 참조 0 확인.
+- #2(P1) **lint 스펙의 실제 구멍**: `port==8080` 만 보면 `targetPort: 8081` 이 통과해 관리 엔드포인트가 LB 8080 으로 공개 → targetPort 고정 + 개수 1 + selector 3자 일치 + probe 포트/경로 + 조작 입력 5종.
+- #3(P1) Secret 부재 판정을 이름 추측 → **참조 기반**(secretRef/secretKeyRef/volume 전무). SM 집합 검사는 selector-lint 소유라 **중복 제거**. PR4 가 뒤집는 것은 SM 기대값 5→6 뿐이고 Secret 부재 계약은 유지로 문구 정정(결정 라 모순 해소).
+- #4(P1) `:gateway:test` 는 application-k8s.yml 을 로드하지 않음(CI 는 profile=test) → k8s 프로파일 명시 활성 설정 테스트 신설, **property 존재/origin** 까지 assert(값 비교는 base 기본값과 같아 무의미).
+- #5(P1) rollback 재현성: known-good digest·revision **사전 기록** → 진입점 복귀 → `--to-revision`/`set image @sha256` → status+5서비스 정상성 → **kustomization 을 known-good 으로 되돌린 뒤에만 재apply**(undo 후 재apply 로 실패 버전 복귀 차단).
+- #6(P2) gateway-metrics label 계약 확정: Service `{app: gateway, monitoring-role: metrics}` ↔ SM matchLabels 동일 두 키(논리곱), PR4 P21 인수조건.
+- #7(P2) application.yml:176 주석이 SM PR4 이연과 모순 → 영향 파일에 주석 정정 추가(§4 "미수정" → "부분 수정").
+
+**수렴 판정**: loop2 도 P1=4 + 새 계약 표면 추가(정규 placeholder 키·lint 조건 확장·k8s 프로파일 설정 테스트) → 종료 조건("직전 루프가 새 계약 표면 무추가 + P1=0") **미달**. attempts=3/3 소진 — 4회차는 §7-6 상한 초과라 사용자 확인 필요.
+
+## 2026-07-24 — GP-2 (PR3b 계획, loop 3 · 상한 초과 승인)
+
+**budget**: attempts 4 > 권장 상한 3 — 사용자 명시 승인(gate-events `GP-cap`).
+**Codex plan 리뷰 attempt 4**: ok, **신규 4건(P0:0 / P1:3 / P2:1)**. run_id: plan:20260723T150421Z:...:4. 사용자 선택 **[2] 전체 반영**.
+> 프롬프트로 2차 반영분 delta(A~E)만 재검토 + "새 문제 없으면 items 를 비우라" 명시.
+
+**확인된 것(무결)**: (A) `${app.gateway.upstream.<svc>-uri:...}` 는 Binder 가 URI 변환 **전에** 해석하므로 RouteDefinition.uri 에서 유효하고 `app.gateway.jwt.*` 관례와 정합 · (C) property 존재/origin assert 는 `ConfigurationPropertySources`/`ConfigurationProperty.getOrigin()` + `RouteDefinitionLocator` 로 외부 호출 없이 가능 · **과잉·중복 검사 없음**.
+
+- #1(P1) lint 를 **이름 카운트 → 실제 매칭 판정**으로: 다른 이름 Service 가 gateway Pod 선택 / 다른 Deployment 가 `app: gateway` Pod 생성 우회 차단 + `hostNetwork=false`·`hostPort` 부재(hostPort 8081 은 Service 검사를 통째로 우회). PR4 는 `gateway-metrics` allow-list 로 확장.
+- #2(P1) Secret 검사 범위를 **PodSpec 전체**로: `initContainers` 경유 주입(native sidecar 는 `restartPolicy: Always` 로 initContainers 에 위치해 "컨테이너 1개" 검사 회피) + `volumes[].projected.sources[].secret` 포함. gateway 는 `initContainers` **0개 고정** + `automountServiceAccountToken: false`.
+- #3(P1) rollback ②의 **제어면·barrier·기록 위치** 확정: 환경별 진입점 수단과 cohort 값, ② 직후 barrier(5서비스 도달성 + gateway 잔존 트래픽 임계), digest/revision/전환시각을 타임스탬프 증적 파일로, 완전 철거 시 **HPA 를 Deployment 보다 먼저 삭제**.
+- #4(P2) **문서 SSOT 붕괴 정정**: §5②·§6 이 P27(b) 조건 목록을 복제하다 어긋남(§5 는 SM 부재 검사를 적었으나 P27 은 SM 검사 제외) → 두 곳을 **P27(b) 참조로 단일화**, 조작 입력도 P27 목록(9종) 정본화.
+
+**수렴 판정**: 여전히 P1=3 이나 **성격이 바뀜** — loop1 = 빠진 산출물, loop2 = 새 검사의 정확도, loop3 = 검사의 우회 경로 + 내가 만든 문서 중복. #4 를 SSOT 단일화로 닫아 "목록 재복제" 결함 **클래스**를 제거함. 잔여 위험은 lint 스크립트 구현 세부에 집중 → 실제 코드를 보는 `/work` diff 리뷰가 더 정확한 게이트. **여기서 계획 루프 종료.**
+
+## 2026-07-24 — GW-1 / GW-2 (PR3b 구현, loop 1)
+
+**GW-1**(자동 통과): 브랜치 `feat/impl3-pr3b-gateway-k8s` — PR3a 명명 관례 승계.
+
+**구현**: P24~P30. base gateway 매니페스트(Deployment+Service+ConfigMap) · `application-k8s.yml` 신설 + 라우트 placeholder 정규화 · overlay patch 4 + gke images[] 6 + gateway HPA(minReplicas 2) · `IMAGE_CONTRACT_TRANSITION` 제거 → **full 6/6** · `scripts/gateway-exposure-lint.sh` 신설 · 계획서 §7 롤아웃 runbook · gke README · `K8sProfileConnectionPropertiesTest` 신설.
+
+**Codex diff 리뷰**(코드 723줄만 — 계획 문서 218줄은 /plan 에서 3회 리뷰돼 제외, cycle 예산 5/5): ok, **7건(P0:0 / P1:3 / P2:4)**. 사용자 선택 **[2] 전체 반영**.
+
+- #1(P1) **CI red 발견** — `observability-promql-lint` 가 exit 2. 내가 로컬에서 lint 4종만 돌리고 관측성 2종을 빠뜨렸고, Codex 가 policy step 전체를 실행해 잡음. 원인은 그 lint 가 S6.d 의 "**SM 이 매칭하는** Service 집합" 을 `k8s/base/services/*/deployment.yml` **전체 glob** 으로 근사한 것 — SM 없는 gateway Service 가 extra 로 검출. **ADR-0015 S6.d 문언대로 SM matchLabels 매칭 Service 로 svc_set 산출**하도록 정정(ADR 변경 없음, 결정 (가) 유지).
+- #2(P1) gateway-exposure-lint 가 Deployment/StatefulSet/DaemonSet/ReplicaSet 만 훑어 **Job/CronJob/직접 Pod 우회**가 통째로 무검사(Codex 가 CronJob+hostPort 8081 로 exit 0 재현). → `pod_templates()` 로 PodSpec 공통 추출(CronJob jobTemplate 포함) + ephemeralContainers 검사 추가.
+- #3(P2) selector "3자 일치" 가 부분집합 판정뿐이었음 → matchLabels/Service selector **정확 일치** + matchExpressions 금지.
+- #4(P2) self-test 가 non-zero 여부만 확인 → **mutation 별 진단 문자열 대조** + 무변조 baseline 통과 확인. 조작 입력 9 → **13종**(cronjob_host_port·bare_pod·label_drift·container_secret 추가, container_secret 은 initContainers 0 계약에 가려져 있던 secretKeyRef 검사를 직접 때린다).
+- #5(P2) 라우트 테스트가 값 비교라 placeholder 이름 회귀에 false-green(프로파일 값 == base 기본값) → `@Nested UpstreamPlaceholderWiringTest` 로 **sentinel 값 override 후 9개 라우트 전부** 추적. 5/9 → 9/9.
+- #6(P2) `spring.data.redis.port` 누락 → CsvSource 추가.
+- #7(P1) gke README 치환 루프가 5개만 순회 → gateway 포함 6개 + digest 고정 안내 + `PROJECT_ID_PLACEHOLDER` 잔존 확인 명령. 승격 설명도 6으로 동기화.
+
+**검증**: CI policy lint **7종 전부 그린**(namespace·image-contract **full 6/6**·gateway-exposure·self-test **13/13**·servicemonitor 5 유지·observability-ssot·observability-promql) · `kubectl kustomize` 양 overlay 렌더 · `./gradlew build` BUILD SUCCESSFUL(gateway 66 테스트 0 실패, 가드 5종) · `docker build SERVICE=gateway` + `docker-health-smoke.sh gateway:ci` passed.
+
+**미확보(명시)**: 실 클러스터 canary 증적 — PR3c GKE 보안 smoke 세션에 합류(계획 §7 · P30 정직성 게이트). 렌더 성공을 canary 통과로 기록하지 않음.
+
+## 2026-07-24 — /ship (PR #76)
+
+- drift: `all_live` (GS-0 미발동) · precheck: **ok**(warnings 0, GS-1 자동 통과)
+- 선행 조치: `/work` 중 상태 확인용 `git add -A` 로 19파일이 staged 상태였음 → **`git reset` 후 partition 별 명시 add** (그대로 커밋했으면 첫 커밋이 staged 전체를 삼켜 분할이 무너짐)
+- 커밋: **6 partition** — feat(k8s) 10파일 / feat(gateway) 2 / test(gateway) 1 / chore(ci) 2 / **fix(ci) 1**(promql lint 정정은 신규 기능이 아니라 기존 구현 근사의 버그 수정이라 분리) / docs(plan) 4. 잔여 untracked 0
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/76
+- /done applied: TASKS ③ 행에 PR3b 인라인(**🔄 유지** — PR3c/3d·PR4 대기) · PHASE4 PR3b 이력 추가(핵심 결정 6·미확보 1 명시)
+- **ADR 무변경**: ADR-0013 Accepted 유지(D3 구현이지 결정 변경 아님) · **ADR-0015 무변경**(SM/관측성 6 확장은 PR4 소관 — 결정 (가)) · promql lint 정정은 S6.d **문언대로의 구현 교정**이라 계약 변경 아님 · Layer1(02/04) 미변경(외부 노출 단일화 완료는 PR3c 이후)

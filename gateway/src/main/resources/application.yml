@@ -1,7 +1,10 @@
 # gateway — Spring Cloud Gateway (ADR-0013 D3 · 구현 ③ PR3a)
 #
 # [ADR-0007] 라우트 predicate / rate limit 파라미터 / 알고리즘 allow-list 는 "동작 규약" 이므로 base 에 둔다.
-# 환경마다 달라지는 것은 업스트림 URI·Redis 연결뿐이라 환경변수 placeholder 로만 주입한다.
+# 환경마다 달라지는 것(업스트림 URI·JWKS·Redis)의 **값 소유자는 프로파일**(application-k8s.yml)이고,
+# base 값은 로컬 실행 편의 기본값이다. 라우트 목록 구조는 base 소유 — 프로파일로 옮기면 전체가 복제된다.
+# 라우트 uri 는 리스트 요소라 프로파일 override 가 불가능하므로 정규 계층형 키 placeholder
+# `${app.gateway.upstream.<svc>-uri:...}` 를 쓴다(환경변수 override 는 APP_GATEWAY_UPSTREAM_USER_URI 로 가능).
 server:
   port: 8080
 
@@ -26,7 +29,7 @@ spring:
             # --- user-service: 인증 전(signup/login/refresh)은 IP 키, 나머지(logout 등)는 userId 키 ---
             #     /api/v1/auth/** 를 통째로 pre-auth 로 묶으면 인증 API 인 logout 까지 IP 기준이 된다.
             - id: user-auth-preauth
-              uri: ${USER_SERVICE_URI:http://user-service:8080}
+              uri: ${app.gateway.upstream.user-uri:http://user-service:8080}
               predicates:
                 - Path=/api/v1/auth/signup,/api/v1/auth/login,/api/v1/auth/refresh
                 - Method=POST
@@ -39,7 +42,7 @@ spring:
                     fail-closed-rate-limiter.windowSeconds: 1
                     deny-empty-key: true
             - id: user-auth
-              uri: ${USER_SERVICE_URI:http://user-service:8080}
+              uri: ${app.gateway.upstream.user-uri:http://user-service:8080}
               predicates:
                 - Path=/api/v1/auth/**
               filters:
@@ -51,7 +54,7 @@ spring:
                     fail-closed-rate-limiter.windowSeconds: 1
                     deny-empty-key: true
             - id: user-users
-              uri: ${USER_SERVICE_URI:http://user-service:8080}
+              uri: ${app.gateway.upstream.user-uri:http://user-service:8080}
               predicates:
                 - Path=/api/v1/users/**
               filters:
@@ -65,7 +68,7 @@ spring:
 
             # --- product-service (admin 을 먼저 둬야 /products/** 에 흡수되지 않는다) ---
             - id: product-admin
-              uri: ${PRODUCT_SERVICE_URI:http://product-service:8080}
+              uri: ${app.gateway.upstream.product-uri:http://product-service:8080}
               predicates:
                 - Path=/api/v1/admin/products/**
               filters:
@@ -77,7 +80,7 @@ spring:
                     fail-closed-rate-limiter.windowSeconds: 1
                     deny-empty-key: true
             - id: product-catalog
-              uri: ${PRODUCT_SERVICE_URI:http://product-service:8080}
+              uri: ${app.gateway.upstream.product-uri:http://product-service:8080}
               predicates:
                 - Path=/api/v1/products/**
               filters:
@@ -91,7 +94,7 @@ spring:
 
             # --- order-service (cart 는 단수) ---
             - id: order-cart
-              uri: ${ORDER_SERVICE_URI:http://order-service:8080}
+              uri: ${app.gateway.upstream.order-uri:http://order-service:8080}
               predicates:
                 - Path=/api/v1/cart/**
               filters:
@@ -103,7 +106,7 @@ spring:
                     fail-closed-rate-limiter.windowSeconds: 1
                     deny-empty-key: true
             - id: order-orders
-              uri: ${ORDER_SERVICE_URI:http://order-service:8080}
+              uri: ${app.gateway.upstream.order-uri:http://order-service:8080}
               predicates:
                 - Path=/api/v1/orders/**
               filters:
@@ -117,7 +120,7 @@ spring:
 
             # --- payment-service ---
             - id: payment
-              uri: ${PAYMENT_SERVICE_URI:http://payment-service:8080}
+              uri: ${app.gateway.upstream.payment-uri:http://payment-service:8080}
               predicates:
                 - Path=/api/v1/payments/**
               filters:
@@ -131,7 +134,7 @@ spring:
 
             # --- notification-service ---
             - id: notification
-              uri: ${NOTIFICATION_SERVICE_URI:http://notification-service:8080}
+              uri: ${app.gateway.upstream.notification-uri:http://notification-service:8080}
               predicates:
                 - Path=/api/v1/notifications/**
               filters:
@@ -150,7 +153,8 @@ app:
   gateway:
     jwt:
       # 공개키 정본 = User JWKS (ADR-0013 D1). 로컬 미러 금지.
-      jwks-uri: ${JWKS_URI:http://user-service:8080/.well-known/jwks.json}
+      # 스칼라 프로퍼티라 placeholder 없이 프로파일이 직접 override 한다(application-k8s.yml).
+      jwks-uri: http://user-service:8080/.well-known/jwks.json
       jwks-timeout: PT2S
       jwks-refresh-cooldown: PT10S
       jwks-refresh-interval: PT5M
@@ -173,7 +177,9 @@ app:
 # actuator 는 별도 관리 포트로 분리한다(계획 공개 경로 SSOT "외부 미노출").
 # gateway 는 외부 진입점이라 8080 이 인터넷에 노출된다 — 같은 포트에 prometheus 를 두면
 # 라우트가 없어도 gateway 자신의 handler 로 직접 접근된다(GW-2 c2:7/c3:5).
-# k8s Service 는 8080 만 노출하고 ServiceMonitor 가 8081 을 scrape 한다(P17/PR3b).
+# k8s Service 는 8080 만 노출한다(PR3b) — 8081 은 probe 전용이다.
+# scrape 은 PR4 에서 신설할 gateway-metrics Service(labels {app: gateway, monitoring-role: metrics})와
+# ServiceMonitor 가 담당한다(ADR-0015 S5 canonical 5→6 확장은 PR4 소관).
 management:
   server:
     port: 8081

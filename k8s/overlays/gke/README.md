@@ -11,17 +11,23 @@ Phase 3 Task 3-4 부하 테스트 및 Phase 4 운영 환경용 Kustomize overlay
 
 ## 이미지 경로 치환 (PROJECT_ID)
 
-커밋된 `kustomization.yml` 의 `images:` 는 5개 서비스 각각에 `PROJECT_ID_PLACEHOLDER` 를 사용합니다 (PR3b — 단일 peekcart 분해). apply 전에 로컬에서 치환하되 **커밋하지 마세요** (operator 로컬 상태).
+커밋된 `kustomization.yml` 의 `images:` 는 **도메인 5 + 인프라 gateway 1 = 6개** 각각에 `PROJECT_ID_PLACEHOLDER` 를 사용합니다 (구현 ① PR3b 단일 peekcart 분해 → 구현 ③ PR3b gateway 합류). apply 전에 로컬에서 치환하되 **커밋하지 마세요** (operator 로컬 상태).
 
 ```bash
 cd k8s/overlays/gke
-for svc in notification-service user-service product-service order-service payment-service; do
+# 도메인 5 + 인프라 gateway 1 = 6. gateway 를 빠뜨리면 PROJECT_ID_PLACEHOLDER 가 남아 ImagePullBackOff 가 됩니다.
+for svc in notification-service user-service product-service order-service payment-service gateway; do
   kustomize edit set image \
     "ghcr.io/kimgyuilli/peekcart-${svc}=asia-northeast3-docker.pkg.dev/<YOUR_PROJECT>/peekcart/${svc}:latest"
 done
 
-# 렌더링 확인
-kubectl kustomize .
+# gateway 를 canary/롤백 대상으로 배포할 때는 latest 가 아니라 digest 로 고정합니다
+# (계획 §7 롤아웃 runbook — latest 면 canary 와 rollback 이 같은 태그를 가리켜 되돌릴 대상이 없습니다).
+# kustomize edit set image \
+#   "ghcr.io/kimgyuilli/peekcart-gateway=asia-northeast3-docker.pkg.dev/<YOUR_PROJECT>/peekcart/gateway@sha256:<digest>"
+
+# 렌더링 확인 — 치환 누락이 남아 있으면 여기서 걸립니다
+kubectl kustomize . | grep -n PROJECT_ID_PLACEHOLDER && echo "치환 누락 있음" || echo "치환 완료"
 
 # apply 후 반드시 원복
 git restore kustomization.yml
@@ -29,7 +35,7 @@ git restore kustomization.yml
 
 ## 이미지 운반 (GHCR → Artifact Registry 승격, D-016)
 
-CI 는 5개 서비스 이미지를 GHCR 로 push 합니다 (`.github/workflows/ci.yml` `publish` job). GKE 는 AR 에서 pull 하므로 승격이 필요합니다. 승격은 `scripts/promote-images.sh` 로 형식화됩니다 (수동 트리거 · crane 우선, docker 폴백 · 승격 후 AR digest 산출 → L-016a digest 고정 근거). 완전 자동 트리거는 후속.
+CI 는 **6개 이미지**(도메인 5 + 인프라 gateway 1)를 GHCR 로 push 합니다 (`.github/workflows/ci.yml` `publish` job). GKE 는 AR 에서 pull 하므로 승격이 필요합니다. 승격은 `scripts/promote-images.sh` 로 형식화됩니다 (수동 트리거 · crane 우선, docker 폴백 · 승격 후 AR digest 산출 → L-016a digest 고정 근거). 완전 자동 트리거는 후속.
 
 ```bash
 # Artifact Registry 인증 + 리포지토리 생성 (최초 1회)
@@ -39,9 +45,10 @@ gcloud artifacts repositories create peekcart --repository-format=docker --locat
 # 승격 미리보기 (실행 안 함 — GHCR→AR 매핑 확인)
 scripts/promote-images.sh --dry-run --project <YOUR_PROJECT>
 
-# 5개 서비스 승격 + 각 AR digest 출력
+# 6개 이미지(도메인 5 + gateway) 승격 + 각 AR digest 출력
 scripts/promote-images.sh --project <YOUR_PROJECT> --tag latest
-# 단일 서비스만: scripts/promote-images.sh --project <YOUR_PROJECT> --service order-service
+# 단일 대상만: scripts/promote-images.sh --project <YOUR_PROJECT> --service order-service
+#              scripts/promote-images.sh --project <YOUR_PROJECT> --service gateway
 ```
 
 ## 배포 순서
@@ -67,8 +74,25 @@ kubectl apply -k k8s/monitoring/shared/
 kubectl apply -k k8s/overlays/gke/
 ```
 
-> **HPA 전제**: 4단계 적용에 포함된 `HorizontalPodAutoscaler/order-service` (`hpa.yml`) 는 CPU Utilization 기반이며 metrics-server API (`metrics.k8s.io`) 가 필요합니다. GKE Standard 는 기본 제공이므로 추가 설치 없이 동작합니다. **PR3b: HPA 는 order-service 단일**(GP-2 #4 · 로드맵 §16 "Phase 4 이후 HPA=Order Service HPA") — 타 4서비스는 HPA 미적용(필요 시 후속). minikube overlay 에는 HPA 미포함.
-> HPA 상태 확인: `kubectl get hpa -n peekcart order-service` · `kubectl top pods -n peekcart`.
+> **HPA 전제**: 4단계 적용에 포함된 HPA (`hpa.yml`) 는 CPU Utilization 기반이며 metrics-server API (`metrics.k8s.io`) 가 필요합니다. GKE Standard 는 기본 제공이므로 추가 설치 없이 동작합니다. **도메인 서비스 HPA 는 order-service 단일**(구현 ① PR3b GP-2 #4 · 로드맵 §16 "Phase 4 이후 HPA=Order Service HPA") — 타 4서비스는 HPA 미적용(필요 시 후속). **gateway 는 그 원칙의 명시적 예외**(구현 ③ PR3b): 전 트래픽 단일 진입점이라 단일 replica 가 SPOF 이므로 `minReplicas: 2` HPA 를 둡니다(ADR-0013 D3). minikube overlay 에는 HPA 미포함.
+> HPA 상태 확인: `kubectl get hpa -n peekcart` · `kubectl top pods -n peekcart`.
+
+## 외부 노출 (구현 ③ PR3b 전환기)
+
+최종 형태의 외부 진입점은 **gateway 하나**입니다 (ADR-0013 D3).
+
+| 대상 | 노출 | 상태 |
+|---|---|---|
+| `gateway` | Internal LoadBalancer (`networking.gke.io/load-balancer-type: Internal`), 8080 | **정본 진입점** |
+| 5개 도메인 서비스 | 각각 Internal LoadBalancer | ⚠️ **전환기 표면 — PR3c 에서 ClusterIP 로 환원** |
+
+5서비스 직접 경로를 PR3b 에서 남겨두는 이유는 **canary 롤백 경로**이기 때문입니다. gateway 전환 중 문제가
+생기면 클라이언트를 서비스별 LB 주소로 되돌립니다 (절차: `docs/plans/task-impl3-spring-cloud-gateway.md` §7).
+PR3c 에서 직접 경로 제거 + NetworkPolicy 로 gateway 경유를 강제합니다.
+
+gateway Service 는 **8080 만 게시**합니다 — 관리 포트 8081(actuator)을 이 Service 에 추가하면 LB 가
+`/actuator/prometheus` 까지 노출합니다. `scripts/gateway-exposure-lint.sh` 가 렌더 산출에서 이를 강제합니다
+(scrape 용 `gateway-metrics` Service 는 ServiceMonitor 와 함께 PR4 에서 신설).
 
 ## 정리 (ADR-0004 운영 체크리스트)
 

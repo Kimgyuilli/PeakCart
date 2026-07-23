@@ -1,5 +1,9 @@
-# GKE HPA — order-service 만 (PR3b GP-2 #4 · 로드맵 §16 "Phase 4 이후 HPA=Order Service HPA").
-# 5서비스 균일 HPA 는 기각(로드맵 What 정합·simplicity). 타 서비스 HPA 는 필요 시 후속.
+# GKE HPA — 도메인 서비스는 order-service 만 (구현 ① PR3b GP-2 #4 · 로드맵 §16 "Phase 4 이후 HPA=Order Service HPA").
+# 5서비스 균일 HPA 는 기각(로드맵 What 정합·simplicity). 타 도메인 서비스 HPA 는 필요 시 후속.
+#
+# gateway 는 그 원칙의 **명시적 예외**다(구현 ③ PR3b): 도메인 확장 정책이 아니라 인프라 가용성 결정 —
+# 전 트래픽이 통과하는 단일 진입점이라 단일 replica 는 SPOF 이고, 인증 경로가 통째로 멈춘다(ADR-0013 D3).
+# 그래서 minReplicas 도 2 로 둔다(HA 하한).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -16,6 +20,35 @@ spec:
     name: order-service
   minReplicas: 1
   maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+  namespace: peekcart
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: peekcart
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 2
+  maxReplicas: 4
   metrics:
     - type: Resource
       resource:

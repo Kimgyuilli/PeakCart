@@ -1,0 +1,96 @@
+# gateway — Spring Cloud Gateway (ADR-0013 D3 · 구현 ③ PR3b)
+#
+# 도메인 서비스가 아니라 *인프라 게이트웨이* 다 — canonical 도메인 5(ADR-0010 §5)와 분리해 취급하며
+# 디렉터리명도 `-service` 접미사 없이 `gateway` 다(scripts/image-contract-lint.sh 의 INFRA_SERVICES).
+#
+# 포트 분리(ADR-0013 D3 · PR3a): 8080=외부 트래픽, 8081=actuator 관리 포트.
+# Service 는 8080 만 게시한다 — overlay 가 이 Service 를 NodePort/LoadBalancer 로 patch 하므로
+# 8081 을 함께 선언하면 관리 엔드포인트(/actuator/prometheus)가 외부로 노출된다.
+# probe 는 management.server.port 를 따라 8081 이다(도메인 5서비스는 8080).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: peekcart
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: peekcart
+spec:
+  replicas: 1
+  # 외부 진입점이라 롤아웃 중에도 수용 가능한 Pod 가 항상 있어야 한다(PR3b runbook 의 rollout 공통 조건).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/component: gateway
+        app.kubernetes.io/part-of: peekcart
+    spec:
+      # Kubernetes API 를 호출하지 않는다 — 토큰 자동 마운트 불필요.
+      automountServiceAccountToken: false
+      # initContainers 없음(계약): gateway 는 마이그레이션·비밀 복사 등 선행 작업이 없다.
+      # RS256 개인키는 user-service Pod 전용이고(ADR-0013 D2) gateway 는 공개키를 JWKS 로만 받으므로
+      # 이 Pod 에는 Secret 참조가 하나도 없어야 한다(scripts/gateway-exposure-lint.sh 가 강제).
+      containers:
+        - name: gateway
+          image: ghcr.io/kimgyuilli/peekcart-gateway:latest
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: gateway-config
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          # readiness 는 JWKS usable key ≥ 1 을 반영한다(JwksReadinessConfig) — cold start 시
+          # 공개키를 못 받은 인스턴스는 트래픽을 받지 않는다. liveness 는 프로세스 생존만 본다.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: peekcart
+  labels:
+    app: gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: gateway
+  ports:
+    # 8080 단일 포트. 관리 포트(8081) scrape 용 Service 는 ServiceMonitor 와 함께 PR4 에서 신설한다
+    # (labels {app: gateway, monitoring-role: metrics} 로 이 Service 와 구분).
+    - name: http
+      port: 8080
+      targetPort: 8080

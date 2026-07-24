@@ -155,7 +155,7 @@
 
 
 - [ ] **P19.** PR3 테스트: **라우팅**(전 controller prefix 양성 + 오라우팅 음성, `cart` 단수·`admin/products`·JWKS 외부 미노출 포함), **JWT 검증 + 응답 행렬 parameterized**(P12 행렬 전항목: known kid+LKG 정상+alert / unknown kid refresh 성공 후 미존재 401 / unknown kid refresh 실패 503 / cold start usable key 0 → readiness=false / Redis 실패 503 / deny·서명오류·만료 401 / role 부족 403 / 초과 429), RS256 왕복·**fallback off 시 HS512 거부/on 시 허용**·HS256/HS384/none 상시 거부, **family-less 토큰 회귀**(RS256·레거시 HMAC 각각 blacklist hit/miss + Redis 오류 + **보호 API·logout·혼재 Pod** 경로), 헤더 strip+inject(외부 spoof 제거 확증), **공개 경로 무헤더 양성**(SSOT 표 기준: signup/login/refresh·상품 **GET**·webhook) + 동일 서비스 보호 경로 무헤더 **401** + **`POST /api/v1/products/**`·admin API 의 401/403**, **JWKS 기대값 분리**(Gateway 외부 route **404** ↔ User 내부 endpoint **200** — P11 미노출과 정합), **header-trust 음성 매트릭스**(`X-User-Id` 단독·Role 누락·비숫자 ID·임의 Role·blank familyId·중복 헤더 → **401**, 500/anonymous fallback 아님), rate limit 429, **Redis 중단 fault-injection**(deny+RateLimiter 동시 fail-closed→503 + alert), **`WebApplicationType.REACTIVE` 부팅 + servlet/MVC 클래스패스 부재 검증**(보강 e).
-  - **conformance = golden vector 방식(loop2 #6)**: 최종 head 에서는 비교 대상(`JwtTokenVerifier`)이 삭제되므로 "기존 verifier 와 동등" 을 최종 CI 에서 실행할 수 없다. → **PR3a 단계에서 differential test**(기존 verifier ↔ Gateway verifier: alg/kid/claims/Redis-key)를 실행하고 **결과 벡터를 독립 test fixture 로 동결**. PR3d 이후 최종 CI 는 **golden vector 에 대한 Gateway 단독 conformance** 만 실행. **k8s 음성·양성**: NodePort/서비스별 LB **부재**, Prometheus target up, non-gateway pod → 업무 API **차단**, Gateway SA → **성공**, payment webhook 의 Gateway 경유. **GKE 필수 exit 실행화(보강)**: enforcement 확인→배포→probe(gateway/non-gateway/monitoring)→artifact 보존→cleanup 을 한 절차의 **보안 smoke 스크립트/수동 승인 job** 으로 만들고 증적 위치 지정. **실행 불가 시 렌더 성공으로 대체 금지 — PR3 미완료 처리.**
+  - **conformance = golden vector 방식(loop2 #6)**: 최종 head 에서는 비교 대상(`JwtTokenVerifier`)이 삭제되므로 "기존 verifier 와 동등" 을 최종 CI 에서 실행할 수 없다. → **PR3a 단계에서 differential test**(기존 verifier ↔ Gateway verifier: alg/kid/claims/Redis-key)를 실행하고 **결과 벡터를 독립 test fixture 로 동결**. PR3d 이후 최종 CI 는 **golden vector 에 대한 Gateway 단독 conformance** 만 실행. **k8s 음성·양성**: NodePort/서비스별 LB **부재**, Prometheus target up, non-gateway pod → 업무 API **차단**, gateway podSelector ingress → **성공**(SA 미도입 — vanilla NP 는 podSelector 로 판정), payment webhook 의 Gateway 경유. **GKE 필수 exit 실행화(보강)**: enforcement 확인→배포→probe(gateway/non-gateway/monitoring)→artifact 보존→cleanup 을 한 절차의 **보안 smoke 스크립트/수동 승인 job** 으로 만들고 증적 위치 지정. **실행 불가 시 렌더 성공으로 대체 금지 — PR3 미완료 처리.**
 
 ### PR4 — 관측성 S9 + HS512 잔재 제거 (D5)
 
@@ -211,6 +211,34 @@
 - [ ] **P30.** PR3b 검증(§5 PR3b 항 참조) — 렌더 양성/음성 + lint 3종 + gateway 이미지 smoke 재확인. **canary 실증적은 PR3c GKE 세션에 합류**(아래 결정 참조).
   - **canary 증적 처분(정직성 게이트)**: 본 repo 에는 앱 레벨 compose e2e 가 없고(`docker-compose.yml` = 인프라 3종만) 상시 클러스터도 없다. 따라서 PR3b 는 **렌더+lint+이미지 smoke** 로 코드 산출물을 닫되, **"canary 통과" 를 렌더 성공으로 대체 기록하지 않는다**. 실 클러스터 probe(보호/공개/spoof·오류율)는 PR3c 의 **GKE 보안 smoke 세션에서 NetworkPolicy 음성·양성과 함께 1회 수행**하고, 그때까지 PR3b 는 "매니페스트 완료 / 전환 증적 미확보" 로 §6 에 남긴다(§5 PR3 의 "렌더-only 대체 금지" 규칙 유지).
 
+### PR3c 세부 — 5서비스 ClusterIP 환원 + NetworkPolicy + header-trust 전환 (P14 전환분·P17 나머지 분해)
+
+> **id 배치**: `hpx_plan_lint` 가 stable id 의 **파일 등장 순서**를 P1..Pn 연속으로 강제한다(`.claude/scripts/lib/sync.sh:38-45`). PR3b 세부가 P24~P30 을 소비했으므로 PR3c 세부는 **P31~P38** 로 잇는다. 실행 순서는 PR3b → **PR3c** → PR3d → PR4 그대로.
+>
+> **범위 정본 = §PR3 실행 분할표의 PR3c 행**: (1) 5서비스 직접 노출 제거(ClusterIP 환원) + NetworkPolicy 로 gateway 경유 강제, (2) header-trust **호환 이미지 rollout**(구·신 Pod 혼재 허용), (3) PR3b 가 미확보로 남긴 canary 증적을 **GKE 보안 smoke 세션에서 1회 수행**. **servlet verifier(`JwtFilter`/`JwtTokenVerifier`/blacklist lookup) 삭제 = ADR-0014 D2-c exit 는 PR3d** — PR3c 는 header-trust configurer 를 **추가·전환**하되 구 컴포넌트는 **잔존**시킨다(rollback 안전창).
+
+**PR3c 진입 시 확정한 결정 (2026-07-24, 코드 grep 검증)**
+
+- **(¬a) 각 Pod 는 단일 모드 — 혼재는 fleet 수준**: gateway 가 `Authorization` 을 **strip 하지 않고 전달**함이 확인됨(`GatewayAuthenticationFilter:37` "PR3a 전환기: Authorization 을 제거하지 않고 그대로 전달"). 따라서 구 이미지 Pod = Bearer 검증(`JwtFilter:38-46`), 신 이미지 Pod = `X-User-*` 신뢰 — **gateway 가 양쪽을 다 실어 보내므로 각 Pod 는 자기 것만 읽으면 된다**(Pod 별 dual-accept 불필요, "헤더/Bearer 양쪽 수용" 은 fleet 해석). rollback = 구 이미지 재배포로 성립(gateway Authorization 전달이 PR3d 까지 살아 있어야 하는 이유). **Authorization 전달 중단은 PR3d** 이므로 PR3c 에서 gateway 를 건드리지 않는다.
+- **(¬b) 안전 순서 = NetworkPolicy/ClusterIP 를 header-trust rollout 보다 먼저**: 서비스를 header-trust(`X-User-*` 맹신)로 먼저 전환하고 NodePort/LB 가 살아 있으면 **직접 경로로 위조 `X-User-*` 주입 = 전면 spoof**. 반대로 NetworkPolicy/ClusterIP 를 먼저 적용하면 그 시점 Pod 는 아직 구 이미지(Bearer 검증)라 `X-User-*` 를 무시 → 위조 무효. 그러므로 PR3c 매니페스트(P34/P35)를 **먼저 apply → 확인 → 이후 header-trust 이미지 rollout(P32)**. 이 순서를 P36 runbook 에 barrier 로 고정. (§PR3 P18 롤아웃 ③→④ 순서의 실체화)
+- **(¬c) header-trust 전환 = configurer 스왑, 구 컴포넌트 잔존**: 5서비스 SecurityConfig 는 전부 `jwtSecurityConfigurer.apply(http, ActuatorSecurityConfig.mergedPublicUrls(BUSINESS_PUBLIC_URLS))` 단일 위임(`UserSecurityConfig:44`·Product/Order/Payment/Notification 동형). → `HeaderTrustSecurityConfigurer.apply(...)` 로 **호출부만 교체**, `BUSINESS_PUBLIC_URLS`·`ActuatorSecurityConfig` 병합·`@EnableMethodSecurity`(Product/Order/Payment 의 `@PreAuthorize`) **불변**. `JwtSecurityConfigurer`/`JwtFilter`/`JwtTokenVerifier`/`RedisTokenBlacklistLookupAdapter` 는 **삭제하지 않는다**(PR3d D2-c exit gate 까지 잔존 — 삭제를 앞당기면 rollback 이미지가 아닌 *현 소스* 의 회귀 위험 없이도 ADR-0014 D2-c 의 "family-less 소멸 증명" 선결을 건너뛰게 됨).
+- **(¬d) `LoginUser` 계약 확장 = `(userId, accessToken)` → `(userId, role, familyId)`**: `.accessToken()` 유일 실사용처 = `AuthController.logout:56 → authService.logout(loginUser.accessToken())`(`AuthService.logout:87-98` = parseToken → blacklist + `revokeAllByUserId`). header-trust 하에선 리소스 서비스가 raw 토큰 미보유 → **`logout(userId, familyId)` = family deny write + `revokeAllByUserId`**(`jwtTokenVerifier` 의존 제거). resolver(`LoginUserArgumentResolver:44-45`)의 `getDetails()`→accessToken 매핑을 principal 확장으로 대체. **family-less(전환기 레거시) 토큰 = familyId null → family deny 생략, `revokeAllByUserId` 만**(access token 즉시 무효화 불가·TTL bounded, 보강 b 수용 리스크). **nullable accessToken 대안 폐기** 확정. 그 외 7개 `@CurrentUser LoginUser` 소비자(User/Order/Payment/Notification 컨트롤러)는 `userId()` 만 사용 → record 확장에 무영향(컴파일러 sweep 으로 확인).
+- **(¬e) 테스트 재작성 실범위 = 통합 2개 + factory (보강 c 재확인)**: Bearer 사용 테스트 = `UserSecurityIntegrationTest`·`NotificationSecurityIntegrationTest`(+`JwtFilterTest`). 8 컨트롤러 슬라이스는 `@WithMockLoginUser`(`WithMockLoginUserSecurityContextFactory:20-30` = SecurityContext 직접 세팅, 필터 무관)라 **원칙 무영향** — factory 의 `principal=userId`/`details=accessToken` 을 principal 확장(role/familyId)으로 소폭 조정만. `JwtFilterTest` 는 PR3d(verifier 삭제)까지 **잔존**(PR3c 에서 이관/삭제하지 않음 — 구 컴포넌트가 살아 있으므로 그 테스트도 유효).
+- **(¬f) overlay service patch 10개가 ClusterIP 환원 대상**: `overlays/{minikube,gke}/patches/<svc>-service.yml` × 5씩 = 10개가 NodePort(minikube 30081~30085)/Internal LB(gke) 로 patch. base Service 는 이미 ClusterIP(default) → **patch 파일 삭제 + 각 `kustomization.yml` patches 목록에서 제거**하면 자동 환원. **gateway patch(30080/LB)는 잔존**(단일 외부 진입점). 각 patch 주석이 이미 *"gateway ③ 도입 시 단일 ingress 로 통합 예정 — 전환기"* 로 예고(`overlays/gke/patches/user-service-service.yml:1`).
+- **(¬g) NetworkPolicy 부재 → 신설(B2)**: 현재 `NetworkPolicy` 리소스 0(`kustomize-namespace-lint.sh:89` 의 허용 kind 목록·gke README 예고에만 존재). scrape 계약과 충돌 주의 — Prometheus 가 각 SM(`base/services/*/servicemonitor.yml`, `release: kube-prometheus-stack`·namespace `peekcart`·namespaceSelector)로 `/actuator/prometheus`(8080) 를 **직접 scrape**. gateway-only ingress 정책이 이 scrape 를 끊으면 관측성 붕괴 → **monitoring namespace/Prometheus pod 예외를 policy 에 명시**(보강 f).
+- **(¬h) GKE 실 클러스터 이번 세션 확보(사용자 확인)**: PR3b 가 "매니페스트 완료/증적 미확보" 로 남긴 canary probe(보호/공개/spoof·오류율)를 PR3c 의 NetworkPolicy 음성·양성과 **함께 1회 실 클러스터 수행**. GKE 는 NetworkPolicy enforcement 에 **Dataplane V2 또는 `--enable-network-policy`(Calico)** 필요 — 클러스터 생성 시 활성 필수(미활성이면 policy 가 조용히 무시돼 음성 테스트가 false-green). 증적은 `docs/progress/evidence/pr3c-gke-smoke-<YYYYMMDD-HHMM>.md`.
+
+- [ ] **P31.** common-auth header-trust 인증 필터 신설 — `HeaderAuthenticationFilter`(reactive 아님, servlet `OncePerRequestFilter` — 리소스 서비스는 MVC) + `HeaderTrustSecurityConfigurer`. **헤더 3-state 계약(§PR3 P14, loop2 #4)**: ① 세 헤더 전부 없음 = **anonymous 로 체인 계속**(즉시 401 금지 — 공개 경로 보존, 보호 경로는 `anyRequest().authenticated()` 가 401) / ② `X-User-Id`(양의 정수)·`X-User-Role`(enum USER/ADMIN) 각 정확히 1개 + (PR3d 이후 `X-User-Family-Id` non-blank) = **인증** / ③ 부분 존재·blank·중복 헤더·형식 오류·미허용 role = **401**(파싱 예외가 500·anonymous 로 새지 않음). `X-User-Family-Id` 는 PR3c 전환기엔 **선택**(family-less 레거시 수용). `LoginUser(userId, role, familyId)` 확장 + `LoginUserArgumentResolver`(principal→userId, authorities→role, 신규 attribute→familyId) 갱신 + `:common` testFixtures `WithMockLoginUserSecurityContextFactory`(role/familyId 세팅) + `WithMockLoginUser`(role/familyId 속성) 조정. **`JwtSecurityConfigurer`/`JwtFilter` 등 구 컴포넌트는 잔존**(결정 ¬c).
+  - **configurer 동등성 계약(review #6, B6)**: `HeaderTrustSecurityConfigurer.apply()` 는 `JwtFilter`→`HeaderAuthenticationFilter` **필터만 교체**하고 나머지 공통 정책은 `JwtSecurityConfigurer:38-51` 을 **전부 보존**한다 — `csrf.disable()`·`sessionManagement(STATELESS)`·`authorizeHttpRequests(publicUrls permitAll + anyRequest authenticated)`·`exceptionHandling(authenticationEntryPoint=JwtAuthenticationEntryPoint, accessDeniedHandler=JwtAccessDeniedHandler)`·`addFilterAfter(MdcFilter, <auth filter>)` 순서. 이 5개 중 하나라도 누락되면 401/403 응답 계약·MDC traceId·stateless 세션이 조용히 달라진다(configurer 스왑이 "필터만" 이 아님을 못박음).
+- [ ] **P32.** 5서비스 header-trust 전환 + logout 계약(결정 ¬c/¬d): User/Product/Order/Payment/Notification `*SecurityConfig.filterChain` 의 `jwtSecurityConfigurer.apply(...)` → `headerTrustSecurityConfigurer.apply(...)` 교체(`BUSINESS_PUBLIC_URLS`·`ActuatorSecurityConfig.mergedPublicUrls`·`@EnableMethodSecurity` 불변). `AuthController.logout` = `@CurrentUser LoginUser` 에서 `userId()`/`familyId()` 추출 → `authService.logout(userId, familyId)`. `AuthService.logout(long userId, String familyId)` 재작성 = family deny write(non-null 시) + `revokeAllByUserId`(`jwtTokenVerifier.parseToken` 제거, `TokenBlacklistPort.denyFamily` 재사용). **공개 경로 SSOT(§PR3 표) 불변** — PR3c 는 필터 메커니즘만 교체하므로 permitAll 집합은 그대로.
+- [ ] **P33.** 인증 테스트 재작성(결정 ¬e): `UserSecurityIntegrationTest`·`NotificationSecurityIntegrationTest` 를 Bearer→`X-User-*` 헤더 인증으로 재작성(3-state 음성 매트릭스: 헤더 없음 anonymous 통과 / 부분·blank·중복·비숫자 ID·임의 role→401 / 정상→인증). **configurer 동등성 회귀(review #6)**: 통합테스트에 401(무인증 보호경로)·**403(role 부족 — `@PreAuthorize` 경로)**·MDC traceId 응답 헤더 존재를 assert(JwtSecurityConfigurer 시절과 동일). 5서비스 context-load 스모크로 configurer 스왑 후 부팅 회귀 확인. `WithMockLoginUserSecurityContextFactory` role/familyId 반영으로 8 컨트롤러 슬라이스 그린 유지. `AuthServiceTest`/`AuthControllerTest` 의 logout 경로를 새 시그니처로. `JwtFilterTest` **잔존**(PR3d 삭제).
+- [ ] **P34.** 5서비스 ClusterIP 환원 + `maxUnavailable:0`(결정 ¬f, review #2): `overlays/minikube/patches/{user,product,order,payment,notification}-service-service.yml`(NodePort) + `overlays/gke/patches/{동일}-service.yml`(Internal LB) **10개 삭제** + 양 `kustomization.yml` patches 목록에서 제거. **gateway service patch(minikube 30080·gke LB)는 유지**. base Service 가 ClusterIP default 로 자동 환원됨을 렌더로 확증. **5서비스 base Deployment 에 `strategy.rollingUpdate.maxUnavailable:0`(+`maxSurge:1`) 명시** — §8 무중단 rollout 을 주석이 아닌 매니페스트 필드로 실체화(gateway 는 PR3b 에서 이미 보유).
+- [ ] **P35.** NetworkPolicy 신설 — **ingress-only, podSelector 기반**(결정 ¬g, B2; review #3/#4/#5 반영): vanilla NetworkPolicy 는 **peer 를 ServiceAccount 로 선택할 수 없다**(podSelector/namespaceSelector 만) → SA 기반 허용 폐기. **selector 정본(코드 grep 확정)**: 대상 = `podSelector.matchLabels {app.kubernetes.io/component: backend}`(5서비스 pod template 이 모두 보유, **gateway 는 `component: gateway` 라 자동 제외** — 신규 라벨 불요·Deployment 무수정). source ingress = ① gateway pod `{app: gateway}` 로부터 8080 + ② monitoring namespace 의 Prometheus pod 로부터 8080(`/actuator/prometheus` scrape 예외 — `namespaceSelector` monitoring NS + Prometheus pod label). **`policyTypes: [Ingress]` 단독** — egress 격리하지 않으므로 DNS/DB/Redis/inter-service outbound 는 정책 무관(egress 규칙·DNS 허용 삭제; egress 격리는 별도 하드닝 항목, PR3c 범위 밖). 배치 = **base `k8s/base/networkpolicy.yml`**(환경 무관 보안, minikube/gke 공통) + `kustomization.yml` 등록(`kustomize-namespace-lint.sh:89` 가 `NetworkPolicy` kind 를 이미 허용 → namespace 정합만). **enforcement 는 CNI 의존** — minikube 는 미보장(P37 GKE Dataplane V2 에서 실증). **Gateway 전용 ServiceAccount 는 PR3c 에서 미도입** — vanilla NP 가 SA 를 안 쓰므로 보안 기여 0. §PR3 P17 의 "Gateway SA" 는 workload identity(GKE WI) 용도라 **별도 항목으로 이연**(NetworkPolicy 와 무관함을 명시).
+  - **실행 가능 lint(review #7) — `scripts/networkpolicy-contract-lint.sh` 신설**: 렌더 성공만으로는 "0개 workload 를 선택하는 정책"·"gateway peer 누락"·"monitoring 예외 누락" 이 전부 통과한다(vacuous-green). 렌더 산출을 파싱해 assert: ① 정책의 `podSelector` 가 렌더된 backend Deployment pod(5개) 를 **실제로 선택**(0개면 실패) ② gateway `{app: gateway}` ingress peer **존재** ③ monitoring namespace scrape 예외 peer **존재** ④ `policyTypes == [Ingress]`(egress 규칙 부재) ⑤ 대상에 gateway pod(`component: gateway`) **불포함**. **self-test(조작 입력 non-zero)**: podSelector 라벨 오타(0 선택)·gateway peer 제거·monitoring peer 제거·egress 규칙 추가·backend 라벨을 gateway 로 오설정 → **5종 전부 non-zero**(`gateway-exposure-lint` self-test 선례). CI policy step 등록.
+- [ ] **P36.** PR3c 무중단 rollout runbook(§8 신설, 결정 ¬a/¬b): **안전 순서 강제** — ① NetworkPolicy + ClusterIP 환원 apply(구 이미지 Pod = Bearer 검증이라 위조 `X-User-*` 무효) → ② **barrier**: 직접 경로(NodePort/LB) 도달 불가 확인 + Prometheus target up 유지 확인 → ③ header-trust 이미지 rollout(`maxUnavailable=0`, digest 고정 태그, 혼재 구간 gateway 가 Authorization+헤더 병행 공급) → ④ 혼재 구간 refresh/logout 정상 확인 → ⑤ 100% 신 이미지. **역순 rollback**: 신 이미지 문제 시 known-good 이미지로 `rollout undo`(gateway Authorization 전달이 살아 있어 구 Bearer Pod 복귀 즉시 인증 회복) → 필요 시 NetworkPolicy/ClusterIP 되돌리기(NodePort/LB patch 복구). **`kubectl delete -k` 금지**(PR3b runbook 과 동일 — overlay 전체 삭제 위험). digest 기록·revision·전환 시각을 증적 파일에.
+- [ ] **P37.** GKE 보안 smoke 스크립트 + 실 클러스터 1회 수행(결정 ¬h, §PR3 P19 "GKE 필수 exit 실행화"): `scripts/gke-security-smoke.sh`(또는 수동 승인 job) = **enforcement 확인**(Dataplane V2/network-policy 활성 검증 — 미활성 시 즉시 fail, false-green 차단) → **배포**(digest 고정) → **probe**: [양성] gateway 경유 공개 경로 무헤더 200·보호 경로 401·spoof `X-User-*` 제거 확증·payment webhook gateway 경유 / [음성] non-gateway pod → 업무 API **차단**·직접 NodePort/LB 부재 / [scrape] Prometheus target up·`/actuator/prometheus` monitoring 예외 통과 / [canary] PR3b 미확보분(보호·공개·spoof·오류율 임계) → **증적 보존**(`docs/progress/evidence/pr3c-gke-smoke-<ts>.md`) → **cleanup**(`loadtest/cleanup.sh` 계열, orphan PD/IP 확인). **렌더 성공을 실행 증적으로 대체 금지 — 미실행 시 PR3c 미완료**.
+- [ ] **P38.** PR3c 검증(§5 PR3c 항): `./gradlew build test`(9모듈) 그린 — header-trust 3-state 음성 매트릭스·**configurer 동등성 회귀(401/403/MDC, review #6)**·logout 새 계약·**family-less logout TTL 계약(review #8: access 유효/refresh 차단)**·8 슬라이스 factory 회귀. 렌더 양성/음성 — ClusterIP 환원(5서비스 Service `type` 부재=ClusterIP·gateway 만 NodePort/LB)·NetworkPolicy `policyTypes:[Ingress]`+`component:backend` 5선택+gateway peer+monitoring 예외. CI policy lint 전체(namespace·image-contract full 6/6·gateway-exposure·**networkpolicy-contract+self-test**·servicemonitor **5 유지**·observability 2)가 NetworkPolicy/ClusterIP 추가 후에도 그린(**PLAN-BLINDSPOTS 자동화후보 "k8s 리소스 추가 시 lint 전부 실행"** 준수). **GKE smoke 증적(P37) 확보 = PR3c 완료 필수 게이트**.
+
 ## 4. 영향 파일
 
 - **신규 모듈**: `gateway/**`(build.gradle·routing config·검증 필터·RateLimiter·Dockerfile), `settings.gradle`.
@@ -221,9 +249,15 @@
   - *신설(계약 lint)*: `scripts/gateway-exposure-lint.sh`(P27b — 렌더 음성 조건 실행화).
   - *수정*: `k8s/base/kustomization.yml`(+2 리소스)·`k8s/overlays/{minikube,gke}/kustomization.yml`(patches 등록, gke `images[]` 6번째)·`k8s/overlays/gke/hpa.yml`(gateway HPA 추가)·`.github/workflows/ci.yml`(`IMAGE_CONTRACT_TRANSITION` 제거 + `gateway-exposure-lint` 등록)·`k8s/overlays/gke/README.md`·본 계획서 §7 runbook.
   - *부분 수정*: `gateway/src/main/resources/application.yml` — **구조는 유지**(라우트 목록·rate limit·alg allow-list 는 동작 규약이라 base 소유)하되 ① 업스트림 placeholder 이름을 정규 계층형 키로 교정(`${USER_SERVICE_URI:..}` → `${app.gateway.upstream.user-uri:..}` 5종, 2차 리뷰 #1), ② `:176` 부근 주석 정정 — 현재 "k8s Service 는 8080 만 노출하고 ServiceMonitor 가 8081 을 scrape 한다(P17/PR3b)" 는 SM 이 PR4 로 이연된 계획과 모순 → "PR3b 는 probe 전용, PR4 의 `gateway-metrics` Service + ServiceMonitor 가 8081 을 scrape" 로 수정(2차 리뷰 #7).
-  - *미포함(의도)*: Secret(소비 비밀 0, 결정 라)·ServiceMonitor(ADR-0015 계약, 결정 가 → PR4)·ServiceAccount(vanilla NetworkPolicy 는 `podSelector` 로 선택하므로 SA 는 정책과 함께 도입, → PR3c)·NetworkPolicy/5서비스 ClusterIP 환원(→ PR3c).
+  - *미포함(의도)*: Secret(소비 비밀 0, 결정 라)·ServiceMonitor(ADR-0015 계약, 결정 가 → PR4)·ServiceAccount(vanilla NetworkPolicy 는 `podSelector` 로 peer 선택 → SA 는 정책에 기여 0, **PR3c 에서도 미도입** — workload identity 용도면 별도 항목 이연, review #3/#4)·NetworkPolicy/5서비스 ClusterIP 환원(→ PR3c).
+- **PR3c**(실행 분할 — P31~P38):
+  - *신설*: `peekcart-common-auth/global/security/HeaderAuthenticationFilter.java`·`HeaderTrustSecurityConfigurer.java`, `k8s/base/networkpolicy.yml`(**ingress-only**·`podSelector{component:backend}`·gateway peer + monitoring scrape 예외 — SA·egress 없음), `scripts/networkpolicy-contract-lint.sh`(review #7, self-test 포함), `scripts/gke-security-smoke.sh`(P37 — 실 클러스터 보안 probe·canary 증적), `docs/progress/evidence/pr3c-gke-smoke-<ts>.md`(증적).
+  - *수정*: 5서비스 `*SecurityConfig.java`(configurer 스왑)·`LoginUser.java`(→`(userId, role, familyId)`)·`LoginUserArgumentResolver.java`·`AuthController.logout`·`AuthService.logout`(family deny + `revokeAllByUserId`)·`:common` testFixtures `WithMockLoginUser`/`WithMockLoginUserSecurityContextFactory`·`UserSecurityIntegrationTest`·`NotificationSecurityIntegrationTest`·`AuthServiceTest`/`AuthControllerTest`(logout)·5서비스 Deployment(`strategy.rollingUpdate.maxUnavailable:0` 명시, review #2)·`k8s/base/kustomization.yml`(+networkpolicy)·`k8s/overlays/{minikube,gke}/kustomization.yml`(service patch 5개씩 제거)·`.github/workflows/ci.yml`(networkpolicy-contract-lint 등록)·`k8s/overlays/gke/README.md`(전환기 표면 → gateway 단일)·본 계획서 §8 PR3c runbook.
+  - *미포함(의도)*: Gateway ServiceAccount(vanilla NP 가 SA peer 미지원 → 보안 기여 0, workload identity 는 별도 이연 — review #3/#4)·egress NetworkPolicy(ingress-only, review #5).
+  - *삭제*: `k8s/overlays/{minikube,gke}/patches/{user,product,order,payment,notification}-service-service.yml`(**10개** — NodePort/LB, ClusterIP 환원).
+  - *미포함(의도, PR3d 소관)*: `JwtFilter`/`JwtTokenVerifier`/`JwtSecurityConfigurer`/`TokenBlacklistLookupPort`/`RedisTokenBlacklistLookupAdapter`/`JwtFilterTest` **삭제**(ADR-0014 D2-c exit) + gateway `Authorization` 전달 중단(PR3d) — PR3c 는 구 컴포넌트 **잔존**(rollback 안전창).
 - **PR3(전체)**:
-  - *신설*: `gateway/**`(routing 정본·reactive 검증 필터·RateLimiter·gateway-local DTO·Dockerfile), `peekcart-common-auth/global/security/`(HeaderAuthenticationFilter·HeaderTrustSecurityConfigurer), `k8s/base/services/gateway/**`(deployment/svc/cm/secret/HPA/SA/**ServiceMonitor**)·NetworkPolicy.
+  - *신설*: `gateway/**`(routing 정본·reactive 검증 필터·RateLimiter·gateway-local DTO·Dockerfile), `peekcart-common-auth/global/security/`(HeaderAuthenticationFilter·HeaderTrustSecurityConfigurer), `k8s/base/services/gateway/**`(deployment/svc/cm/HPA)·NetworkPolicy. **Gateway ServiceMonitor 는 PR4 신설**(PR3c 동안 canonical SM 정확히 5 유지 — ADR-0015 S5/S6.d·P38, review #10). Secret·SA 는 PR3b/PR3c "미포함(의도)" 결정 참조.
   - *삭제(ADR-0014 D2-c exit)*: common-auth `JwtFilter`·`JwtTokenVerifier`·`JwtSecurityConfigurer`·`TokenBlacklistLookupPort`·`RedisTokenBlacklistLookupAdapter`(+`JwtFilterTest`) 및 common-auth/5서비스의 검증용 JJWT·Redis 의존.
   - *수정*: 5서비스 `*SecurityConfig.java`·`LoginUser`/`LoginUserArgumentResolver`/`AuthController.logout`/`AuthService.logout`·`WithMockLoginUserSecurityContextFactory`·통합테스트 2개·`settings.gradle`·CI images 매트릭스·`scripts/image-contract-lint.sh`·`scripts/promote-images.sh`·`scripts/servicemonitor-selector-lint.sh`·**overlay service patch 10개 제거**(minikube NodePort 5·gke LB 5).
 - **PR4**: Gateway/User 메트릭 컴포넌트·grafana dashboard/alert·observability lint·`02`/`04` Layer1 동기화. **ADR 본문은 수정 안 함**(S9 는 ADR-0009:58 기존재) — 존재/owner 정합만 검증, 계약 변경 시에만 신규 ADR.
@@ -232,7 +266,7 @@
 
 - **PR1**: `./gradlew :user-service:test :peekcart-common-auth:test` — RS256 왕복·alg 거부·JWKS 스키마 그린. HS256 위조 토큰 401.
 - **PR2**: `./gradlew :peekcart-common-auth:test :user-service:test` — grace 1회/2회 차단·병렬 1건만 성공, reuse→family revoke→Redis deny write 확증(Testcontainers Redis), common-auth `TokenClaims`/parseToken family_id 회귀.
-- **PR3**: `./gradlew build test`(9모듈) — gateway 라우팅(전 prefix 양성 + 오라우팅 음성)·응답 행렬(401/403/429/503+readiness)·fail-closed·헤더 strip/inject·**header-trust 음성 매트릭스(부분·형식오류 401)**·공개 경로 SSOT 표 기준 무헤더 양성 ↔ 보호 경로 401/403·JWKS 404(외부)↔200(내부)·rate limit 429·Redis fault-injection·**conformance golden vector**(PR3a differential → 동결 → PR3d 이후 Gateway 단독)·REACTIVE 부팅+servlet 부재. **단계별 canary**(PR3a~d 진입 조건) 증적. **k8s 음성·양성**(NodePort/LB 부재·Prometheus target up·non-gateway 차단·Gateway SA 성공·webhook Gateway 경유) — minikube CNI 제약 시 **GKE 보안 smoke 스크립트 필수 exit**(enforcement 확인→배포→probe→증적→cleanup, 렌더-only 불충분·미실행 시 PR3 미완료).
+- **PR3**: `./gradlew build test`(9모듈) — gateway 라우팅(전 prefix 양성 + 오라우팅 음성)·응답 행렬(401/403/429/503+readiness)·fail-closed·헤더 strip/inject·**header-trust 음성 매트릭스(부분·형식오류 401)**·공개 경로 SSOT 표 기준 무헤더 양성 ↔ 보호 경로 401/403·JWKS 404(외부)↔200(내부)·rate limit 429·Redis fault-injection·**conformance golden vector**(PR3a differential → 동결 → PR3d 이후 Gateway 단독)·REACTIVE 부팅+servlet 부재. **단계별 canary**(PR3a~d 진입 조건) 증적. **k8s 음성·양성**(NodePort/LB 부재·Prometheus target up·non-gateway 차단·**gateway podSelector ingress 성공**·webhook Gateway 경유) — minikube CNI 제약 시 **GKE 보안 smoke 스크립트 필수 exit**(enforcement 확인→배포→probe→증적→cleanup, 렌더-only 불충분·미실행 시 PR3 미완료).
 - **PR3b**(P30):
   - ① 렌더 — `for env in minikube gke; do kubectl kustomize "k8s/overlays/$env"; done`(brace expansion 은 한 명령에 인자 2개를 넘겨 실패한다). **양성**: gateway Deployment/Service/ConfigMap 각 1, gke `images[]` rewrite 가 gateway 에도 적용(`.../peekcart/gateway`), HPA 2건(order-service·gateway), minikube gateway Service `type=NodePort nodePort=30080`.
   - ② **음성은 산문이 아니라 실행 가능한 assertion** — `scripts/gateway-exposure-lint.sh` 가 렌더 산출을 파싱해 위반 시 non-zero. **검사 조건과 조작 입력 목록의 정본은 P27(b)** — 여기에 재복제하지 않는다(3차 리뷰 #4: 복제본이 어긋나 구현자가 다른 합격 기준을 따를 위험). 소유권 분계도 P27(b) 를 따른다(Secret 소비 참조=본 lint / ServiceMonitor 집합=`servicemonitor-selector-lint`).
@@ -240,6 +274,11 @@
   - ④ 이미지 — `docker build --build-arg SERVICE=gateway -t gateway:ci .`(CI 와 동일 형식) + `bash scripts/docker-health-smoke.sh gateway:ci`(PR3a 계약 회귀 — smoke 가 쓰는 관리 포트 8081 이 매니페스트 probe 포트와 동일함을 확인).
   - ⑤ `./gradlew :gateway:test` 그린 + **k8s 프로파일 전용 설정 테스트 신설(2차 리뷰 #4, P1)** — `:gateway:test` 는 기본적으로 `application-k8s.yml` 을 **로드하지 않으므로**(CI 는 오히려 `SPRING_PROFILES_ACTIVE=test`) 새 키가 오타여도 base 기본값으로 그린이 된다. → `k8s` 프로파일을 명시 활성화한 테스트에서 **업스트림 5키·JWKS·Redis 가 프로파일 property source 에 실제 존재**함을 assert(값만 비교하면 base 기본값과 같아 무의미 — **property 존재/origin 까지 확인**)하고, 각 `RouteDefinition.uri` 가 그 값으로 해석됐는지 확인.
   - **canary 실증적은 미포함** — PR3c GKE 세션(P30 정직성 게이트).
+- **PR3c**(P38):
+  - ① `./gradlew build test`(9모듈) 그린 — **header-trust 3-state 음성 매트릭스**(헤더 없음 anonymous 통과 / 부분·blank·중복·비숫자 ID·임의 role→401 / 정상→인증, 500·anonymous fallback 아님)·**configurer 동등성 회귀**(401·403·MDC traceId 보존, review #6)·`logout(userId, familyId)` 새 계약(family deny + `revokeAllByUserId`, family-less=deny 생략)·**family-less logout TTL 계약**(access 유효/refresh 차단, review #8)·8 컨트롤러 슬라이스 factory 회귀·`UserSecurityIntegrationTest`/`NotificationSecurityIntegrationTest` 헤더 인증 재작성.
+  - ② 렌더 양성/음성 — `kubectl kustomize k8s/overlays/{minikube,gke}`(각각): 5서비스 Service 에 NodePort/LB patch **부재**(ClusterIP default), gateway 만 외부 노출 유지, `NetworkPolicy` 리소스 존재 + `policyTypes:[Ingress]` + `podSelector{component:backend}` 가 backend 5개를 선택(gateway 제외) + gateway ingress peer + **monitoring scrape 예외 peer 존재**, 5서비스 Deployment `maxUnavailable:0`.
+  - ③ **CI policy lint 전부 재현**(PLAN-BLINDSPOTS 자동화후보 준수 — NetworkPolicy/ClusterIP 추가가 일부 lint 를 깨지 않음 확증): `kustomize-namespace-lint`(NetworkPolicy namespace 정합) · `image-contract-lint`(full 6/6 유지) · `gateway-exposure-lint`(+self-test) · **`networkpolicy-contract-lint`(+self-test 5종, review #7)** · `servicemonitor-selector-lint`(**5 유지** — gateway SM 미신설, review #10) · `observability-ssot`/`observability-promql`.
+  - ④ **GKE 보안 smoke 실 클러스터 1회 수행**(P37, 결정 ¬h) — enforcement(Dataplane V2/network-policy) 활성 검증 → 배포(digest 고정) → probe(양성: 공개 200·보호 401·spoof strip·webhook gateway 경유 / 음성: non-gateway pod 차단·직접 NodePort/LB 부재 / scrape: Prometheus target up) → PR3b canary 증적(보호·공개·spoof·오류율 임계) → 증적 파일 보존 → cleanup. **미실행 시 PR3c 미완료 — 렌더 성공으로 대체 금지**.
 - **PR4**: 메트릭 counter 통합테스트(사유 태그)·observability lint negative(총계 6·Gateway ServiceMonitor 누락)·HS512 제거 회귀. 전 모듈 그린.
 - **가드**: `assertNoServiceProjectDeps`(gateway↔서비스 직접 의존 금지), **gateway↔`:common` 의존 금지 가드**(보강 e), B1b string-level sweep(route path↔서비스 prefix).
 
@@ -251,6 +290,8 @@
 - [ ] Rate limit route-class별 429 + fail-closed(401/429/503 응답 계약 분리). (PR3)
 - [ ] **ADR-0014 D2-c exit**: move/delete/retain 표대로 servlet 검증 컴포넌트 삭제 + 키/서명 클래스 User 이관 + 검증 전용 JJWT·Redis 의존 제거(User 서명·Product 캐시는 유지). (PR3d)
 - [ ] **PR3b**: gateway k8s 배포 표면 완성(base 2 리소스 + overlay patch 4 + gke `images[]` 6 + HPA) 후 **`image-contract-lint` full 6/6**(전환기 flag 제거) · `servicemonitor-selector-lint` 5 유지 · **`gateway-exposure-lint` 그린 + P27(b) 조작 입력 9종 전부에서 실패**(조건·목록의 정본은 P27(b), 여기서 재열거하지 않음). runbook 의 rollback 이 **이름 단위 삭제**(overlay 전체 delete 금지)이고 canary 이미지가 **digest 고정**. **전환 증적은 PR3c GKE 세션까지 미확보로 명시** — 렌더 성공을 canary 통과로 기록 금지. (PR3b)
+- [ ] **PR3c**: 5서비스 ClusterIP 환원(overlay service patch 10개 제거) + NetworkPolicy(**ingress-only·podSelector `component:backend`**·gateway peer + monitoring scrape 예외, SA 미도입) + **header-trust 전환**(5 SecurityConfig configurer 스왑 — 공통 정책 전부 보존·`LoginUser(userId,role,familyId)`·`logout(userId,familyId)`, 구 servlet 컴포넌트 잔존) + 안전 순서 rollout(NetworkPolicy/ClusterIP 선행→header-trust rollout, 역순 rollback) + `networkpolicy-contract-lint` self-test. CI policy lint 전부 그린 유지. (PR3c)
+- [ ] **family-less logout 계약 게이트(review #8)**: header-trust 전환 후 logout 은 raw access token 미보유 → family deny + `revokeAllByUserId` 로 재정의. **family 有 토큰**: family deny 로 즉시 차단 확증. **family-less(전환기 레거시) 토큰**: 기존 access token 은 **최대 잔여 access TTL 까지 유효**(즉시 무효화 상실 = 수용 리스크), 단 **refresh 는 차단**(`revokeAllByUserId`). 이 계약을 테스트로 고정하고 완료조건에 TTL 상한·위험 수용 명시(즉시 무효화가 필요하면 PR3d family-non-null 이후로). (PR3c)
 - [ ] **무중단 롤아웃 PR3a~d 완주**(단계별 이미지 태그·진입 조건·`maxUnavailable=0`·역순 rollback runbook, 혼재 구간 인증 무중단). (PR3)
 - [ ] **family-less 토큰 소멸 증명 후** 수용 경로 제거 + `LoginUser.familyId` non-null 불변식. (PR3d)
 - [ ] header-trust 3-state 계약(anonymous 통과 / 완전 인증 / 그 외 401) — 부분·형식오류가 500·anonymous 로 새지 않음. (PR3)
@@ -366,3 +407,134 @@ cd k8s/overlays/gke && kustomize edit set image \
 kubectl -n peekcart delete hpa/gateway              # gke only, Deployment 보다 먼저
 kubectl -n peekcart delete deployment/gateway service/gateway configmap/gateway-config
 ```
+
+---
+
+## 8. 롤아웃 runbook — PR3c (ClusterIP 환원 + NetworkPolicy + header-trust)
+
+> 실행 단위는 §PR3 실행 분할표의 **PR3c**. **전제**: PR3b 의 gateway 100% 전환이 유지되고 있다.
+> **핵심 안전 불변식**: NetworkPolicy/ClusterIP 를 header-trust 이미지 rollout **보다 먼저** 적용한다(결정 ¬b) —
+> 순서가 뒤집히면 NodePort/LB 직접 경로로 위조 `X-User-*` 를 주입하는 전면 spoof 창이 열린다.
+> gateway 의 `Authorization` 전달은 PR3c 내내 **살아 있다**(PR3d 에서 중단) — 이것이 구 이미지 rollback 의 안전창이다.
+
+### 8-1. 배포 전 기록 (rollback 재현성)
+
+`docs/progress/evidence/pr3c-gke-smoke-<YYYYMMDD-HHMM>.md` 에:
+
+| 항목 | 취득 명령 |
+|---|---|
+| known-good(header-trust 이전) 이미지 digest | `scripts/promote-images.sh --dry-run` 의 5서비스 `@sha256:...` |
+| 현재 각 서비스 Deployment revision | `kubectl -n peekcart rollout history deployment/<svc>` |
+| 전환 전 진입점 상태 | `kubectl -n peekcart get svc -o wide` (5서비스 NodePort/LB + gateway) |
+| NetworkPolicy enforcement 활성 | `gcloud container clusters describe <c> --format='value(networkPolicy.enabled)'` 또는 Dataplane V2 확인 |
+
+### 8-2. ① 정책·Service 만 적용 — 이미지는 건드리지 않는다 (review #2)
+
+> ⚠️ `kubectl apply -k k8s/overlays/<env>` 통짜 적용은 **5서비스 Deployment 이미지도 선언 상태로 되돌린다** — base 가
+> `:latest` 를 가리키므로 apply 가 header-trust rollout 을 barrier 보다 **먼저** 트리거할 수 있다. 정책 도입 단계는
+> **이미지 revision 을 고정한 채** Service/NetworkPolicy 변경만 적용한다.
+
+```bash
+set -euo pipefail
+cd k8s/overlays/<env>
+# (a) 5서비스 이미지를 known-good digest 로 고정(apply 가 이미지를 흔들지 않도록)
+for svc in user-service product-service order-service payment-service notification-service; do
+  kustomize edit set image ghcr.io/kimgyuilli/peekcart-$svc=<known-good-$svc>@sha256:<digest>
+done
+# (b) apply 전 revision 을 기록(8-1 파일값과 동일해야 함)
+declare -A REV_BEFORE
+for svc in user-service product-service order-service payment-service notification-service; do
+  REV_BEFORE[$svc]=$(kubectl -n peekcart get deploy $svc -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')
+done
+kubectl apply -k .
+# (c) revision hard assert — 하나라도 올라가면 이미지가 흔들린 것 → 즉시 중단
+for svc in "${!REV_BEFORE[@]}"; do
+  after=$(kubectl -n peekcart get deploy $svc -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')
+  [ "$after" = "${REV_BEFORE[$svc]}" ] || { echo "FATAL: $svc revision ${REV_BEFORE[$svc]}->$after (이미지 흔들림)"; exit 1; }
+done
+kubectl -n peekcart get svc            # 5서비스 type=ClusterIP, gateway 만 NodePort/LB
+kubectl -n peekcart get networkpolicy  # 정책 존재
+```
+
+`maxUnavailable:0` 은 5서비스 Deployment **매니페스트 필드**로 박는다(주석 아님, review #2) — rollout 이 항상 무중단이도록.
+
+### 8-3. ② barrier — header-trust rollout 전에 **enforcement 를 증명**한다 (review #1)
+
+> enforcement·직접경로 차단 검증을 rollout **이후**(P37)로 미루면, 정책이 실제로 막지 못하는 상태에서 신 Pod 가
+> 헤더를 신뢰하기 시작해 spoof 창이 열린다. 아래는 **rollout 전** 실행하고 **각 항목이 기대와 불일치하면 `exit 1`**
+> 한다(산문 아님) — 하나라도 실패하면 rollout 금지. `scripts/gke-security-smoke.sh --barrier`(P37)가 이 블록을 소유.
+
+```bash
+set -euo pipefail
+# (1) enforcement 활성 hard-fail — Dataplane V2 또는 networkPolicy.enabled 중 하나면 통과(단일 계약, review #4)
+DP=$(gcloud container clusters describe <c> --format='value(networkPolicy.enabled)')          # True/False
+NM=$(gcloud container clusters describe <c> --format='value(networkConfig.datapathProvider)') # ADVANCED_DATAPATH=Dataplane V2
+[ "$DP" = "True" ] || [ "$NM" = "ADVANCED_DATAPATH" ] || { echo "FATAL: NP enforcement OFF (DP=$DP datapath=$NM)"; exit 1; }
+# (2) non-gateway Pod → 5서비스 8080 차단(정책 양성): 도달하면 exit 1
+code=$(kubectl -n peekcart run np-probe --image=curlimages/curl --restart=Never --rm -i --quiet -- \
+  sh -c 'curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://order-service:8080/actuator/health || echo 000')
+[ "$code" = "000" ] || { echo "FATAL: non-gateway 가 order-service 도달(code=$code) — 정책 미차단"; exit 1; }
+# (3) gateway 경유 공개 경로 200 아니면 exit 1
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $GW/api/v1/products)
+[ "$code" = "200" ] || { echo "FATAL: gateway 공개 경로 $code (기대 200)"; exit 1; }
+# (4) Prometheus target up — monitoring 예외 동작 검증(도달 실패면 exit 1)
+UP=$(curl -s "$PROM/api/v1/query?query=up{namespace=\"peekcart\"}" | jq '[.data.result[].value[1]|tonumber]|add // 0')
+[ "$UP" -ge 5 ] || { echo "FATAL: peekcart scrape target up=$UP (<5) — monitoring 예외 미동작"; exit 1; }
+# (5) 직접 경로 도달 불가 — 도달 성공(2xx/3xx)이면 exit 1
+#     minikube = NodePort 30081~30085 / gke = 8-1 에 기록한 5서비스 LB 주소
+for ep in "$(minikube ip):30081" ... ; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://$ep/actuator/health" || echo 000)
+  case "$code" in 000|4*|5*) : ;; *) echo "FATAL: 직접 경로 $ep 도달(code=$code)"; exit 1 ;; esac
+done
+echo "barrier PASS"
+```
+
+(1)~(5) 전부 `exit 1` 없이 통과해야 header-trust 이미지를 rollout 한다. 이 barrier 가 결정 ¬b(안전 순서)의 실체다.
+
+### 8-4. ③ header-trust 이미지 rollout (혼재 허용, digest 고정)
+
+```bash
+# 각 서비스를 header-trust 이미지 digest 로 (latest 금지). maxUnavailable=0 로 무중단.
+kubectl -n peekcart set image deployment/<svc> <svc>=<header-trust>@sha256:<digest>
+kubectl -n peekcart rollout status deployment/<svc> --timeout=5m
+```
+
+혼재 구간(구 Bearer Pod + 신 header-trust Pod 공존) 동안 gateway 는 `Authorization` + `X-User-*` 를 **둘 다**
+공급하므로 어느 Pod 로 라우팅돼도 인증이 성립한다. **혼재 검증은 "한 번 성공" 으로 부족(review #9)** — 요청이 구·신
+Pod **양쪽에** 도달했음을 증명해야 한다:
+
+```bash
+# rollout 중간(구·신 revision 공존)에 refresh/logout 을 반복 호출하고, 응답 헤더로 serving revision 을 식별.
+# (서비스가 X-Served-By 류 헤더가 없으면, 구/신 이미지에 임시 revision 헤더를 심거나
+#  gateway access log 의 upstream pod 를 대조 — 어느 쪽이든 두 revision 응답을 증적에 남긴다)
+for i in $(seq 1 40); do
+  curl -s -D - -o /dev/null $GW/api/v1/auth/refresh -X POST -d "$REFRESH_JSON" | grep -i 'x-served-by\|http/'
+done | sort | uniq -c   # 구/신 revision 응답이 둘 다 관측돼야 혼재 검증 성립
+```
+
+두 revision 응답 + refresh/logout 정상(logout 새 계약 = family deny + `revokeAllByUserId`)을 8-1 증적 파일에 기록한다.
+
+### 8-5. ④ GKE 보안 smoke (P37 증적)
+
+```bash
+bash scripts/gke-security-smoke.sh <env>    # enforcement 확인 → probe(양성/음성/scrape) →
+                                            # canary(보호·공개·spoof·오류율) → 증적 → cleanup
+```
+
+렌더 성공을 실행 증적으로 대체하지 않는다. 스크립트가 enforcement 미활성을 감지하면 즉시 실패한다(음성 테스트
+false-green 차단).
+
+### 8-6. rollback (역순 — NetworkPolicy 는 나중, 이미지 먼저)
+
+> ❌ `kubectl delete -k` 금지(overlay 전체 삭제 위험, PR3b 와 동일).
+
+```bash
+# ① 이미지 되돌리기 — gateway 가 Authorization 을 전달하므로 구 Bearer Pod 로 즉시 인증 회복
+kubectl -n peekcart set image deployment/<svc> <svc>=<known-good>@sha256:<digest>
+kubectl -n peekcart rollout status deployment/<svc> --timeout=5m
+# ② 필요 시에만 NetworkPolicy/ClusterIP 되돌리기 — service patch 복구 후 재apply
+#    (구 이미지가 Bearer 검증이므로 NetworkPolicy 를 급히 걷어낼 이유는 낮다)
+```
+
+이미지 rollback 이 NetworkPolicy 제거보다 먼저다 — 정책을 먼저 걷으면 아직 header-trust 인 Pod 가 직접
+경로에 노출된다.

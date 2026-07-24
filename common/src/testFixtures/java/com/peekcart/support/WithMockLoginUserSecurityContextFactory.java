@@ -10,8 +10,8 @@ import java.util.List;
 
 /**
  * {@link WithMockLoginUser}에 선언된 값으로 SecurityContext를 구성한다.
- * Principal을 {@code Long}(userId), Details를 {@code String}(accessToken)으로 설정하여
- * {@code LoginUserArgumentResolver}가 정상 동작하도록 한다.
+ * Principal을 {@code Long}(userId), authority를 {@code ROLE_<role>}, Details를 {@code String}(familyId)로
+ * 설정하여 {@code LoginUserArgumentResolver}(header-trust, PR3c)가 정상 동작하도록 한다.
  */
 public class WithMockLoginUserSecurityContextFactory
         implements WithSecurityContextFactory<WithMockLoginUser> {
@@ -21,9 +21,9 @@ public class WithMockLoginUserSecurityContextFactory
         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                 annotation.userId(),
                 null,
-                List.of(new SimpleGrantedAuthority("ROLE_USER"))
+                List.of(new SimpleGrantedAuthority("ROLE_" + annotation.role()))
         );
-        auth.setDetails(annotation.accessToken());
+        auth.setDetails(annotation.familyId());
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(auth);

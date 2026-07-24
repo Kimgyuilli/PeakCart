@@ -1,18 +1,14 @@
 package com.peekcart.notification.infrastructure.security;
 
-import com.peekcart.global.jwt.JwtFilter;
+import com.peekcart.global.security.HeaderAuthenticationFilter;
 import com.peekcart.support.IntegrationTestConfig;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -26,33 +22,23 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
-import javax.crypto.SecretKey;
-import java.nio.charset.StandardCharsets;
-import java.util.Date;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Notification 서비스 보안 통합 회귀 (ADR-0014 D1 · ADR-0011 §D2 · ADR-0009 S4).
- * <ul>
- *   <li>게이트 g: 미인증 거부 / blacklist hit 거부 / miss(정상 토큰) 통과. (Redis 실패 fail-closed 는
- *       common-auth {@code RedisTokenBlacklistLookupAdapterTest} 단위 회귀에서 검증)</li>
- *   <li>게이트 h: root signer 와 동일 HS256/{@code app.jwt.secret} 으로 서명한 토큰을 notification verifier 가 검증</li>
- *   <li>게이트 j: 모듈당 {@code SecurityFilterChain} 1개 · {@code JwtFilter} 1회 등록</li>
- *   <li>게이트 c: {@code /actuator/health} 비인증 permitAll(S4 단일 소유)</li>
- * </ul>
+ * Notification 서비스 보안 통합 회귀 — header-trust 전환(ADR-0013 D3 · PR3c).
+ * Gateway 신뢰 헤더로 인증하며 서명 검증·blacklist 는 하지 않는다(Gateway 로 이관). 3-state 계약과
+ * 공통 정책(401·permitAll·actuator)을 고정한다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
 @Import(IntegrationTestConfig.class)
 @TestPropertySource(properties = {
         "spring.flyway.enabled=true",
-        "spring.flyway.locations=classpath:db/migration",
-        // 전환기 HMAC(HS512) fallback 검증 — bounded 전환창 시뮬레이션(게이트 h). 기본값은 false(RS256 단일).
-        "app.jwt.rs256.hs256-fallback-enabled=true"
+        "spring.flyway.locations=classpath:db/migration"
 })
-@DisplayName("Notification 보안 통합 테스트")
+@DisplayName("Notification 보안 통합 테스트 (header-trust)")
 class NotificationSecurityIntegrationTest {
 
     @Container
@@ -70,46 +56,49 @@ class NotificationSecurityIntegrationTest {
     static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.1");
 
     @Autowired TestRestTemplate restTemplate;
-    @Autowired RedisTemplate<String, String> redisTemplate;
     @Autowired Map<String, SecurityFilterChain> securityFilterChains;
 
-    @Value("${app.jwt.secret}")
-    String jwtSecret;
-
     @Test
-    @DisplayName("미인증 요청은 401 로 거부된다 (게이트 g — 미인증)")
-    void unauthenticated_rejected() {
+    @DisplayName("신뢰 헤더 부재 요청은 401 로 거부된다 (3-state: 부재→보호경로 401)")
+    void noHeaders_rejected() {
         ResponseEntity<String> res = restTemplate.getForEntity("/api/v1/notifications", String.class);
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
-    @DisplayName("root signer 와 동일 app.jwt.secret 서명 토큰은 notification verifier 가 검증해 200 (게이트 h — cross-module)")
-    void rootSignedToken_accepted() {
-        String token = signAccessToken(1L, "USER");
+    @DisplayName("정상 X-User-* 헤더는 인증되어 200 (3-state: 정상→인증)")
+    void validHeaders_authenticated() {
         ResponseEntity<String> res = restTemplate.exchange(
-                "/api/v1/notifications", HttpMethod.GET, bearer(token), String.class);
+                "/api/v1/notifications", HttpMethod.GET, trusted(1L, "USER", "fam-1"), String.class);
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     @Test
-    @DisplayName("blacklist 에 등록된 토큰은 거부된다 (게이트 g — hit)")
-    void blacklistedToken_rejected() {
-        String token = signAccessToken(2L, "USER");
-        redisTemplate.opsForValue().set("bl:" + token, "1");
-
+    @DisplayName("X-User-Id 만 있고 Role 누락이면 401 (3-state: 부분 존재)")
+    void partialHeaders_rejected() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HeaderAuthenticationFilter.USER_ID_HEADER, "1");
         ResponseEntity<String> res = restTemplate.exchange(
-                "/api/v1/notifications", HttpMethod.GET, bearer(token), String.class);
+                "/api/v1/notifications", HttpMethod.GET, new HttpEntity<>(headers), String.class);
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
-    @DisplayName("SecurityFilterChain 은 정확히 1개, JwtFilter 는 1회만 등록된다 (게이트 j)")
-    void singleChain_singleJwtFilter() {
+    @DisplayName("허용되지 않은 Role 은 401 (3-state: 미허용 role)")
+    void invalidRole_rejected() {
+        ResponseEntity<String> res = restTemplate.exchange(
+                "/api/v1/notifications", HttpMethod.GET, trusted(1L, "SUPERUSER", null), String.class);
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("SecurityFilterChain 은 정확히 1개, HeaderAuthenticationFilter 는 1회만 등록된다 (configurer 동등성)")
+    void singleChain_singleHeaderFilter() {
         assertThat(securityFilterChains).hasSize(1);
         SecurityFilterChain chain = securityFilterChains.values().iterator().next();
-        long jwtFilterCount = chain.getFilters().stream().filter(f -> f instanceof JwtFilter).count();
-        assertThat(jwtFilterCount).isEqualTo(1);
+        long headerFilterCount = chain.getFilters().stream()
+                .filter(f -> f instanceof HeaderAuthenticationFilter).count();
+        assertThat(headerFilterCount).isEqualTo(1);
     }
 
     @Test
@@ -119,21 +108,13 @@ class NotificationSecurityIntegrationTest {
                 .isEqualTo(HttpStatus.OK);
     }
 
-    private HttpEntity<Void> bearer(String token) {
+    private HttpEntity<Void> trusted(Object userId, String role, String familyId) {
         HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(token);
+        headers.set(HeaderAuthenticationFilter.USER_ID_HEADER, String.valueOf(userId));
+        headers.set(HeaderAuthenticationFilter.USER_ROLE_HEADER, role);
+        if (familyId != null) {
+            headers.set(HeaderAuthenticationFilter.USER_FAMILY_ID_HEADER, familyId);
+        }
         return new HttpEntity<>(headers);
-    }
-
-    /** root {@code JwtTokenSigner} 와 동일한 claim 구조·HS256·app.jwt.secret 으로 액세스 토큰을 발급한다. */
-    private String signAccessToken(Long userId, String role) {
-        SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
-        return Jwts.builder()
-                .subject(String.valueOf(userId))
-                .claim("role", role)
-                .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + 1_800_000))
-                .signWith(key)
-                .compact();
     }
 }

@@ -16,5 +16,6 @@ import java.lang.annotation.Target;
 @WithSecurityContext(factory = WithMockLoginUserSecurityContextFactory.class)
 public @interface WithMockLoginUser {
     long userId() default 1L;
-    String accessToken() default "mock-access-token";
+    String role() default "USER";
+    String familyId() default "mock-family-id";
 }

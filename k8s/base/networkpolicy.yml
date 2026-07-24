@@ -1,0 +1,46 @@
+# backend-ingress-gateway-only — 업무 API(8080) ingress 를 gateway 와 monitoring scrape 로만 제한한다.
+# (ADR-0013 D3 · 구현 ③ PR3c — header-trust 하에서 리소스 서비스가 X-User-* 를 맹신하므로,
+#  직접 경로 spoof 를 NetworkPolicy 로 봉쇄해야 안전하다. ClusterIP 환원(P34)과 짝을 이룬다.)
+#
+# 설계(계획 결정 ¬g, review #3/#4/#5):
+#   - vanilla NetworkPolicy 는 peer 를 ServiceAccount 로 선택할 수 없다 → podSelector 기반.
+#   - 대상 = component: backend (5서비스 pod 이 모두 보유, gateway 는 component: gateway 라 자동 제외).
+#   - ingress 허용 = ① gateway pod(app: gateway) ② monitoring NS 의 Prometheus pod(scrape 예외).
+#   - policyTypes: [Ingress] 단독 — egress 격리하지 않으므로 DB/Redis/Kafka/DNS outbound 는 정책 무관.
+#
+# enforcement 는 CNI 의존(minikube 는 미보장) — GKE Dataplane V2 에서 실증(P37 GKE 보안 smoke).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-ingress-gateway-only
+  namespace: peekcart
+  labels:
+    app.kubernetes.io/part-of: peekcart
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    # ① gateway pod 만 업무 API(8080) 로 진입
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+    # ② monitoring NS 의 Prometheus pod 의 /actuator/prometheus(8080) scrape 예외
+    #    (없으면 Gateway-only 정책이 scrape 를 끊어 관측성이 붕괴한다 — review #5)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080

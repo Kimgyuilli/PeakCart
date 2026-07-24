@@ -1,12 +1,9 @@
 package com.peekcart.user.application;
 
 import com.peekcart.global.auth.TokenBlacklistPort;
-import com.peekcart.global.auth.TokenClaims;
 import com.peekcart.global.auth.TokenHasher;
 import com.peekcart.global.auth.TokenIssuer;
-import com.peekcart.global.auth.TokenParseException;
 import com.peekcart.global.jwt.JwtAuthProperties;
-import com.peekcart.global.jwt.JwtTokenVerifier;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.user.application.dto.TokenResult;
 import com.peekcart.user.domain.exception.RefreshTokenReuseException;
@@ -45,7 +42,6 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final TokenBlacklistPort tokenBlacklistPort;
     private final TokenIssuer tokenIssuer;
-    private final JwtTokenVerifier jwtTokenVerifier;
     private final PasswordEncoder passwordEncoder;
     private final JwtAuthProperties jwtAuthProperties;
 
@@ -80,22 +76,17 @@ public class AuthService {
     }
 
     /**
-     * 액세스 토큰을 블랙리스트에 등록하고 회원의 모든 리프레시 토큰을 무효화한다.
-     *
-     * @throws UserException 유효하지 않은 토큰이면 {@code USR-004}
+     * 회원의 리프레시 토큰 family 를 무효화한다(header-trust, ADR-0013 D3 · PR3c).
+     * <p>header-trust 전환 후 리소스 서비스는 raw access token 을 보유하지 않으므로 특정 토큰 blacklist 대신
+     * <b>family deny + 전체 리프레시 무효화</b>로 재정의한다. familyId 가 있으면 이미 발급된 access token 을
+     * family deny 로 즉시 차단한다. 전환기 레거시 토큰(familyId {@code null})은 family deny 를 기록할 수 없어
+     * 기존 access token 이 access TTL 까지 유효하고(bounded risk), refresh 만 {@code revokeAllByUserId} 로 차단된다.
      */
-    public void logout(String accessToken) {
-        TokenClaims claims;
-        try {
-            claims = jwtTokenVerifier.parseToken(accessToken);
-        } catch (TokenParseException e) {
-            throw new UserException(ErrorCode.USR_004);
+    public void logout(Long userId, String familyId) {
+        if (familyId != null && !familyId.isBlank()) {
+            tokenBlacklistPort.denyFamily(familyId, jwtAuthProperties.accessTokenExpiry() / 1000);
         }
-        long ttlSeconds = (claims.expiration().toEpochMilli() - System.currentTimeMillis()) / 1000;
-        if (ttlSeconds > 0) {
-            tokenBlacklistPort.addToBlacklist(accessToken, ttlSeconds);
-        }
-        refreshTokenRepository.revokeAllByUserId(claims.userId());
+        refreshTokenRepository.revokeAllByUserId(userId);
     }
 
     /**

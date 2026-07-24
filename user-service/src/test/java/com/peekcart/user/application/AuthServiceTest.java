@@ -1,12 +1,9 @@
 package com.peekcart.user.application;
 
 import com.peekcart.global.auth.TokenBlacklistPort;
-import com.peekcart.global.auth.TokenClaims;
 import com.peekcart.global.auth.TokenHasher;
 import com.peekcart.global.auth.TokenIssuer;
-import com.peekcart.global.auth.TokenParseException;
 import com.peekcart.global.jwt.JwtAuthProperties;
-import com.peekcart.global.jwt.JwtTokenVerifier;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.support.ServiceTest;
 import com.peekcart.support.fixture.UserFixture;
@@ -45,7 +42,6 @@ class AuthServiceTest {
     @Mock RefreshTokenRepository refreshTokenRepository;
     @Mock TokenBlacklistPort tokenBlacklistPort;
     @Mock TokenIssuer tokenIssuer;
-    @Mock JwtTokenVerifier jwtTokenVerifier;
     @Mock PasswordEncoder passwordEncoder;
 
     private static final String ACCESS_TOKEN = "access.token.value";
@@ -59,7 +55,7 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         authService = new AuthService(userRepository, refreshTokenRepository, tokenBlacklistPort,
-                tokenIssuer, jwtTokenVerifier, passwordEncoder, jwtAuthProperties);
+                tokenIssuer, passwordEncoder, jwtAuthProperties);
     }
 
     private TokenIssuer.IssuedTokens issuedTokens() {
@@ -71,10 +67,6 @@ class AuthServiceTest {
         given(tokenIssuer.issue(anyLong(), anyString(), anyString())).willReturn(issuedTokens());
         given(refreshTokenRepository.save(any(RefreshToken.class)))
                 .willAnswer(inv -> UserFixture.withId(inv.getArgument(0), 100L));
-    }
-
-    private TokenClaims tokenClaims(long userId, Instant expiration) {
-        return new TokenClaims(userId, "USER", UserFixture.DEFAULT_FAMILY_ID, expiration);
     }
 
     // ── signup ────────────────────────────────────────────────────────────────
@@ -155,26 +147,21 @@ class AuthServiceTest {
     // ── logout ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("logout: 유효한 토큰이면 블랙리스트 등록 후 회원 토큰을 무효화한다")
-    void logout_success() {
-        Instant expiration = Instant.now().plusSeconds(3600);
-        given(jwtTokenVerifier.parseToken(ACCESS_TOKEN)).willReturn(tokenClaims(1L, expiration));
+    @DisplayName("logout: familyId 가 있으면 family deny 후 회원 리프레시 토큰을 무효화한다")
+    void logout_withFamily_deniesAndRevokes() {
+        authService.logout(1L, "fam-1");
 
-        authService.logout(ACCESS_TOKEN);
-
-        then(tokenBlacklistPort).should().addToBlacklist(eq(ACCESS_TOKEN), anyLong());
+        then(tokenBlacklistPort).should().denyFamily(eq("fam-1"), anyLong());
         then(refreshTokenRepository).should().revokeAllByUserId(1L);
     }
 
     @Test
-    @DisplayName("logout: 유효하지 않은 토큰이면 USR-004 예외가 발생한다")
-    void logout_invalidToken_throwsUSR004() {
-        given(jwtTokenVerifier.parseToken(ACCESS_TOKEN)).willThrow(new TokenParseException(new RuntimeException()));
+    @DisplayName("logout: family-less(전환기 레거시) 토큰이면 family deny 없이 리프레시만 무효화한다")
+    void logout_familyLess_revokesOnly() {
+        authService.logout(1L, null);
 
-        assertThatThrownBy(() -> authService.logout(ACCESS_TOKEN))
-                .isInstanceOf(UserException.class)
-                .extracting(e -> ((UserException) e).getErrorCode())
-                .isEqualTo(ErrorCode.USR_004);
+        then(tokenBlacklistPort).should(never()).denyFamily(anyString(), anyLong());
+        then(refreshTokenRepository).should().revokeAllByUserId(1L);
     }
 
     // ── refresh ───────────────────────────────────────────────────────────────

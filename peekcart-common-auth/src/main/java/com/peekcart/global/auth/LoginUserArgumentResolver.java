@@ -2,6 +2,7 @@ package com.peekcart.global.auth;
 
 import org.springframework.core.MethodParameter;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.support.WebDataBinderFactory;
@@ -26,7 +27,8 @@ public class LoginUserArgumentResolver implements HandlerMethodArgumentResolver 
     }
 
     /**
-     * {@code SecurityContext}에서 userId와 accessToken을 꺼내 {@link LoginUser}를 생성한다.
+     * {@code SecurityContext}에서 userId(principal)·role(authority)·familyId(details)를 꺼내
+     * {@link LoginUser}를 생성한다. familyId 는 전환기 레거시 토큰이면 {@code null}일 수 있다.
      */
     @Override
     public LoginUser resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
@@ -36,7 +38,13 @@ public class LoginUserArgumentResolver implements HandlerMethodArgumentResolver 
             throw new IllegalStateException("인증 정보가 없습니다.");
         }
         Long userId = (Long) authentication.getPrincipal();
-        String accessToken = (String) authentication.getDetails();
-        return new LoginUser(userId, accessToken);
+        String role = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(a -> a.startsWith("ROLE_"))
+                .map(a -> a.substring("ROLE_".length()))
+                .findFirst()
+                .orElse(null);
+        String familyId = (String) authentication.getDetails();
+        return new LoginUser(userId, role, familyId);
     }
 }

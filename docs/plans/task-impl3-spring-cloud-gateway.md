@@ -2,6 +2,7 @@
 
 > 선행 ADR-0013(Accepted). 보안 묶음 L-001/002/003/019 편입. Phase 4 구현 로드맵 ③.
 > PR 분할: PR1 RS256/JWKS(dual-validation) → PR2 Refresh Reuse Detection → PR3 Gateway 모듈 + header-trust 전환(+ ADR-0014 D2-c servlet 검증 exit) → PR4 관측성 S9 + HS512 잔재 제거.
+> **PR3d 재정의(ADR-0017 Accepted, 경로 A)**: PR3d 는 "평문 header-trust 굳히기 + verifier 삭제"에서 **"Gateway 서명 내부 토큰(`X-Internal-Auth`)으로 격상"** 으로 대체됐다. 아래 §PR3 실행 분할 PR3d 행과 **P14 클래스 처분표(loop2 #3)** 는 `docs/plans/task-impl3-pr3d-internal-token.md`(P1~P8)가 정본이다.
 > 각 PR 은 자체 `/work` + `/ship` 을 거치며, 해당 PR 착수 시 세부 계획을 보강한다(impl② PR3 선례).
 
 ## 1. 목표
@@ -105,7 +106,7 @@
 | **PR3a** | Gateway shadow 배포 — 라우팅·검증기·RateLimiter, **Authorization + 재주입 헤더 병행 전달**. 서비스는 아직 `JwtFilter`(구) 유지 | P11·P12·P13·P16 | Redis/JWKS warm-up 완료, Gateway 최초 JWKS 적재 성공(usable key ≥1), readiness=true | Gateway 트래픽 0 (서비스 직접 경로 살아있음) |
 | **PR3b** | 트래픽을 Gateway 로 전환 (canary → 100%) | P17 부분(gateway svc/HPA/SA/ServiceMonitor) | PR3a 안정, 보호/공개/spoof canary 통과, 오류율 임계 이하 | 트래픽을 기존 직접 경로로 복귀 |
 | **PR3c** | 서비스 직접 노출 제거(ClusterIP)+NetworkPolicy, **header-trust 호환 이미지 rollout**(구·신 Pod 혼재 허용 — 헤더/Bearer 양쪽 수용) | P14 전환분·P17 나머지 | PR3b 100% 전환 유지, 혼재 구간 refresh/logout 정상 | 이전 이미지 태그로 rollout undo, NodePort/LB patch 복구 |
-| **PR3d** | **rollback window 경과 후** Authorization 전달 중단 + servlet verifier 삭제(ADR-0014 D2-c exit) | P14 삭제분·P18 ⑤ | family-less 토큰 소멸 증명(#1 게이트), 혼재 Pod 0 | ⚠️ **Gateway 가 Authorization 전달을 먼저 복구**해야 서비스 롤백 가능 — 역순 강제 |
+| **PR3d** | **[재정의 — ADR-0017/경로 A]** 평문 header-trust → **Gateway 서명 내부 토큰(`X-Internal-Auth`)** 격상 + Authorization 전달 중단 + 서비스 측 사용자 토큰 verifier·blacklist 삭제(ADR-0014 D2-c exit, verifier 기계는 내부 토큰 검증기로 **용도 변경**). 정본: `task-impl3-pr3d-internal-token.md`(P1~P8) | P1~P8(구 P14 삭제분·P18 ⑤ 대체) | family-less 토큰 소멸 증명(#1 게이트), dual-accept 종료(혼재 Pod 0) | ⚠️ **Gateway 가 평문/Authorization 전달을 먼저 복구**해야 서비스 롤백 가능 — 역순 강제 |
 
 - **rollout 공통**: `maxUnavailable=0`, 단계별 고유 이미지 태그, 각 단계 readiness·오류율 임계·역순 rollback 명령과 증적을 P18/P19 완료 조건으로 고정.
 
@@ -133,6 +134,7 @@
 - [ ] **P14.** 리소스 서비스 header-trust 전환(**PR3c**) + servlet 검증 삭제(**PR3d**): common-auth `HeaderAuthenticationFilter` + `HeaderTrustSecurityConfigurer`, 5서비스 SecurityConfig 를 `JwtSecurityConfigurer`→header-trust 로 전환. **`LoginUser` 계약(보강 b)**: `LoginUser(userId, role, familyId)`, `logout(userId, familyId)`=family deny write + `revokeAllByUserId`, resolver 의 `getDetails()`→accessToken 매핑 제거.
   - **헤더 3-state 계약 확정(loop2 #4)**: ① **세 헤더 모두 없음 = anonymous 로 체인 계속**(즉시 401 금지 — 공개 경로가 깨진다. 보호 경로는 `anyRequest().authenticated()` 가 401 로 막는 것이 확인됨 `JwtSecurityConfigurer:41-44`) / ② 세 헤더가 **각각 정확히 하나씩 존재 + 검증 통과 = 인증** / ③ **그 외(부분 존재·blank·중복 헤더·형식 오류·미허용 role) = 401**. 검증 규칙: `X-User-Id`=양의 정수, `X-User-Role`=명시 enum(USER/ADMIN), `X-User-Family-Id`=non-blank(PR3d 이후 필수). **파싱 예외가 500 이나 anonymous fallback 으로 새지 않게** 한다.
   - **ADR-0014 D2-c exit — 클래스별 move/delete/retain 표(loop2 #3, PR3d 실행)**: 일괄 삭제하면 User 서명/JWKS 가 깨진다(`JwtTokenSigner` 가 `JwtAuthProperties`/`JwtKeyProperties`/`PemKeyLoader` 의존, `JwkController:3` 이 `RsaPublicKeyRegistry` 의존).
+  - **⚠️ [PR3d 재정의로 대체 — ADR-0017]** 아래 표는 "평문 header-trust 굳히기" 전제로 작성됐다. 경로 A 채택으로 PR3d 는 서명 내부 토큰 격상이 되어, `RsaPublicKeyRegistry`/`PemKeyLoader`/`JwtKeyProperties`(공개키)는 **삭제가 아니라 내부 토큰 검증기로 용도 변경**되고 삭제 대상은 사용자 토큰 검증 필터·서비스 측 blacklist lookup 으로 좁혀진다. **정본 처분표 = `task-impl3-pr3d-internal-token.md` §3 P6.** 아래 표는 이력으로 보존(참조 금지).
 
 | 대상 | 처분 |
 |---|---|

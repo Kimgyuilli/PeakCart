@@ -61,6 +61,9 @@ jobs:
           bash scripts/gateway-exposure-lint.sh
           # 조작 입력 9종에서 실제로 실패하는지 — lint 자체가 vacuous-green 으로 썩는 것을 막는다.
           bash scripts/gateway-exposure-lint.sh --self-test
+          # NetworkPolicy backend ingress 제한(PR3c) — 0개 선택·peer 누락·egress 혼입 차단.
+          bash scripts/networkpolicy-contract-lint.sh
+          bash scripts/networkpolicy-contract-lint.sh --self-test
           bash scripts/servicemonitor-selector-lint.sh
           bash scripts/observability-ssot-lint.sh
           bash scripts/observability-promql-lint.sh

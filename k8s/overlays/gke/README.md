@@ -77,18 +77,20 @@ kubectl apply -k k8s/overlays/gke/
 > **HPA 전제**: 4단계 적용에 포함된 HPA (`hpa.yml`) 는 CPU Utilization 기반이며 metrics-server API (`metrics.k8s.io`) 가 필요합니다. GKE Standard 는 기본 제공이므로 추가 설치 없이 동작합니다. **도메인 서비스 HPA 는 order-service 단일**(구현 ① PR3b GP-2 #4 · 로드맵 §16 "Phase 4 이후 HPA=Order Service HPA") — 타 4서비스는 HPA 미적용(필요 시 후속). **gateway 는 그 원칙의 명시적 예외**(구현 ③ PR3b): 전 트래픽 단일 진입점이라 단일 replica 가 SPOF 이므로 `minReplicas: 2` HPA 를 둡니다(ADR-0013 D3). minikube overlay 에는 HPA 미포함.
 > HPA 상태 확인: `kubectl get hpa -n peekcart` · `kubectl top pods -n peekcart`.
 
-## 외부 노출 (구현 ③ PR3b 전환기)
+## 외부 노출 (구현 ③ PR3c — gateway 단일 진입점)
 
-최종 형태의 외부 진입점은 **gateway 하나**입니다 (ADR-0013 D3).
+외부 진입점은 **gateway 하나**입니다 (ADR-0013 D3). PR3c 에서 5서비스 직접 LB 경로를 제거하고
+ClusterIP 로 환원했으며, NetworkPolicy 로 업무 API(8080) 진입을 gateway·monitoring scrape 로만 제한합니다.
 
 | 대상 | 노출 | 상태 |
 |---|---|---|
 | `gateway` | Internal LoadBalancer (`networking.gke.io/load-balancer-type: Internal`), 8080 | **정본 진입점** |
-| 5개 도메인 서비스 | 각각 Internal LoadBalancer | ⚠️ **전환기 표면 — PR3c 에서 ClusterIP 로 환원** |
+| 5개 도메인 서비스 | ClusterIP (외부 노출 없음) | header-trust + NetworkPolicy 로 gateway 경유 강제 |
 
-5서비스 직접 경로를 PR3b 에서 남겨두는 이유는 **canary 롤백 경로**이기 때문입니다. gateway 전환 중 문제가
-생기면 클라이언트를 서비스별 LB 주소로 되돌립니다 (절차: `docs/plans/task-impl3-spring-cloud-gateway.md` §7).
-PR3c 에서 직접 경로 제거 + NetworkPolicy 로 gateway 경유를 강제합니다.
+**NetworkPolicy enforcement 는 CNI 의존입니다** — GKE 는 Dataplane V2 또는 `--enable-network-policy`(Calico)가
+활성이어야 정책이 실제로 적용됩니다. 미활성이면 정책이 조용히 무시되어 직접 경로 spoof 가 열립니다.
+롤아웃 전 `scripts/gke-security-smoke.sh` 가 enforcement 활성을 hard-fail 로 확인합니다
+(절차·안전 순서: `docs/plans/task-impl3-spring-cloud-gateway.md` §8).
 
 gateway Service 는 **8080 만 게시**합니다 — 관리 포트 8081(actuator)을 이 Service 에 추가하면 LB 가
 `/actuator/prometheus` 까지 노출합니다. `scripts/gateway-exposure-lint.sh` 가 렌더 산출에서 이를 강제합니다

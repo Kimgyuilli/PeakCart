@@ -664,3 +664,31 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **미확보(명시)**: 실 클러스터 canary 증적 — runbook 은 작성했으나 미실행. 상시 클러스터 부재로 실 probe(보호/공개/spoof·오류율)는 **PR3c 의 GKE 보안 smoke 세션에서 NetworkPolicy 음성·양성과 함께 1회** 수행한다. **렌더 성공을 canary 통과로 기록하지 않음** → PR3c 진입 조건("100% 전환 유지")은 본 PR 머지로 충족되지 않는다.
 
 **다음**: PR3c(5서비스 ClusterIP 환원 + NetworkPolicy + header-trust 전환 + ADR-0014 D2-c exit + **GKE 보안 smoke = canary 증적 합류**) → PR3d(Authorization 중단·verifier 삭제) → PR4(관측성 S9 + `gateway-metrics`/SM + lint 6 + HS512 제거).
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3c (header-trust 전환 + ClusterIP 환원 + NetworkPolicy) — [#77](https://github.com/Kimgyuilli/PeakCart/pull/77)
+
+> ADR-0013 D3. PR3a/PR3b 로 Gateway 를 클러스터에 올린 뒤, 리소스 서비스가 JWT 를 재검증하는 대신 Gateway 가 검증 후 주입한 `X-User-*` 신뢰 헤더로 인증하도록 전환한다. 동시에 5서비스 직접 노출을 제거(ClusterIP)하고 NetworkPolicy 로 gateway 경유를 강제해 header-trust 의 spoofing 을 봉쇄한다. **servlet verifier 삭제(ADR-0014 D2-c exit)·Authorization 전달 중단은 PR3d** — PR3c 는 구 컴포넌트를 잔존시켜 rollback 안전창을 남긴다.
+
+**작업 (P31~P38)**:
+- **P31** common-auth `HeaderAuthenticationFilter`(servlet `OncePerRequestFilter`) + `HeaderTrustSecurityConfigurer`. **3-state 계약**: 세 헤더 부재→anonymous 통과 / `X-User-Id`(양의 정수)·`X-User-Role`(USER/ADMIN) 각 1개(+familyId 전환기 선택)→인증 / 형식오류(부분·blank·중복·비숫자·미허용 role)→401(entrypoint, 500·anonymous fallback 아님). `LoginUser(userId,role,familyId)` + resolver(authority→role, details→familyId) + testFixtures(role/familyId).
+- **P32** 5 SecurityConfig `jwtSecurityConfigurer`→`headerTrustSecurityConfigurer` 스왑(공통 정책·`@EnableMethodSecurity`·PUBLIC_URLS 불변). `AuthController.logout`→`authService.logout(userId, familyId)` = family deny(non-null 시) + `revokeAllByUserId`(`jwtTokenVerifier` 의존 제거·고아 import/field 정리).
+- **P33** 테스트: `HeaderAuthenticationFilterTest` 3-state 13종 + `UserSecurityIntegrationTest`·`NotificationSecurityIntegrationTest` Bearer→`X-User-*` 재작성(configurer·MdcFilter parity·actuator permitAll) + `AuthServiceTest` logout family/family-less.
+- **P34** overlay service patch 10개(minikube NodePort 5·gke Internal LB 5) 삭제 → base ClusterIP 환원 + 5 base Deployment `strategy.rollingUpdate.maxUnavailable:0`.
+- **P35** `k8s/base/networkpolicy.yml` — **ingress-only**·`podSelector{component:backend}`(5서비스 선택·gateway `component:gateway` 자동 제외)·ingress ①gateway `{app:gateway}` ②monitoring NS Prometheus scrape 예외(둘 다 TCP 8080). `networkpolicy-contract-lint.sh`(고정 5 Deployment 이름 식별·peer+포트 결합, self-test 8종).
+- **P36** PR3c 무중단 rollout runbook(계획 §8 — 안전 순서: NetworkPolicy/ClusterIP 선행→header-trust rollout, 역순 rollback).
+- **P37** `gke-security-smoke.sh`(`--barrier`: enforcement hard-fail[Dataplane V2 OR networkPolicy.enabled]·non-gateway 차단·gateway 공개 200·Prometheus up·직접경로 도달불가 / default: barrier+canary+증적).
+- **P38** 검증: 전체 빌드 9모듈 BUILD SUCCESSFUL · CI lint 7종 그린(image-contract full 6/6·servicemonitor 5 유지·gateway-exposure 13/13·**networkpolicy-contract 8/8**) · 렌더 양성(5 ClusterIP·gateway NodePort/LB).
+
+**핵심 결정**:
+- **configurer 스왑 = 필터만 교체, 공통 정책 전부 보존**(Codex diff #6): csrf/STATELESS/entryPoint/accessDeniedHandler/MdcFilter 순서 유지 — 누락 시 401/403·MDC traceId 계약이 조용히 달라진다.
+- **NetworkPolicy 는 podSelector 기반**(Codex diff #3/#4): vanilla NP 는 peer 를 ServiceAccount 로 선택할 수 없다 → SA 기반 허용 폐기·Gateway SA PR3c 미도입. `component:backend` 로 5서비스만 선택.
+- **안전 순서**: NetworkPolicy/ClusterIP 를 header-trust rollout 보다 먼저(구 이미지 Bearer 검증이라 위조 `X-User-*` 무효). gateway 의 Authorization 전달은 PR3c 내내 유지(rollback 안전창).
+- **검증 도구 false-green 차단**(Codex diff #1/#2/#5): lint 는 보호 대상을 고정 Deployment 이름으로 식별해 라벨 드리프트를 잡고 peer 를 포트와 결합 검사. smoke barrier 는 kubectl-run 실패↔curl 결과 분리(`000000` 버그·kubectl 실패 오판 제거)·직접경로는 HTTP 응답 오면 실패. self-test 로 각 시나리오 재현·차단.
+
+**프로세스**: `/plan`(Codex 3 loop: timeout→10건→4건 전량 반영. NetworkPolicy SA 미지원·barrier 실행화·configurer parity 등) → `/work`(diff single 리뷰 1 loop, **6건[P1:4/P2:2] 전량 반영** — 내 검증 도구 자체의 false-green 이 핵심. np-lint self-test 8/8 이 Codex 지적 시나리오 재현·차단) → `/ship`([PR #77](https://github.com/Kimgyuilli/PeakCart/pull/77), 4 커밋 feat(auth)/test(auth)/feat(k8s)/docs). consistency precheck ok.
+
+**미확보(명시)**: **GKE 실 클러스터 보안 smoke 증적** — `gke-security-smoke.sh` 는 작성 완료했으나 실 클러스터 barrier(enforcement·직접경로 차단·spoof)·canary 실행은 라이브 클러스터 단계라 본 PR 미포함. **렌더/lint 성공을 canary 통과로 기록하지 않는다**(계획 §6/P38). PR3c 완료 필수 게이트이며 **PR3d 진입 전 확보 필수**.
+
+**다음**: PR3d(header-trust 이미지 rollout 완료 후 Authorization 전달 중단 + servlet verifier[`JwtFilter`/`JwtTokenVerifier`/blacklist lookup] 삭제 = ADR-0014 D2-c exit + family-less 소멸 증명 후 `LoginUser.familyId` non-null) → PR4(관측성 S9 + `gateway-metrics`/SM + lint 6 + HS512 제거). **선행: GKE 보안 smoke 증적 확보.**

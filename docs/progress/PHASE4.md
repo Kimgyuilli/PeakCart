@@ -691,4 +691,21 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 
 **미확보(명시)**: **GKE 실 클러스터 보안 smoke 증적** — `gke-security-smoke.sh` 는 작성 완료했으나 실 클러스터 barrier(enforcement·직접경로 차단·spoof)·canary 실행은 라이브 클러스터 단계라 본 PR 미포함. **렌더/lint 성공을 canary 통과로 기록하지 않는다**(계획 §6/P38). PR3c 완료 필수 게이트이며 **PR3d 진입 전 확보 필수**.
 
-**다음**: PR3d(header-trust 이미지 rollout 완료 후 Authorization 전달 중단 + servlet verifier[`JwtFilter`/`JwtTokenVerifier`/blacklist lookup] 삭제 = ADR-0014 D2-c exit + family-less 소멸 증명 후 `LoginUser.familyId` non-null) → PR4(관측성 S9 + `gateway-metrics`/SM + lint 6 + HS512 제거). **선행: GKE 보안 smoke 증적 확보.**
+**다음**: PR3d(**재정의 — 아래 ADR-0017 채택 참조**) → PR4(관측성 S9 + `gateway-metrics`/SM + lint 6 + HS512 제거). **선행: GKE 보안 smoke 증적 확보.**
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3d 재정의 (ADR-0017 채택: Gateway 서명 내부 토큰) — 2026-07-25
+
+> **결정만 기록(구현 전).** PR3c 리뷰에서 "평문 header-trust 는 NetworkPolicy 단일 통제(single control)라 근본적 방어가 아니다"를 짚고, defense-in-depth 로 격상하기로 **ADR-0017(Accepted, 경로 A)** 신설. PR3d 의 정의가 "평문 header-trust 굳히기 + verifier 삭제" → "Gateway 서명 내부 토큰(`X-Internal-Auth`) 격상"으로 바뀐다.
+
+**핵심**:
+- **평문 → 서명 assertion**: Gateway 가 `X-User-*`(평문) 대신 자기 개인키로 서명한 짧은 수명 내부 JWT(`X-Internal-Auth`, TTL≤30s)를 주입. 리소스 서비스는 Gateway 공개키로 **서명·iss(`peekcart-gateway`)·kid·exp 핀 검증** 후 claims 에서 신원 추출. 평문 신뢰 헤더 폐기 → **스푸핑 표면 0**.
+- **신뢰 경계 이중화**: 신원 위조에 NetworkPolicy(네트워크) AND 서명키(암호) 동시 돌파 필요. NetworkPolicy 단독 실패(CNI 미enforce·라벨 드리프트·파드 컴프로마이즈)로 위조 불가.
+- **verifier 용도 변경(삭제 아님)**: `RsaPublicKeyRegistry`/`PemKeyLoader`/`JwtKeyProperties`(공개키)는 내부 토큰 검증기로 재활용(기존 크립토 ~80% 재사용). 삭제 대상은 사용자 토큰 검증 필터(`JwtFilter`/`JwtTokenVerifier`)·서비스 측 blacklist lookup(deny 는 Gateway 소유). ADR-0014 D2-c exit 은 여전히 성립.
+- **경로 A**: PR3c 가 GKE 증적 미확보 = 평문 header-trust 미배포 → 평문을 실 클러스터에 굳히지 않고 서명 assertion 을 header-trust rollout 으로 직행(dual-accept 경유). GKE 보안 smoke 는 서명 상태에서 1회 수행하며 위조 `X-Internal-Auth`·평문 직접주입 차단을 barrier 에 추가.
+- **기각 대안**: 평문 유지(단일 통제) / HMAC 공유비밀(서비스 1개 컴프로마이즈=위조, blast radius) / mTLS(메시 인프라 과대, Phase 5+) / 원본 JWT 재검증(중복·지연 회귀).
+
+**산출물**: ADR-0017(Accepted)·`docs/plans/task-impl3-pr3d-internal-token.md`(P1~P8 정본)·상위 계획 PR3d 행·P14 처분표 대체 표기.
+
+**다음**: 새 브랜치에서 초안 `/plan`(Codex 리뷰 루프) → PR3d `/work`+`/ship`. **선행 게이트 불변: GKE 보안 smoke 증적(위조 서명 차단 포함).**

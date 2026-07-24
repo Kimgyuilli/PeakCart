@@ -38,3 +38,11 @@
 - 검증: np-lint self-test 8/8, gw-exposure 13/13, 7 lint 그린, common-auth test·user 통합테스트 그린
 - diff: .cache/diffs/diff-task-impl3-pr3c-review-1784868001.patch
 - raw: .cache/codex-reviews/diff-task-impl3-spring-cloud-gateway-1784868040.json
+
+## 2026-07-24 05:10 — /ship --execute (PR #77)
+- 4 커밋: feat(auth)/test(auth)/feat(k8s)/docs(plan) + docs(progress) done 반영
+- **커밋 재작성**: 최초 p1 이 /work 의 pre-staged git rm 삭제 10개를 흡수(git commit 은 전체 index 커밋) → soft-reset 후 clean index 재커밋(카테고리 무혼합 확인)
+- push origin/feat/impl3-pr3c-header-trust-networkpolicy · PR #77 (base main)
+- /done: TASKS ③ PR3c ✅[#77] 반영(③ 는 PR3d/PR4 남아 🔄 유지) · PHASE4 PR3c 이력 추가
+- consistency precheck ok
+- **미확보 명시**: GKE 실 클러스터 smoke 증적(PR3d 진입 전 필수)

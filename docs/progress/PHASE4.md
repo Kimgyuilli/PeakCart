@@ -712,7 +712,7 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 
 ---
 
-## 구현 ③ Spring Cloud Gateway — PR3c GKE 보안 smoke 게이트 실행 (증적 확보) — 2026-08-08
+## 구현 ③ Spring Cloud Gateway — PR3c GKE 보안 smoke 게이트 실행 (증적 확보) — 2026-08-08 — [#79](https://github.com/Kimgyuilli/PeakCart/pull/79)
 
 > **코드 변경 없음 — 실행/증적 세션.** PR3c([#77](https://github.com/Kimgyuilli/PeakCart/pull/77))가 "렌더/lint 성공을 canary 통과로 기록하지 않는다"며 미확보로 남긴 실 클러스터 barrier 를 1회 수행했다. PR3d 진입 조건이던 선행 게이트가 해제된다.
 

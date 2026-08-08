@@ -706,6 +706,41 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 - **경로 A**: PR3c 가 GKE 증적 미확보 = 평문 header-trust 미배포 → 평문을 실 클러스터에 굳히지 않고 서명 assertion 을 header-trust rollout 으로 직행(dual-accept 경유). GKE 보안 smoke 는 서명 상태에서 1회 수행하며 위조 `X-Internal-Auth`·평문 직접주입 차단을 barrier 에 추가.
 - **기각 대안**: 평문 유지(단일 통제) / HMAC 공유비밀(서비스 1개 컴프로마이즈=위조, blast radius) / mTLS(메시 인프라 과대, Phase 5+) / 원본 JWT 재검증(중복·지연 회귀).
 
-**산출물**: ADR-0017(Accepted)·`docs/plans/task-impl3-pr3d-internal-token.md`(P1~P8 정본)·상위 계획 PR3d 행·P14 처분표 대체 표기.
+**산출물**: ADR-0017(Accepted)·`docs/plans/task-impl3-pr3d-internal-token.md`(P1~P10 정본 — loop3 에서 P9/P10 추가, 상위 문서 P1~P8 표기는 2026-08-08 정정)·상위 계획 PR3d 행·P14 처분표 대체 표기.
 
 **다음**: 새 브랜치에서 초안 `/plan`(Codex 리뷰 루프) → PR3d `/work`+`/ship`. **선행 게이트 불변: GKE 보안 smoke 증적(위조 서명 차단 포함).**
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3c GKE 보안 smoke 게이트 실행 (증적 확보) — 2026-08-08 — [#79](https://github.com/Kimgyuilli/PeakCart/pull/79)
+
+> **코드 변경 없음 — 실행/증적 세션.** PR3c([#77](https://github.com/Kimgyuilli/PeakCart/pull/77))가 "렌더/lint 성공을 canary 통과로 기록하지 않는다"며 미확보로 남긴 실 클러스터 barrier 를 1회 수행했다. PR3d 진입 조건이던 선행 게이트가 해제된다.
+
+**환경**: 신규 GCP 프로젝트 `peekcart-gate`(조직 하위) · GKE `peekcart-loadtest`(asia-northeast3-a, e2-standard-4×3, **Dataplane V2**) · loadgen VM `peekcart-loadgen`(e2-small, 동일 VPC) · 이미지 GHCR→AR 승격 6개 digest 고정(D-016/L-016a) · kube-prometheus-stack. 세션 종료 후 `loadtest/cleanup.sh` + orphan PD 4건 수동 삭제 → **잔여 리소스 0**.
+
+**결과**: `gke-security-smoke.sh` **barrier 5/5 + canary 3/3 전부 통과**.
+
+| 검사 | 결과 |
+|---|---|
+| (1) enforcement | `datapathProvider=ADVANCED_DATAPATH` |
+| (2) non-gateway Pod → order-service | 차단(`000`) |
+| (3) gateway 공개 경로 | `200` |
+| (4) Prometheus scrape | `up=5`(monitoring 예외 동작) |
+| (5) 직접 경로 5개 | 전부 도달불가 |
+| canary | 공개 `200` / 보호 무토큰 `401` / spoof `X-User-*` `401` |
+
+**핵심 결정**:
+- **검사(5) 는 그대로 돌리면 vacuous-green**: 새 클러스터엔 직접 경로가 처음부터 없어 아무 IP 5개나 넣어도 전부 `000` 이고, 모든 LB 가 **Internal** 이라 VPC 밖에서 실행하면 무엇을 넣든 `000` 이다(스크립트의 개수 검증만으로는 의미가 확보되지 않는다). → **3상태 측정으로 양성 대조군을 만든다**: ①LB有·NP無=**200**(검사가 도달을 감지함) → ②LB有·NP有=`000`(NP 단독 효과) → ③ClusterIP·NP有=`000`(표면 제거). ①→③ 직행이면 LB 삭제와 NP 적용이 동시에 일어나 무엇이 `000` 을 만들었는지 분리되지 않아 ②를 끼웠다.
+- **직접 경로는 PR3c(3ed4fb4)가 삭제한 service patch 를 git 에서 복원해 실제로 띄운 주소**(합성 NodePort 아님) — 그래야 "표면 제거"가 임시 오브젝트가 아닌 계약 변경에 대한 증명이 된다. 복원 overlay 는 `k8s/overlays/gke-probe-state1/`(operator-local, `.git/info/exclude`).
+- **smoke 실행 위치 = VPC 내부 VM**: gateway·5서비스 LB 가 전부 Internal 이라 노트북 실행은 검사(3) 이 `000` 으로 실패하고 검사(5) 는 무조건 통과한다.
+
+**증적**: `docs/progress/evidence/pr3c-gke-smoke-20260808-1445.md`(스크립트 출력 + 3상태 addendum + 배포 편차).
+
+**배포 편차(증적에 명시)**:
+1. 조직 정책으로 기본 컴퓨트 SA 자동 IAM 부여가 꺼져 AR pull 403 → `roles/artifactregistry.reader`, loadgen VM 용 `roles/container.developer` 수동 부여.
+2. **user-service RS256 개인키를 k8s Secret 으로 마운트**(ADR-0013 D2 의 Secret Manager+CSI 아님) — 게이트 검증 대상과 무관한 부팅 전제로 판단. **PR3d P5 CSI 계약은 본 증적으로 미충족**.
+3. `SLACK_WEBHOOK_URL`·`TOSS_SECRET_KEY`·`TOSS_WEBHOOK_SECRET` 은 `docker-health-smoke.sh` placeholder 런타임 주입(실 자격증명 아님, 외부 연동 미검증).
+
+**발견된 결함(PR3d 흡수)**: `gke-security-smoke.sh` 증적 헤더 `- canary:` 가 항상 `n/a` — `CANARY_RESULT` 가 `tee` 파이프라인 서브셸에서 설정돼 부모 셸로 전파되지 않는다. 실제 값은 로그 블록에 보존되어 본 증적은 온전. PR3d P10 이 같은 스크립트를 확장하므로 그때 수정한다.
+
+**다음**: **PR3d 착수 가능**(선행 게이트 해제). `docs/plans/task-impl3-pr3d-internal-token.md` P1~P10 → `/work`. PR3d P10 ②(signed-only crypto barrier)도 위조 401 을 주장하려면 **정상 서명 200 양성 대조군**이 같은 이유로 필요하다.

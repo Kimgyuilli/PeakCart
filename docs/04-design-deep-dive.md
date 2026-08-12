@@ -402,19 +402,29 @@ Polling 방식 선택 이유:
   - 추후 트래픽 증가 시 Debezium 전환 가능한 구조로 설계
 ```
 
-### 10-2. API Gateway 인증 책임 범위 (RS256·Rate Limit·헤더 신뢰 모델은 see ADR-0013)
+### 10-2. API Gateway 인증 책임 범위 (RS256·Rate Limit 은 see ADR-0013 · 내부 토큰은 see ADR-0017)
 
-Phase 4에서 JWT 검증은 Spring Cloud Gateway에서 **RS256 공개키**로 수행하며(서명은 User 서버 개인키), 내부 서비스는 별도 JWT 재검증을 수행하지 않습니다. Gateway 검증 순서(서명/만료 → blacklist+family deny → 헤더 주입)·헤더 위조 차단·Rate Limit 은 ADR-0013 §D1/D3.
+Phase 4에서 사용자 JWT 검증은 Spring Cloud Gateway에서 **RS256 공개키**로 수행하며(서명은 User 서버 개인키), 내부 서비스는 사용자 토큰을 재검증하지 않습니다. Gateway 검증 순서(서명/만료 → blacklist+family deny)·Rate Limit 은 ADR-0013 §D1/D3.
+
+Gateway 통과 후의 신뢰 전달은 **평문 헤더가 아니라 Gateway가 서명한 내부 토큰**입니다 (ADR-0017).
 
 ```
 Gateway 통과 후 내부 서비스 호출 시:
-  - Gateway가 검증된 사용자 정보(user_id, role)를 HTTP 헤더로 전달
-  - 내부 서비스는 헤더 값을 신뢰하고 비즈니스 로직 처리
+  - Gateway가 외부 유입 X-User-* / Authorization 을 항상 strip
+  - 검증된 사용자 정보(user_id, role, family_id)를 Gateway 개인키로 서명해
+    X-Internal-Auth 단일 헤더로 주입 (사용자 Authorization 은 전달하지 않음)
+  - 내부 서비스는 서명·iss·kid·exp/iat·수명상한을 검증한 뒤에만 인증 주체를 세운다
 
-보안 전제:
-  - 내부 서비스는 Gateway를 통해서만 접근 가능
+보안 전제 (defense-in-depth — NetworkPolicy AND 서명):
   - K8s NetworkPolicy로 서비스 간 직접 통신 차단 (외부 → Gateway → 서비스만 허용)
-  - 내부 재검증 생략으로 성능 향상, NetworkPolicy로 신뢰 경계 보장
+  - NetworkPolicy 우회(오설정·측면 이동)만으로는 인증을 통과할 수 없다
+    — 평문 헤더 위조는 서명 검증에서 401
+  - 사용자 토큰 재검증은 생략하되, 신뢰 경계는 네트워크 단독이 아니라 서명이 함께 보장
+
+키 도메인 분리:
+  - Gateway 내부 토큰 공개키는 User 서비스 JWKS(/.well-known/jwks.json) 에 투입하지 않는다
+    — 레지스트리를 통째로 게시하는 구조라 내부 신뢰 앵커가 외부에 노출된다
+  - 강제는 kid 가 아니라 SPKI DER SHA-256 fingerprint 대조 (같은 키의 kid 우회 차단)
 ```
 
 ### 10-3. 페이지네이션 전략 — Offset 방식의 한계

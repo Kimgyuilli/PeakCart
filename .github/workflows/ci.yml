@@ -64,6 +64,10 @@ jobs:
           # NetworkPolicy backend ingress 제한(PR3c) — 0개 선택·peer 누락·egress 혼입 차단.
           bash scripts/networkpolicy-contract-lint.sh
           bash scripts/networkpolicy-contract-lint.sh --self-test
+          # 내부 토큰 키 도메인 분리(ADR-0017 D3) — Gateway 공개키가 User JWKS 설정에 섞이면 실패.
+          # kid 가 아니라 SPKI fingerprint 로 비교해 "같은 키를 다른 kid 로" 우회를 막는다.
+          bash scripts/internal-key-ownership-lint.sh
+          bash scripts/internal-key-ownership-lint.sh --self-test
           bash scripts/servicemonitor-selector-lint.sh
           bash scripts/observability-ssot-lint.sh
           bash scripts/observability-promql-lint.sh

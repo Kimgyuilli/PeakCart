@@ -1,0 +1,56 @@
+# Gateway 내부 토큰 **공개키** 배포 — 5개 도메인 서비스 공용 (ADR-0017 D3 · 구현 ③ PR3d-b)
+#
+# 공개키는 비밀이 아니므로 ConfigMap 이다. 그럼에도 이미지 베이크(classpath) 대신 ConfigMap 인 이유는
+# **회전(P8)** 이다 — active/previous 를 겹쳐 두는 구간에 이미지 재빌드가 끼면 회전이 배포 파이프라인에
+# 묶여 "선배포 → 수렴 확인 → 전환" 순서를 지킬 수 없다. ConfigMap 편집 + 롤링 재시작으로 끝나야 한다.
+#
+# [키 도메인 분리 — ADR-0017 D3] 여기 실리는 키는 **gateway 내부 토큰 검증용 뿐**이다.
+# user-service 의 사용자 토큰 공개키(app.jwt.rs256.public-keys)와 절대 섞지 않는다 —
+# JwkController 가 그 레지스트리를 통째로 JWKS 로 게시하므로 내부 신뢰 앵커가 외부에 노출된다.
+# 강제: scripts/internal-key-ownership-lint.sh (kid 가 아니라 SPKI DER SHA-256 fingerprint 대조).
+---
+# PEM 파일 — 5서비스에 readOnly 볼륨으로 마운트된다.
+# 회전 시: previous.pem 에 구 키를 복사 → active.pem 을 신 키로 교체 → 아래 binding 의 인덱스 갱신.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: internal-token-keys
+  namespace: peekcart
+  labels:
+    app.kubernetes.io/part-of: peekcart
+data:
+  # base 는 dev 키를 담은 템플릿이다. 운영 키는 overlay/회전 절차가 교체한다(P8 runbook).
+  peekcart-gateway-dev-2026.pem: |
+    -----BEGIN PUBLIC KEY-----
+    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3Hcy2IjZ0wLDTqhxACko
+    GkM87G3ePvxFSRSfBaOBVhAbDZwGh8+TaIXyTfQ+P2rc8HLSgZcQwbHcDCcqzbpF
+    4waO6fcec37B3IiqzI8J1EpWsuWqjt2lLPaLtCLh3OKpbF6bHzkew5laodhSd20W
+    ss+LxhnFZhbQpKzLAKWAq6r7acOAn5+isDGtGzM5NhRXpfm2CTnDDQXJK16F2edY
+    d+p85YMej3YYp8iIo33M+l21RTNV+Cgl5Pwn+KTAISW+F0xUOfcNqkWicUgBd7Z8
+    UN+r9Bb1nEDducaI3FDNi0O+WLj/f6PQiBwZVO27XyyTeEVDdANbocA3EgFqGcfk
+    oQIDAQAB
+    -----END PUBLIC KEY-----
+---
+# Spring 바인딩 — 이미지에 베이크된 classpath 기본값을 **덮어쓴다**.
+#
+# 인덱스 env 로 노출하는 이유: 회전 overlap 은 리스트 항목이 1개 → 2개 → 1개로 변하는 일이라,
+# application-k8s.yml 에 리스트를 고정하면 previous 키 추가가 이미지 변경이 된다. relaxed binding 의
+# 인덱스 env(APP_INTERNALTOKEN_PUBLICKEYS_<i>_*)면 ConfigMap 편집만으로 항목 수를 바꿀 수 있다.
+#
+# 회전 중(overlap)에는 _1_ 쌍을 추가하고, old kid 제거 단계에서 도로 지운다(P8 runbook ①·⑤).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: internal-token-binding
+  namespace: peekcart
+  labels:
+    app.kubernetes.io/part-of: peekcart
+#
+# [ADR-0007] `mode`(SIGNED_ONLY/DUAL_ACCEPT)는 여기 두지 않는다 — 그건 연결 정보가 아니라 **인증 동작
+# 규약**이라 base(application.yml) + `InternalTokenProperties` 기본값이 소유한다. 커밋된 매니페스트의
+# 기본은 언제나 SIGNED_ONLY 이며, 전환기 DUAL_ACCEPT 는 롤아웃 절차(§7 ②)가 그 단계에서만 얹었다가
+# ④ 에서 걷어내는 **한시적 override** 다. 여기 SIGNED_ONLY 를 중복 선언하면 base 기본값과 두 곳이
+# 진실을 다투면서 ADR-0007 위반만 남는다(동작 규약의 프로파일 유출).
+data:
+  APP_INTERNALTOKEN_PUBLICKEYS_0_KID: peekcart-gateway-dev-2026
+  APP_INTERNALTOKEN_PUBLICKEYS_0_LOCATION: file:/etc/peekcart/internal-token-keys/peekcart-gateway-dev-2026.pem

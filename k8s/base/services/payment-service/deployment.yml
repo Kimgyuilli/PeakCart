@@ -28,6 +28,12 @@ spec:
     spec:
       # DB-per-service (구현 ② PR2): 각 서비스가 자기 스키마를 독립 Flyway 마이그레이션하므로
       # order-service readiness 게이트(전환기 initContainer)를 제거한다 — cross-service cold-start 순서 의존 소멸.
+      # gateway 내부 토큰 **공개키** 마운트(ADR-0017 D3 · PR3d-b). 비밀이 아니라 ConfigMap 이며,
+      # 이미지 베이크 대신 두는 이유는 회전 overlap 이 이미지 변경 없이 끝나야 하기 때문이다(P8).
+      volumes:
+        - name: internal-token-keys
+          configMap:
+            name: internal-token-keys
       containers:
         - name: payment-service
           image: ghcr.io/kimgyuilli/peekcart-payment-service:latest
@@ -36,8 +42,14 @@ spec:
           envFrom:
             - configMapRef:
                 name: payment-service-config
+            - configMapRef:
+                name: internal-token-binding
             - secretRef:
                 name: payment-service-secret
+          volumeMounts:
+            - name: internal-token-keys
+              mountPath: /etc/peekcart/internal-token-keys
+              readOnly: true
           resources:
             requests:
               cpu: 250m

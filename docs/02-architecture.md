@@ -39,7 +39,7 @@
 ### 4-4. 레포 전략: 모노레포 (Gradle 멀티모듈) (Phase 4 모듈 구조는 see ADR-0011, ADR-0014)
 
 - 단일 GitHub 레포에서 전체 서비스 구조를 한눈에 파악 가능
-- `common` 모듈로 이벤트 DTO, 공통 예외, 응답 포맷 공유 + `peekcart-common-observability` 모듈(ADR-0009 선결정) + `peekcart-common-auth` 모듈(전환기 JWT 검증, ADR-0014) + 5개 서비스 모듈 (경계·의존 규칙은 ADR-0011/ADR-0014)
+- `common` 모듈로 이벤트 DTO, 공통 예외, 응답 포맷 공유 + `peekcart-common-observability` 모듈(ADR-0009 선결정) + `peekcart-common-auth` 모듈(내부 토큰 검증 — 사용자 JWT 검증은 ADR-0014 D2-c 로 종료, ADR-0017) + `internal-token-contract` 모듈(내부 토큰 이름 계약, 프레임워크 의존 0 — 발행 `gateway`/검증 `peekcart-common-auth` 가 서로 의존 불가) + 5개 서비스 모듈 (경계·의존 규칙은 ADR-0011/ADR-0014)
 - 실무 기준에서는 서비스별 독립 배포와 권한 분리를 위해 멀티레포가 적합하나, 포트폴리오 가시성과 개발 효율을 위해 모노레포 채택
 
 ### 4-5. MSA 분리 대상 서비스 (see ADR-0010)
@@ -105,7 +105,7 @@ graph TD
     Slack["Slack Webhook (외부)"]
     LB["nGrinder / k6 부하 테스트"]
 
-    Client -->|HTTP| Gateway["Spring Cloud Gateway\\nRS256 JWT 1차 검증 · 라우팅 · Rate Limit (see ADR-0013)"]
+    Client -->|HTTP| Gateway["Spring Cloud Gateway\\nRS256 JWT 검증 · 서명 내부 토큰 발행 · 라우팅 · Rate Limit (see ADR-0013, ADR-0017)"]
 
     Gateway --> UserSvc
     Gateway --> ProductSvc
@@ -430,7 +430,7 @@ peekcart/
 │   │   ├── namespace.yml
 │   │   ├── infra/{mysql,redis,kafka}/    # Phase 3 와 동일 (공통 인프라)
 │   │   ├── services/                      # Phase 3 의 peekcart/ 를 서비스별로 분리
-│   │   │   ├── api-gateway/
+│   │   │   ├── gateway/
 │   │   │   │   ├── deployment.yml
 │   │   │   │   └── service.yml
 │   │   │   ├── order-service/
@@ -467,12 +467,32 @@ peekcart/
 │       ├── exception/
 │       └── response/
 │
-├── api-gateway/                           # Spring Cloud Gateway
+├── internal-token-contract/               # 내부 토큰 이름 계약 (순수 Java, ADR-0017)
+│   └── src/main/java/com/peekcart/internaltoken/
+│       └── InternalTokenContract.java     # issuer / claim / 헤더 이름 단일 출처
+│
+├── peekcart-common-auth/                  # 내부 토큰 검증 공유 모듈 (ADR-0014, ADR-0017)
+│   └── src/main/java/com/peekcart/global/
+│       ├── security/
+│       │   ├── InternalTokenAuthenticationFilter.java  # X-Internal-Auth 검증 → 인증 주체
+│       │   ├── InternalTokenVerifier.java
+│       │   ├── InternalGatewayPublicKeyRegistry.java   # User JWKS 와 키 도메인 분리
+│       │   ├── InternalTokenModeInvariant.java         # 부팅 시 필터 구성 검사
+│       │   └── HeaderTrustSecurityConfigurer.java
+│       └── auth/
+│           └── LoginUser.java             # userId · role · familyId
+│
+├── gateway/                               # Spring Cloud Gateway (WebFlux, :common 미의존)
 │   └── src/main/java/com/peekcart/gateway/
-│       ├── filter/
-│       │   └── JwtAuthFilter.java
+│       ├── auth/
+│       │   ├── GatewayAuthenticationFilter.java  # 외부 헤더 strip → RS256 검증 → 내부 토큰 주입
+│       │   ├── GatewayJwtVerifier.java
+│       │   ├── JwksKeyRegistry.java
+│       │   └── InternalTokenIssuer.java   # Gateway 개인키 서명 (ADR-0017)
+│       ├── ratelimit/
+│       │   └── FailClosedRedisRateLimiter.java   # SCG 기본 fail-OPEN 대체 (ADR-0013 D3)
 │       └── config/
-│           └── RouteConfig.java
+│           └── RateLimiterConfig.java
 │
 ├── user-service/
 ├── product-service/
@@ -513,7 +533,7 @@ peekcart/
 | 결제 실패 보상 | `@TransactionalEventListener` | Choreography Saga |
 | 이벤트 DTO | 도메인 내부 `infrastructure/event/` | `common/event/` 공유 모듈 |
 | Outbox | 도메인별 개별 구현 | `common/outbox/` 공유 모듈 |
-| 인증 처리 | `global/jwt/` | `api-gateway` JWT 필터로 이동 |
+| 인증 처리 | `global/jwt/` (서비스 내 JWT 필터) | `gateway` 가 사용자 JWT 검증 → 서명 내부 토큰(`X-Internal-Auth`) 주입, 서비스는 내부 토큰만 검증 (see ADR-0017) |
 | 인프라 | `docker-compose.yml` + (Phase 3) `k8s/` Kustomize 단일 서비스 | `k8s/` Kustomize 서비스별 디렉토리 + Helm (kube-prometheus-stack) |
 | DB 구성 | 단일 DB (모든 도메인) | DB-per-service — 5 스키마(`peekcart_<svc>`) + 계정/권한 격리, 1 인스턴스 (see ADR-0012 §D1·ADR-0016) |
 | DB 마이그레이션 | Flyway (단일 DB) | Flyway (서비스별 독립 마이그레이션 `V1__init_<svc>.sql`) |

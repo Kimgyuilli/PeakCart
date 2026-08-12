@@ -776,6 +776,20 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **미충족(명시)**:
 1. **k8s gateway 매니페스트는 배포 불가** — 개인키 CSI 마운트(P5) 부재로 fail-fast 기동 거부. CI 는 apply 하지 않고 클러스터도 0이라 실효 비용 0. PR3a→PR3b 전환기와 동일 취급 — **렌더 그린을 배포 가능으로 기록하지 않는다.**
 2. **부하 하 event-loop lag 미측정** — 마이크로벤치로는 불가. PR3d-b 부하 세션 이연(계획서 §9.2 명시). 초과 시 P2 (b) bounded scheduler + 포화 503.
-3. **Layer 1 동기화(02 / 04 §10-2) 이연** — 서명 assertion·키 도메인 분리 반영은 PR3d-b 에서 일괄.
+3. ~~**Layer 1 동기화(02 / 04 §10-2) 이연**~~ → **별도 docs PR 로 해소**(아래 항목).
 
 **다음**: **PR3d-b**(P5 CSI 키배포[user 키 정본화 포함]·P7 나머지·P8 회전 runbook·P10 GKE 2단 barrier·§7 롤아웃) → PR4(관측성 S9). **진입 조건: GKE 재기동 + Secrets Store CSI Driver 설치** — 비용상 PR4 와 같은 클러스터 세션으로 묶기를 권장.
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3d-a 후속: Layer 1 동기화 (docs) — 2026-08-12 — [#81](https://github.com/Kimgyuilli/PeakCart/pull/81)
+
+> PR3d-a 의 미충족 #3(Layer 1 동기화 이연)을 해소했다. 클러스터 비의존이라 PR3d-b 를 기다릴 이유가 없어 별도 docs PR 로 떼어냈다.
+
+**변경**:
+- **`04-design-deep-dive.md` §10-2** — "Gateway 가 평문 헤더로 전달 / 내부 서비스는 헤더 값을 신뢰" 기술을 폐기하고 서명 assertion 으로 교체. 외부 `X-User-*`·`Authorization` strip → Gateway 개인키 서명 `X-Internal-Auth` 단일 주입(사용자 Authorization 미전달) → 서비스는 서명·iss·kid·exp/iat·수명상한 검증 후 인증 주체 확립. 보안 전제를 "NetworkPolicy 가 신뢰 경계를 보장"에서 **defense-in-depth(NetworkPolicy AND 서명)** 으로 정정 — NP 우회만으로는 인증을 통과할 수 없다. **키 도메인 분리** 절 신설(Gateway 공개키는 User JWKS 에 미투입, 강제는 kid 가 아닌 SPKI DER SHA-256 fingerprint).
+- **`02-architecture.md`** — §4-4 모듈 목록에 `internal-token-contract` 추가 + `peekcart-common-auth` 역할을 "전환기 JWT 검증"→"내부 토큰 검증"(ADR-0014 D2-c 종료)으로 정정 · Phase 4 다이어그램 Gateway 노드에 내부 토큰 발행 명시 · §12 Phase 4 트리의 `api-gateway/`(가상 이름·`JwtAuthFilter`)를 실제 `gateway/` 모듈 구조로 교체하고 `peekcart-common-auth`/`internal-token-contract` 추가 · k8s `services/api-gateway/`→`gateway/` · Phase 1→4 전환표 "인증 처리" 행 정정.
+
+**남긴 것**: `00-lagacy.md` 의 동일 문구 3곳은 아카이브라 손대지 않았다. 02 §12 트리의 여타 누락(`peekcart-common-observability`, NetworkPolicy 매니페스트 등)은 ADR-0017 표면이 아니라 범위 밖.
+
+**다음**: 변동 없음 — **PR3d-b**(GKE 재기동 + Secrets Store CSI Driver 설치 선행) → PR4(관측성 S9).

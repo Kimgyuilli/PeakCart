@@ -813,3 +813,36 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **파생 정정**: §8 loop3 #3 의 "verifier + 내부토큰 필터 공존 rollback 전용 호환 이미지"는 §9.1(verifier 삭제 완료)로 **전제 소멸** — 되돌릴 대상은 직전 릴리스 이미지. 행렬은 b-1 에서 재작성.
 
 **다음**: **PR3d-b-1** 착수(진입 조건 없음) → **b-2**(GKE 재기동 + CSI Driver + Secret Manager 키 등록) → PR4(관측성 S9).
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3d-b-1: 키 배포 매니페스트 · 소유 경계 lint · 롤아웃 게이트 — 2026-08-13 — [#83](https://github.com/Kimgyuilli/PeakCart/pull/83)
+
+> 계획서 §10.2. PR3d-a 가 남긴 "개인키가 클러스터에 도달할 경로 없음"(미충족 #1)과 PR3c 의 "user 개인키 ad-hoc k8s Secret" 편차를 **클러스터 없이 그린이 되는 범위**로 해소했다. 실 키 주입·롤아웃 실행·barrier 증적은 b-2.
+
+**순서 제약을 먼저 지켰다** — 매니페스트가 lint 보다 먼저다(§10.1 V1). 반대로 하면 검사 대상이 없어 P7 lint 가 vacuous-green 이 된다. PR3d-a 에서 세 번 밟은 함정이라 착수 순서 자체를 계획에 못박고 시작했다.
+
+**핵심 결정**:
+- **개인키는 etcd 를 경유하지 않는다** — k8s Secret 은 base64 일 뿐이고 `kubectl get secret` 권한이면 원문이 나온다. 내부 토큰 개인키는 NetworkPolicy 우회 시 마지막 방어선이라 노출 = 전 서비스 위조다. Secret Manager → CSI → 노드 tmpfs 직접 투영(ADR-0013 D2·ADR-0017 D2). `secretObjects`·`nodePublishSecretRef` 는 이 이점을 되돌리므로 lint 가 금지한다.
+- **공개키는 ConfigMap** — 비밀이 아닌데도 이미지 베이크를 안 쓴 이유는 **회전**이다. overlap 은 리스트가 1→2→1 로 변하는 일이라 이미지에 고정하면 회전이 빌드 파이프라인에 묶여 "선배포 → 수렴 → 전환"(§11) 순서를 지킬 수 없다. 인덱스 env 로 ConfigMap 편집 + 재시작만으로 끝낸다.
+- **두 lint 의 검사 대상이 반대다** — exposure-lint 는 gateway **한 워크로드의 노출 표면**을, workload-key-ownership-lint 는 **"누가 그 키를 가져갔나"** 를 본다. 후자를 신설한 이유가 이것이다(같은 스크립트에 넣으면 전제[kubectl]와 실패 원인이 섞인다).
+
+**설계 가정 1건이 테스트로 뒤집혔다**: 착수 시 Spring 이 리스트를 **인덱스 단위 병합**한다고 보고 "이미지 기본값 항상 1개" 규약을 세우려 했으나 `InternalTokenPropertiesBindingTest` 가 반증 — 리스트는 **최고 우선순위 소스가 통째로 대체**한다. 실제 동작이 더 안전하다(ConfigMap 이 신뢰 kid 집합의 단일 출처 → 회전 ⑤가 실제 폐기로 이어진다). 렌더·lint 로는 안 잡히고 b-2 실 클러스터에서야 드러났을 지점이라 §11.2 도 정정했다.
+
+**프로세스**: `/work` single 리뷰(1,569줄). **분할 아티팩트 0건** — PR3d-a 가 3 chunk 로 나눠 24건 중 10건이 "다른 chunk 파일이 없어 컴파일 불가" 류 오판이었던 것과 대비된다. **11건 전량 실제 결함, 전량 반영**. 그중:
+1. **내 검증도구 false-green 3건** — SPC 를 **이름으로만** 승인해 `resourceName` 만 상대 키로 바꾸는 우회가 열려 있었고(이 PR 의 존재 이유가 키 도메인 분리인데), 소유자를 이름으로만 판정해 `Job/gateway` 가 통과했고, 개인키 탐지가 이름 정규식이라 `bundle.pem` 에 PKCS#8 담으면 미탐이었다.
+2. **내 논증 오류 1건** — "Pod 200 = 서명 주입" 은 다운스트림이 SIGNED_ONLY 일 때만 참인데 §7 ③ 구간은 DUAL_ACCEPT 다. 평문만 주입해도 200 이라 "평문 주입 0" 게이트가 false-green 이었다 → 전제를 관측으로 확인 후 아니면 거부.
+3. **내 판단 오류 1건** — P10 ② "직접경로 Bearer 거부"를 "클러스터 밖에서 불가능"이라 빼고 사유를 주석에 적었는데, **gateway Pod 안에서는 가능**하다(NetworkPolicy 가 허용한 유일 peer).
+4. self-test 판정을 `grep -qF`(ID 존재) → **ID×기대 횟수 multiset**(변이 35→49종). `APP_INTERNALTOKEN_MODE` ConfigMap 배치는 ADR-0007 위반(동작 규약의 프로파일 유출)이라 제거.
+
+**추가 발견**: `rollout-convergence-gate.sh` 의 python 블록이 `\"` 이스케이프 때문에 **파싱조차 안 되는 상태**였다. 클러스터가 없어 실행될 일이 없었던 탓에 Codex 도 놓쳤고, b-2 첫 실행에서 터졌을 코드다.
+
+**검증**: lint 10종 · **self-test 69종**(exposure 25·workload 24·np 8·itko 7·dockerfile 5) · `kustomize build` 3종 · 10모듈 빌드+테스트 · 임베디드 python 4블록 compile + 양/음성.
+
+**미충족(명시)**:
+1. **실 클러스터 미적용** — Secret Manager 에 키가 없다. 렌더 그린을 배포 가능으로 기록하지 않는다(PR3a→PR3b 와 동일 취급).
+2. **barrier ② 는 gateway 경유 경로 중심** — 서비스 측 서명 검증 자체는 통합테스트 소관. 단 gateway Pod 내부 직접경로 Bearer 거부는 검증한다.
+3. **minikube 도 CSI Driver 없이는 gateway 부팅 불가**(base 에 SPC 포함). PR3d-a 이전에도 개인키가 없어 마찬가지였으므로 회귀는 아니다.
+4. 부하 하 event-loop lag 미측정(PR3d-a 승계).
+
+**다음**: **PR3d-b-2** — 진입 조건 GKE 재기동 + Secrets Store CSI Driver 설치 + Secret Manager 키 등록. PR4(관측성 S9)와 같은 클러스터 세션 권장.

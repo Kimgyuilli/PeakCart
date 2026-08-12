@@ -162,6 +162,16 @@ app:
       # 기본 off(RS256 단일). PR4 P22 에서 제거한다.
       hs512-fallback-enabled: false
       hs512-secret: ${JWT_SECRET:}
+    # 내부 토큰 발행 (ADR-0017 D1/D2 · 구현 ③ PR3d).
+    # 개인키는 산출물에 포함하지 않는다 — 로컬 dev 는 gitignored 파일, k8s 는 Secret Manager CSI 마운트
+    # (PR3d-b). 값 자체가 아니라 *위치*만 설정으로 노출한다.
+    # ttl/require-family-id 는 "동작 규약" 이라 base 소유다(ADR-0007).
+    internal-token:
+      active-kid: peekcart-gateway-dev-2026
+      private-key-location: ${GATEWAY_INTERNAL_PRIVATE_KEY_LOCATION:file:./local-keys/dev-gateway-internal-private.pem}
+      ttl-seconds: 30
+      # family-less 레거시 신원은 내부 토큰을 발행하지 않는다(fail-closed).
+      require-family-id: true
     # 공개 경로 SSOT (method + path) — 계획 §"공개 경로 SSOT".
     # method 까지 고정해 관리형 POST 가 무인증으로 새지 않게 한다.
     # 주의: 여기 매칭돼도 Bearer 토큰이 *제시되면* 반드시 검증한다(만료/위조/deny → 401).

@@ -744,3 +744,38 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **발견된 결함(PR3d 흡수)**: `gke-security-smoke.sh` 증적 헤더 `- canary:` 가 항상 `n/a` — `CANARY_RESULT` 가 `tee` 파이프라인 서브셸에서 설정돼 부모 셸로 전파되지 않는다. 실제 값은 로그 블록에 보존되어 본 증적은 온전. PR3d P10 이 같은 스크립트를 확장하므로 그때 수정한다.
 
 **다음**: **PR3d 착수 가능**(선행 게이트 해제). `docs/plans/task-impl3-pr3d-internal-token.md` P1~P10 → `/work`. PR3d P10 ②(signed-only crypto barrier)도 위조 401 을 주장하려면 **정상 서명 200 양성 대조군**이 같은 이유로 필요하다.
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3d-a: Gateway 서명 내부 토큰 (코드) — 2026-08-12 — [#80](https://github.com/Kimgyuilli/PeakCart/pull/80)
+
+> PR3d 를 **PR3d-a(코드) / PR3d-b(키배포·클러스터)** 로 분할 확정하고(계획서 §9), 그중 a 를 구현했다. 평문 `X-User-*` 신뢰가 사라지고 Gateway 가 서명한 `X-Internal-Auth` 만 인증 근거가 된다(ADR-0017).
+
+**분할 기준 = "클러스터 없이 그린이 되는가"**. 단일 PR 로 두면 코드가 CSI 인프라 준비를 기다리고, 반대로 lint 를 먼저 짜면 검사 대상 매니페스트가 없어 vacuous-green 이 된다. PR3a(이미지·코드)→PR3b(k8s 표면)와 같은 축이다.
+
+**착수 전 코드 검증이 계획 전제 3건을 뒤집었다** (§9.1):
+- **`JwtFilter` 는 PR3c 이후 이미 미배선**(5서비스 전부 `HeaderTrustSecurityConfigurer`) → 계획이 P0급으로 다룬 loop2 #1("④~⑤ 구간 verifier 활성 시 Bearer 로 Gateway 우회") 위험이 성립하지 않는다. P6 삭제는 순수 dead-code 제거 → 롤아웃 비결합.
+- 같은 이유로 loop3 #3(rollback 전용 호환 이미지) **전제 소멸** — 되돌릴 대상은 직전 릴리스(PR3c) 이미지다. §7 rollback 행렬은 b 착수 시 재작성.
+- **user-service 개인키의 k8s 매니페스트가 아예 없다**(GKE 세션의 ad-hoc Secret 이 유일) → 이 상태로 P7 key-ownership lint 를 만들면 검사 대상이 없어 **vacuous-green**. b 의 P5 에 user 키 CSI 정본화를 포함시켰다.
+
+**핵심 결정**:
+- **이름 계약 단일 출처**: gateway(WebFlux)와 common-auth(servlet)는 서로 의존 불가(B6)라 양쪽 리터럴이 곧 drift 원천 → 프레임워크 의존 0 인 `internal-token-contract` 모듈에 issuer/claim/헤더 이름을 한 번만 정의. 루트 가드에 allowlist 예외 1건을 열되 **계약 모듈 자신의 project/Spring 의존을 금지하는 (a2) 검사**를 함께 추가해 예외가 우회로가 되지 않게 했다.
+- **키 도메인 분리(D3)**: Gateway 공개키를 `app.jwt.rs256.public-keys` 에 넣지 않는다 — `JwkController` 가 레지스트리를 통째로 JWKS 게시하므로 내부 신뢰 앵커가 노출된다. 강제는 **kid 가 아니라 SPKI DER SHA-256 fingerprint** 로 한다(같은 키를 다른 kid 로 넣는 우회 차단). lint + 5서비스 통합테스트 이중.
+- **교차모듈 conformance**: 두 모듈을 잇는 단일 테스트가 불가능 → 공유 fixture 에 **커밋된 계약 토큰**을 두고 발행측/검증측이 각각 고정. 한쪽만 바뀌면 반대편이 깨진다.
+- **fail-fast/fail-closed**: 키 로딩 실패·빈 키셋·범위 위반은 부팅 거부. family-less 는 발행 거부(401). `InternalTokenModeInvariant` 가 부팅 시 필터 구성을 검사(사용자 verifier 부활·체인 0개 차단).
+
+**프로세스**: `/work`(diff 6천 줄 → **split 3 chunk 리뷰**, 24건). **분할 아티팩트 10건 기각** — chunk 를 나눠 독립 리뷰하니 다른 chunk 의 파일을 "패치에 없어 컴파일 불가(P0)"로 판정했다. full build 그린 + 파일별 chunk 소속 대조로 반증. **실제 결함 7건 전량 반영**, 그중 3건이 내가 만든 검증 도구 자체의 false-green:
+1. 직접경로 Bearer 거부 테스트가 깨진 문자열 → verifier 가 부활해도 통과하는 **vacuous-negative** → 유효 access token 발급 + 4서비스에 검증키를 **일부러 등록**해 회귀 시 실제로 깨지게 함
+2. 부팅 불변식이 SecurityFilterChain 0개일 때 조기 return → **fail-open** → 위반 처리
+3. 키 도메인 검사가 fixture 키 1개만 대조 → 두 레지스트리 **fingerprint 집합 서로소** 검사로 교체
+
+나머지 4건: lint 서비스 단위 검사(ITKO-006), 양성 대조군을 구체 상태로 고정(405/200/404 — "401 아님"은 403·5xx 도 그린), RS384/RS512 거부·경계값(±1s)·키 회전 overlap 테스트, 서명 지연 baseline.
+
+**검증**: 10모듈 그린 · **575 테스트 0 실패** · 가드 5종 · lint self-test 7/7 · 서명 p95 RSA-2048 **1.80ms** / RSA-3072 **3.00ms**(예산 10/25ms, 측정 전 확정).
+
+**미충족(명시)**:
+1. **k8s gateway 매니페스트는 배포 불가** — 개인키 CSI 마운트(P5) 부재로 fail-fast 기동 거부. CI 는 apply 하지 않고 클러스터도 0이라 실효 비용 0. PR3a→PR3b 전환기와 동일 취급 — **렌더 그린을 배포 가능으로 기록하지 않는다.**
+2. **부하 하 event-loop lag 미측정** — 마이크로벤치로는 불가. PR3d-b 부하 세션 이연(계획서 §9.2 명시). 초과 시 P2 (b) bounded scheduler + 포화 503.
+3. **Layer 1 동기화(02 / 04 §10-2) 이연** — 서명 assertion·키 도메인 분리 반영은 PR3d-b 에서 일괄.
+
+**다음**: **PR3d-b**(P5 CSI 키배포[user 키 정본화 포함]·P7 나머지·P8 회전 runbook·P10 GKE 2단 barrier·§7 롤아웃) → PR4(관측성 S9). **진입 조건: GKE 재기동 + Secrets Store CSI Driver 설치** — 비용상 PR4 와 같은 클러스터 세션으로 묶기를 권장.

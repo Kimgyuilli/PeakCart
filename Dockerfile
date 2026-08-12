@@ -21,6 +21,7 @@ RUN test -n "$SERVICE" || (echo "ERROR: --build-arg SERVICE=<service> 필요" >&
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle/ gradle/
 COPY common/build.gradle common/build.gradle
+COPY internal-token-contract/build.gradle internal-token-contract/build.gradle
 COPY peekcart-common-observability/build.gradle peekcart-common-observability/build.gradle
 COPY peekcart-common-auth/build.gradle peekcart-common-auth/build.gradle
 COPY notification-service/build.gradle notification-service/build.gradle
@@ -33,6 +34,7 @@ RUN chmod +x gradlew && ./gradlew :${SERVICE}:dependencies --no-daemon >/dev/nul
 
 # 전 모듈 소스 (settings.gradle include 정합 — 설정 단계가 전 모듈 평가)
 COPY common/ common/
+COPY internal-token-contract/ internal-token-contract/
 COPY peekcart-common-observability/ peekcart-common-observability/
 COPY peekcart-common-auth/ peekcart-common-auth/
 COPY notification-service/ notification-service/

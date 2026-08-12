@@ -35,4 +35,9 @@ dependencies {
     testFixturesApi 'org.testcontainers:kafka'
     testFixturesApi 'org.springframework.kafka:spring-kafka-test'
     testFixturesApi 'org.awaitility:awaitility'
+    // 사용자 access token fixture(TestRsaKeys.mintUserAccessToken) — 서비스가 Bearer 를 더 이상
+    // 인증하지 않음을 *유효한* 토큰으로 증명하는 음성 대조군용 (ADR-0017 · PR3d P9)
+    testFixturesImplementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    testFixturesRuntimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    testFixturesRuntimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
 }

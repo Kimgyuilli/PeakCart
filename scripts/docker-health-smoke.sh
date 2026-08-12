@@ -84,9 +84,13 @@ done
 SMOKE_KEY_DIR="${SMOKE_KEY_DIR:-$(mktemp -d)}"
 mkdir -p "$SMOKE_KEY_DIR"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$SMOKE_KEY_DIR/jwt-private.pem" 2>/dev/null
+# Gateway 내부 토큰 개인키(구현 ③ PR3d): gateway 컨테이너도 부팅 시 개인키를 요구한다(fail-fast).
+# 사용자 토큰 서명키와 별개다 — 키 도메인을 섞지 않는다(ADR-0017 D3).
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+    -out "$SMOKE_KEY_DIR/gateway-internal-private.pem" 2>/dev/null
 # 컨테이너 non-root 유저가 마운트를 traverse·read 할 수 있게 (mktemp -d 는 700) 디렉토리/파일 권한 개방
 chmod 755 "$SMOKE_KEY_DIR"
-chmod 644 "$SMOKE_KEY_DIR/jwt-private.pem"
+chmod 644 "$SMOKE_KEY_DIR/jwt-private.pem" "$SMOKE_KEY_DIR/gateway-internal-private.pem"
 
 echo "[D-012/L-015] starting app container"
 # 자격증명 런타임 주입(GP-2 work #2/#3): k8s 프로파일은 SLACK_WEBHOOK_URL(notification)·TOSS_*(payment)
@@ -104,6 +108,7 @@ docker run -d \
     -e TOSS_WEBHOOK_SECRET="${SMOKE_TOSS_WEBHOOK_SECRET:-test_webhook_smoke}" \
     -v "${SMOKE_KEY_DIR}:/smoke-keys:ro" \
     -e JWT_PRIVATE_KEY_LOCATION="file:/smoke-keys/jwt-private.pem" \
+    -e GATEWAY_INTERNAL_PRIVATE_KEY_LOCATION="file:/smoke-keys/gateway-internal-private.pem" \
     "$IMAGE" >/dev/null
 
 # health 경로/포트는 이미지 성격에 따라 다르다 (구현 ③ PR3a).

@@ -1,6 +1,7 @@
 package com.peekcart;
 
-import com.peekcart.global.auth.RedisTokenBlacklistLookupAdapter;
+import com.peekcart.global.security.InternalGatewayPublicKeyRegistry;
+import com.peekcart.global.security.InternalTokenVerifier;
 import com.peekcart.support.IntegrationTestConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>개별 기능 통합 테스트와 별개로, peel 후 order-service 가 자기 횡단 배선으로 부팅됨을 명시적으로 못박는다:
  * <ul>
- *   <li>ADR-0014 fail-closed — common-auth {@link RedisTokenBlacklistLookupAdapter} 가 {@link RedisTemplate} 과 함께 기동(data-redis 무조건성).</li>
+ *   <li>ADR-0017 — common-auth 내부 토큰 검증 스택({@link InternalTokenVerifier}·{@link InternalGatewayPublicKeyRegistry})이 기동(Gateway 공개키 배선 fail-fast).</li>
  *   <li>{@link SecurityFilterChain} 정확히 1개({@code OrderSecurityConfig}, ADR-0014 D1).</li>
  *   <li>Kafka listener container factory 배선({@code OrderKafkaConfig} — consumer 4종 구동).</li>
  * </ul>
@@ -61,9 +62,10 @@ class OrderApplicationTests {
     @Autowired Map<String, SecurityFilterChain> securityFilterChains;
 
     @Test
-    @DisplayName("Redis blacklist 검증 어댑터가 RedisTemplate 과 함께 기동된다 (ADR-0014 fail-closed)")
-    void redisBlacklistAdapter_bootsWithRedisTemplate() {
-        assertThat(ctx.getBean(RedisTokenBlacklistLookupAdapter.class)).isNotNull();
+    @DisplayName("내부 토큰 검증 스택이 Gateway 공개키와 함께 기동된다 (ADR-0017 fail-fast)")
+    void internalTokenStack_bootsWithGatewayPublicKey() {
+        assertThat(ctx.getBean(InternalTokenVerifier.class)).isNotNull();
+        assertThat(ctx.getBean(InternalGatewayPublicKeyRegistry.class).kids()).isNotEmpty();
         assertThat(ctx.getBeanNamesForType(RedisTemplate.class)).isNotEmpty();
     }
 

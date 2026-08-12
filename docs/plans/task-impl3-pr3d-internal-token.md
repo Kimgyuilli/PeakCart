@@ -176,3 +176,54 @@ PR3c 는 GKE 실 클러스터 증적 미확보 = **평문 header-trust 가 아�
 - **[P7 CSI 계수 단위 (loop3 #4)]** "정확히 1개" = **SPC object 1 ↔ CSI volume 1 ↔ gateway container volumeMount 1** 관계로 계수(volume 을 여러 경로/컨테이너 mount 금지), 양쪽 `readOnly=true`. SPC `parameters.secrets` entry 정확히 1개, `secretObjects`(k8s Secret 동기화)·`nodePublishSecretRef` **금지**. 각 우회별 음성 self-test + 고유 진단 코드.
 - **[P7 property-ownership 산출 (loop3 #5)]** 렌더 ConfigMap 만 보지 말고 **5서비스를 실제 k8s profile·배포 env/args 로 부팅**해 Spring `Environment` 최종 바인딩된 두 key map 검사(profile override·`SPRING_APPLICATION_JSON`·relaxed binding·configtree 경로 포함). fingerprint = PEM 문자열 hash 금지 → **SPKI DER SHA-256 정규화** 비교(동일 키 재인코딩·다른 kid 우회 차단). self-test 에 override·다른 kid·PEM 재포맷 변이 포함.
 - **[P7 lint 견고성 (loop3 #6)]** `--self-test`/CI 에서 **kubectl 부재 → exit 2**(로컬 skip 은 명시 옵션만). 진단 대조는 부분 문자열 grep 금지 → **안정적 고유 ID + 기대 발생 횟수** 검증(다른 진단이 같은 문구 포함 시 false-green 차단).
+
+## 9. PR 분할 확정 — PR3d-a(코드) / PR3d-b(키배포·클러스터) — 2026-08-12
+
+> **분할 기준 = "클러스터 없이 그린이 되는가"**. P1~P10 을 단일 PR 로 두면 코드가 CSI 인프라(GCP Secret Manager + Secrets Store CSI Driver 설치) 준비를 기다리게 되고, 반대로 lint(P7)를 먼저 짜면 검사 대상 매니페스트가 없어 vacuous-green 이 된다.
+> **선례**: PR3a(이미지·코드) → PR3b(k8s 표면)가 같은 축으로 갈렸고 전환기 게이트(`IMAGE_CONTRACT_TRANSITION`)로 봉합했다. PR3d 도 동일 축을 따른다.
+
+### 9.1 착수 전 코드 검증 (grep, 2026-08-12) — 분할 판단의 근거
+
+| 사실 | 확인 결과 | 계획 영향 |
+|---|---|---|
+| `JwtFilter`/`JwtSecurityConfigurer` 배선 | **5서비스 전부 `HeaderTrustSecurityConfigurer` 사용 → `JwtFilter` 는 PR3c 이후 이미 미배선(dead code)** | **loop2 #1 의 위험(④~⑤ 구간 `JwtFilter` 활성 → Bearer 로 Gateway 우회)은 이미 성립하지 않는다.** P6 삭제 = 순수 dead-code 제거 → 롤아웃과 비결합, PR3d-a 소관 |
+| loop3 #3 rollback 호환 이미지(verifier + 내부토큰 필터 공존) | 위와 같은 이유로 **전제 소멸** — rollback 대상은 "verifier 살아있는 이미지" 가 아니라 **직전 릴리스(PR3c 평문 header-trust) 이미지** | §7 rollback 행렬 재작성 필요(PR3d-b 착수 시). 특수 호환 이미지 빌드 불요 |
+| user-service RS256 개인키 k8s 매니페스트 | **존재하지 않음**. `private-key-location: ${JWT_PRIVATE_KEY_LOCATION:file:./local-keys/...}` 뿐이고 GKE 세션은 ad-hoc k8s Secret 으로 때움(PR3c 증적 편차 2) | **P7 key-ownership lint("user 개인키=user-service 만")가 현 상태에선 vacuous-green** → PR3d-b 는 gateway 키뿐 아니라 **user-service 키 배포도 함께** 정본화해야 한다 |
+| `gateway-exposure-lint.sh` Secret 규칙 | gateway PodSpec 의 Secret volume/`secretKeyRef`/projected Secret **무조건 거부**, 현 `k8s/base/services/gateway/` 는 volume 0 | PR3d-a 가 `k8s/` 를 건드리지 않으면 lint 무변경 그린. 0→1 CSI 전환은 PR3d-b 단독 소관 |
+| 개인키 주입 seam | `docker-health-smoke.sh` 가 이미 `-v ${SMOKE_KEY_DIR}:/smoke-keys:ro` + `JWT_PRIVATE_KEY_LOCATION` 로 주입 | gateway 내부키도 **같은 seam 재사용**(env + 파일 마운트) → PR3d-a 가 CI 스모크까지 자립 그린 |
+| 모듈 수 | 현재 9(`common`·observability·auth·5서비스·gateway) | `internal-token-contract` 신설로 **10모듈**. §5 의 "9모듈 그린" 은 PR3d-a 부터 **10모듈**로 읽는다 |
+
+### 9.2 PR3d-a — 서명 내부 토큰 코드 (클러스터 비의존)
+
+**범위**: P1 · P2 · P3 · P4 · P6 · P9 · P7 중 property-ownership 만.
+
+- **P1/P2 발행**: `internal-token-contract` 모듈(issuer·claim 이름 단일 정의) + `InternalTokenIssuer`/`InternalTokenProperties` + `GatewayAuthenticationFilter` 재작성(static → 인스턴스, 평문 3개 → `X-Internal-Auth`, strip 확장). 개인키는 `${GATEWAY_INTERNAL_PRIVATE_KEY_LOCATION:file:./local-keys/...}` — user-service 선례와 동일 seam, **산출물 비포함**.
+- **P3/P4 검증**: `InternalTokenVerifier` + 전용 `InternalGatewayPublicKeyRegistry`(`app.internal-token.public-keys`) + `HeaderAuthenticationFilter` 재작성(3-state 보존). 공개키는 non-secret 이므로 dev 키를 `classpath:keys/dev-gateway-internal-public.pem` 로 베이크(기존 `dev-jwt-public.pem` 선례).
+- **모드 계약**: `SIGNED_ONLY`(기본) / `DUAL_ACCEPT`(명시 opt-in). dual-accept 는 §7 ② 가 어차피 요구하므로 추가 비용이 아니며, **기본값은 안전 쪽(deny)** 으로 고정한다. loop3 #2 부팅 불변식(`SIGNED_ONLY` ⇒ `fidRequired` AND `JwtFilter` bean 0 AND 내부 필터 bean 1)은 그대로 구현한다 — 9.1 로 이미 참이지만 회귀 가드로 유지.
+- **P6 삭제**: `JwtFilter`·`JwtTokenVerifier`·`JwtSecurityConfigurer`·`TokenBlacklistLookupPort`·`RedisTokenBlacklistLookupAdapter`·`TokenClaims`·`TokenParseException` (전부 미배선 dead code) + Gateway `Authorization` 전달 중단. `RsaPublicKeyRegistry`/`PemKeyLoader`/`JwtKeyProperties` 는 User JWKS 전용 retain.
+- **P9 테스트 전량** + **P7 property-ownership lint**(gateway kid ∉ `app.jwt.rs256.public-keys`, SPKI DER SHA-256 fingerprint 비교 — 5서비스 실제 부팅 `Environment` 기준, 클러스터 불요).
+- **CI 스모크**: gateway 컨테이너에 내부키 런타임 주입 1줄 추가(`docker-health-smoke.sh`).
+
+**완료 조건**: 10모듈 그린 · P9 전 항목 그린(음성 매트릭스·JWKS fingerprint 배제·직접경로 Bearer 거부·5서비스 통합·교차모듈 conformance·스푸핑 회귀 3종) · 기존 lint 6종 무변경 그린 · **서명 지연 baseline 확정**(P2 (a)).
+
+**P2 (b) 부분 이연(명시)**: 서명 <b>마이크로벤치</b> baseline 은 PR3d-a 에서 확정한다(`InternalTokenSigningBudgetTest` — 예산 RSA-2048 p95 &lt;10ms · RSA-3072 p95 &lt;25ms, 측정 전 확정). 그러나 **동시 부하 하의 전체 요청 p95/p99 와 event-loop lag** 는 단일 JVM 벤치로 측정할 수 없으므로 **PR3d-b 클러스터/부하 세션으로 이연**한다. 그때 예산 초과가 관측되면 P2 (b) 대로 서명 전용 bounded scheduler + 포화 시 503 fail-closed 를 구현한다. — 렌더/마이크로벤치 통과를 "부하 예산 검증 완료" 로 기록하지 않는다.
+
+**명시적 미충족(문서화)**: `k8s/` 미변경이므로 **main 의 gateway k8s 매니페스트는 PR3d-b 전까지 배포 불가**(개인키 마운트 부재 → fail-fast 기동 거부). CI 는 매니페스트를 apply 하지 않고 클러스터는 현재 0(PR3c 세션 후 전량 정리)이므로 실효 비용 0. **PR3a→PR3b 의 전환기 처리와 동일 취급 — 렌더 그린을 배포 가능으로 기록하지 않는다.**
+
+### 9.3 PR3d-b — 키 배포 · lint · 롤아웃 실증 (클러스터 의존)
+
+**범위**: P5 · P7 나머지 · P8 · P10 · §7 롤아웃 실행.
+
+- **P5 키 배포 — gateway + user-service 동시**(9.1 근거): GCP Secret Manager + Secrets Store CSI Driver 설치 → gateway 개인키 CSI read-only 마운트 + **user-service 개인키도 ad-hoc k8s Secret → CSI 정본화**(ADR-0013 D2 미충족 잔여 해소). user 키 매니페스트가 없으면 key-ownership lint 가 검사할 대상이 없어 vacuous-green 이 된다.
+- **P7 나머지**: `gateway-exposure-lint.sh` "비밀 0" → "승인 CSI 정확히 1개"(SPC 1 ↔ volume 1 ↔ volumeMount 1, `readOnly` 양쪽, `secretObjects`/`nodePublishSecretRef` 금지) + 신규 key-ownership lint(전 workload 종류) + 각 self-test(고유 진단 ID × 기대 횟수).
+- **5서비스 `app.internal-token.public-keys` k8s ConfigMap 배선**(베이크 dev 키 → 운영 kid 교체).
+- **P8** 키 회전 runbook + active/previous overlap 1회 검증.
+- **P10 ①/②** GKE 2단 barrier + canary. **`gke-security-smoke.sh` 의 `CANARY_RESULT` 서브셸 전파 버그 수정 포함**(PR3c 흡수분). barrier ② 는 위조 401 주장에 **정상 서명 200 양성 대조군** 필수(PR3c 검사(5) 3상태 교훈).
+- **§7 롤아웃 ①~⑥ 실행** + 단계별 수렴 hard gate(loop3 #1 판정식). **rollback 행렬은 9.1 기준으로 재작성**(verifier 재활성 단계 삭제 — 직전 릴리스 이미지로 회귀).
+
+**완료 조건**: §6 전부 + PR3d-b 소관 증적(`docs/progress/evidence/`).
+
+### 9.4 진입 조건
+
+- PR3d-a: **없음**(즉시 착수 가능).
+- PR3d-b: PR3d-a 머지 + **GCP 프로젝트/GKE 재기동 + Secrets Store CSI Driver 설치**(PR3c 세션 종료로 클러스터 잔여 0 → 재구축 필요). 비용상 PR3d-b 는 PR4(관측성 S9)와 **같은 클러스터 세션으로 묶는 것**을 권한다.

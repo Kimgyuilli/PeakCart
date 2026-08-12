@@ -3,7 +3,8 @@
 // 서비스↔서비스 project() 의존 금지 (assertNoServiceProjectDeps 로 강제).
 // Order = publisher+consumer 양방향 서비스 — outbox 실행 세트 + idempotency + ShedLockConfig 자체 복제(product peel 선례).
 // 공유 DB 전환기: order·payment·product 세 poller 가 같은 outbox_events 를 보므로 aggregateType allowlist + ShedLock 이름으로 소유권 분리(app yml).
-// data-redis 는 무조건(@Cacheable 미사용이나 common-auth blacklist read fail-closed 가 RedisTemplate 필수 — ADR-0014). cache starter 는 불요(@Cacheable 없음).
+// data-redis 는 :common RedisConfig(RedisTemplate 빈) 배선에 필요하다. cache starter 는 불요(@Cacheable 없음).
+// (PR3d: common-auth blacklist read 어댑터가 삭제돼 ADR-0014 fail-closed 근거는 소멸 — deny 는 Gateway 소유, ADR-0017 D5)
 
 plugins {
     id 'java'
@@ -58,6 +59,8 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation testFixtures(project(':common'))
+    // Gateway 서명 내부 토큰 fixture — 보안 통합 테스트가 유효/위조 토큰을 만든다(ADR-0017)
+    testImplementation testFixtures(project(':internal-token-contract'))
     // cross-module JWT(게이트 h) — root signer 와 동일 HS256/app.jwt.secret 으로 토큰 발급해 인증 검증
     testImplementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 

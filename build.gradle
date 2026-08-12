@@ -69,12 +69,12 @@ jar {
 }
 
 // ===== [PR2a-2b/N7] 서비스 모듈 의존 위반 검출 (ADR-0011 §D3 · ADR-0014) =====
-// 각 *-service 모듈은 allowlist(:common/:peekcart-common-observability/:peekcart-common-auth) 외
+// 각 *-service 모듈은 allowlist(:common/:peekcart-common-observability/:peekcart-common-auth/:internal-token-contract) 외
 // 프로젝트(특히 서비스↔서비스)를 의존하면 빌드 실패시킨다. testFixtures(project(':common')) 는 path=:common 으로 허용.
 tasks.register('assertNoServiceProjectDeps') {
 	group = 'verification'
 	description = '서비스 모듈의 allowlist 외 project() 의존을 빌드 실패로 검출한다 (ADR-0011 §D3).'
-	def allowed = [':common', ':peekcart-common-observability', ':peekcart-common-auth'] as Set
+	def allowed = [':common', ':peekcart-common-observability', ':peekcart-common-auth', ':internal-token-contract'] as Set
 	// 실행 시점(doLast)에 수집한다 — task 구성 단계에서는 서브프로젝트가 아직 평가되지 않아
 	// 의존이 비어 위반을 놓칠 수 있다(전 프로젝트 구성 완료 후 평가해야 정확).
 	doLast {
@@ -197,10 +197,31 @@ tasks.register('assertGatewayHasNoServletDeps') {
 			return
 		}
 		def violations = []
-		// (a) 정적 project 의존 — :common 계열 금지 (gateway 전용 DTO 사용)
+		// (a) 정적 project 의존 — allowlist 외 전부 금지 (gateway 전용 DTO 사용)
+		//     :internal-token-contract 만 예외 — 프레임워크 의존이 0 인 순수 Java 상수 모듈이며(ADR-0017),
+		//     발행(gateway)/검증(common-auth)이 서로를 의존할 수 없어 이름 계약의 단일 출처로 필요하다.
+		//     이 예외가 servlet 유입 구멍이 되지 않음은 (a2) 자체 검사와 (b) 런타임 classpath 검사가 함께 막는다.
+		def allowedProjectDeps = [':internal-token-contract'] as Set
 		gatewayProject.configurations.each { cfg ->
 			cfg.dependencies.withType(ProjectDependency).each { dep ->
-				violations << "gateway (${cfg.name}) -> ${dep.path} : gateway 는 servlet 노출 모듈을 의존할 수 없다".toString()
+				if (!allowedProjectDeps.contains(dep.path)) {
+					violations << "gateway (${cfg.name}) -> ${dep.path} : gateway 는 servlet 노출 모듈을 의존할 수 없다".toString()
+				}
+			}
+		}
+		// (a2) allowlist 모듈이 나중에 오염되는 것을 막는다 — :internal-token-contract 자신이
+		//      다른 project 나 Spring/servlet 라이브러리를 의존하기 시작하면 (a) 예외가 우회로가 된다.
+		def contractProject = findProject(':internal-token-contract')
+		if (contractProject != null) {
+			['api', 'implementation', 'runtimeOnly', 'compileOnly'].each { cfgName ->
+				def cfg = contractProject.configurations.findByName(cfgName)
+				cfg?.dependencies?.each { dep ->
+					if (dep instanceof ProjectDependency) {
+						violations << ":internal-token-contract (${cfgName}) -> ${dep.path} : 계약 모듈은 어떤 project 도 의존할 수 없다".toString()
+					} else if (dep.group?.startsWith('org.springframework') || dep.group == 'jakarta.servlet') {
+						violations << ":internal-token-contract (${cfgName}) -> ${dep.group}:${dep.name} : 계약 모듈은 프레임워크를 의존할 수 없다".toString()
+					}
+				}
 			}
 		}
 		// (b) 런타임 classpath 전이 — servlet API / MVC 마커 클래스 유입 금지
@@ -216,7 +237,7 @@ tasks.register('assertGatewayHasNoServletDeps') {
 			throw new GradleException(
 					"gateway servlet 유입 위반 (WebFlux 전용이어야 함, 계획 B6):\n  " + violations.join('\n  '))
 		}
-		println 'assertGatewayHasNoServletDeps: OK (project 의존 0 · servlet 아티팩트 유입 없음)'
+		println "assertGatewayHasNoServletDeps: OK (project 의존 allowlist=${allowedProjectDeps} 외 0 · 계약 모듈 무오염 · servlet 아티팩트 유입 없음)"
 	}
 }
 

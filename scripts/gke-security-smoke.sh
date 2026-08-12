@@ -28,6 +28,11 @@ set -euo pipefail
 TAG="[GKE-SMOKE]"
 NAMESPACE="${NAMESPACE:-peekcart}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-docs/progress/evidence}"
+# canary/crypto 결과는 `... | tee` 파이프라인(서브셸) 안에서 산출되므로 변수로는 부모 셸에 못 돌아온다.
+# 파일 경유가 유일하게 확실한 전달 수단이다(PR3c 증적 헤더가 늘 n/a 였던 원인).
+RESULT_FILE="$(mktemp -t gke-smoke-canary.XXXXXX)"
+CRYPTO_RESULT_FILE="$(mktemp -t gke-smoke-crypto.XXXXXX)"
+trap 'rm -f "$RESULT_FILE" "$CRYPTO_RESULT_FILE"' EXIT
 EXPECTED_DIRECT_COUNT="${EXPECTED_DIRECT_COUNT:-5}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "$TAG '$1' 필요" >&2; exit 2; }; }
@@ -142,6 +147,108 @@ run_barrier() {
     echo "$TAG barrier PASS — rollout 진행 가능"
 }
 
+# ── barrier ② signed-only crypto barrier (ADR-0017 · 구현 ③ PR3d P10 ②) ──
+#
+# barrier ①(network preflight, run_barrier)이 "직접 경로가 막혔다" 를 보이는 반면, 여기서는
+# "게이트웨이를 통해도 서명 없이는 못 들어간다" 를 본다. 두 방벽은 AND 로 걸린다(defense-in-depth).
+#
+# **직접경로 Bearer 거부는 gateway Pod 안에서 때린다**(계획 P10 ② 필수 항목):
+#   클러스터 *밖*에서는 NetworkPolicy 때문에 서비스에 닿을 수 없어 이 검사를 할 수 없다. 그러나
+#   gateway Pod 는 정책상 허용된 유일한 peer 이므로, 거기서 유효한 사용자 access token 을
+#   `Authorization: Bearer` 로 서비스에 직접 보내면 "서비스가 사용자 토큰을 자기 힘으로 인증하는가"
+#   를 실제로 때릴 수 있다. 401 이어야 한다 — 200 이면 사용자 토큰 verifier 가 되살아난 회귀이고,
+#   그 경우 Gateway 를 우회한 인증이 성립한다(ADR-0014 D2-c exit 파기).
+#
+# 정상 서명 200 **양성 대조군**이 필수다(PR3c 검사(5) 3상태 교훈): 전부 401 인 상태 — 예컨대 gateway 가
+# 아예 죽어 모든 요청이 실패하는 경우 — 에서도 "위조가 401" 은 참이 되어 vacuous-green 이 된다.
+run_crypto_barrier() {
+    local rc=0 forged_code plain_code ok_code token
+    # (1) 위조 내부 토큰 — 서명이 붙은 것처럼 보이는 임의 JWT. gateway 는 외부 유입을 strip 하므로
+    #     "무토큰 요청" 으로 취급돼 401 이어야 한다. 200 이면 외부 주입이 신뢰된 것이다.
+    local forged="eyJhbGciOiJSUzI1NiIsImtpZCI6ImZvcmdlZCJ9.eyJzdWIiOiI5OTkiLCJyb2xlIjoiQURNSU4ifQ.ZmFrZQ"
+    forged_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                    -H "X-Internal-Auth: $forged" "$GW_URL/api/v1/orders" 2>/dev/null || true)
+    if [ "$forged_code" = "401" ]; then
+        echo "$TAG (②-1) 위조 X-Internal-Auth 401 OK"
+    else
+        echo "$TAG FATAL (②-1) 위조 X-Internal-Auth 가 $forged_code — 외부 주입이 신뢰된다" >&2
+        rc=1
+    fi
+
+    # (2) 평문 X-User-* 직접 주입 — strip 대상. 인증 주체가 서지 않아 401.
+    plain_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                   -H 'X-User-Id: 999' -H 'X-User-Role: ADMIN' \
+                   -H 'X-User-Family-Id: f-999' "$GW_URL/api/v1/orders" 2>/dev/null || true)
+    if [ "$plain_code" = "401" ]; then
+        echo "$TAG (②-2) 평문 X-User-* 무시→401 OK"
+    else
+        echo "$TAG FATAL (②-2) 평문 X-User-* 가 $plain_code — header-trust 잔재" >&2
+        rc=1
+    fi
+
+    # (3) 양성 대조군 — 정상 로그인 토큰으로 보호 경로 200. 이게 없으면 위 401 들이 무의미하다.
+    #     자격증명은 운영자가 SMOKE_USER_EMAIL/SMOKE_USER_PASSWORD 로 주입한다.
+    if [ -z "${SMOKE_USER_EMAIL:-}" ] || [ -z "${SMOKE_USER_PASSWORD:-}" ]; then
+        echo "$TAG FATAL (②-3) SMOKE_USER_EMAIL/SMOKE_USER_PASSWORD 미설정 — 양성 대조군 없이" \
+             "위조 401 을 주장할 수 없다(vacuous-negative)" >&2
+        return 1
+    fi
+    token=$(curl -s --max-time 10 -X POST "$GW_URL/api/v1/auth/login" \
+              -H 'Content-Type: application/json' \
+              -d "{\"email\":\"${SMOKE_USER_EMAIL}\",\"password\":\"${SMOKE_USER_PASSWORD}\"}" 2>/dev/null \
+            | sed -n 's/.*"accessToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    if [ -z "$token" ]; then
+        echo "$TAG FATAL (②-3) 로그인 실패 — 양성 대조군을 만들 수 없다" >&2
+        return 1
+    fi
+    ok_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                -H "Authorization: Bearer $token" "$GW_URL/api/v1/orders" 2>/dev/null || true)
+    if [ "$ok_code" = "200" ]; then
+        echo "$TAG (②-3) 정상 로그인 토큰 200 OK (양성 대조군 — gateway 서명 주입 경로 동작)"
+    else
+        echo "$TAG FATAL (②-3) 정상 토큰이 $ok_code — 서명 주입 경로가 깨졌다" >&2
+        rc=1
+    fi
+
+    # (4) 직접경로 Bearer 거부 — gateway Pod 에서 order-service 로 직접. 유효한 사용자 토큰이므로
+    #     "토큰이 깨져서 401" 이 아니라 "서비스가 사용자 토큰을 인증 근거로 쓰지 않아서 401" 이다
+    #     (PR3d-a 에서 깨진 문자열을 써 vacuous-negative 를 만들었던 실수의 클러스터 판).
+    local direct_code gw_pod probe_out marker
+    gw_pod=$(kubectl -n "$NAMESPACE" get pods -l app=gateway \
+               -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$gw_pod" ]; then
+        echo "$TAG FATAL (②-4) gateway Pod 를 찾을 수 없다 — 직접경로 Bearer 검사를 수행 못 함" >&2
+        return 1
+    fi
+    # marker 로 curl 실제 실행을 확인한다 — exec 실패(RBAC/컨테이너에 curl 부재)를 차단 성공으로
+    # 오판하면 안 된다(검사 (2) 와 동일 규약).
+    probe_out=$(kubectl -n "$NAMESPACE" exec "$gw_pod" -- sh -c \
+                  "printf 'MARK:%s' \"\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                     -H 'Authorization: Bearer $token' http://order-service:8080/api/v1/orders 2>/dev/null)\"" \
+                2>/dev/null || true)
+    marker=$(printf '%s' "$probe_out" | grep -o 'MARK:[0-9]*' | head -n1 || true)
+    if [ -z "$marker" ]; then
+        echo "$TAG FATAL (②-4) gateway Pod probe 실행 실패(marker 없음) — 직접경로 거부를 검증할 수 없다" >&2
+        return 1
+    fi
+    direct_code="${marker#MARK:}"
+    if [ "$direct_code" = "401" ]; then
+        echo "$TAG (②-4) 직접경로 Bearer(유효 사용자 토큰) 401 OK — 서비스 측 사용자 verifier 부재 확인"
+    else
+        echo "$TAG FATAL (②-4) 직접경로 Bearer 가 $direct_code — 사용자 토큰 verifier 부활(Gateway 우회 가능)" >&2
+        rc=1
+    fi
+
+    CRYPTO_RESULT="위조=$forged_code 평문=$plain_code 정상=$ok_code 직접경로Bearer=$direct_code"
+    printf '%s\n' "$CRYPTO_RESULT" >"$CRYPTO_RESULT_FILE"
+
+    if [ "$rc" -ne 0 ]; then
+        echo "$TAG crypto barrier 실패 — signed-only 전환을 완료로 기록하지 않는다" >&2
+        return 1
+    fi
+    echo "$TAG crypto barrier PASS"
+}
+
 # ── canary probe (공개/보호/spoof) — 전환 증적 ──
 run_canary() {
     local rc=0 pub prot spoof
@@ -150,6 +257,9 @@ run_canary() {
     spoof=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
               -H 'X-User-Id: 999' -H 'X-User-Role: ADMIN' "$GW_URL/api/v1/orders" 2>/dev/null || true)
     CANARY_RESULT="공개(/products)=$pub 보호(/orders 무토큰)=$prot spoof(X-User-*)=$spoof"
+    # 이 함수는 `... | tee` 파이프라인 안(서브셸)에서 호출된다 — 변수 대입은 부모 셸로 전파되지
+    # 않아 증적 헤더가 항상 `n/a` 였다(PR3c 발견분). 결과는 파일로 넘긴다.
+    printf '%s\n' "$CANARY_RESULT" >"$RESULT_FILE"
     [ "$pub" = "200" ]  && echo "$TAG canary 공개 200 OK"       || { echo "$TAG FAIL 공개=$pub" >&2; rc=1; }
     [ "$prot" = "401" ] && echo "$TAG canary 보호 무토큰 401 OK" || { echo "$TAG FAIL 보호=$prot" >&2; rc=1; }
     [ "$spoof" = "401" ] && echo "$TAG canary spoof strip→401 OK" || { echo "$TAG FAIL spoof=$spoof" >&2; rc=1; }
@@ -158,7 +268,12 @@ run_canary() {
 
 case "${1:-}" in
     --barrier)
+        # ① network preflight 만 — signed-only 전환 **전**에 도는 hard gate(§7 ①).
         run_barrier
+        ;;
+    --crypto-barrier)
+        # ② signed-only crypto barrier 만 — 전환 **후**에 돈다(§7 ⑤).
+        run_crypto_barrier
         ;;
     *)
         # default: barrier + canary 를 실제 실행하고 결과를 증적에 기록. 실패 시 성공 증적을 만들지 않는다.
@@ -167,7 +282,8 @@ case "${1:-}" in
         f="$EVIDENCE_DIR/pr3c-gke-smoke-$ts.md"
         log="$(mktemp)"
         rc=0
-        { run_barrier && CANARY_RESULT="" && run_canary; } 2>&1 | tee "$log" || rc=1
+        : >"$RESULT_FILE"
+        { run_barrier && run_crypto_barrier && run_canary; } 2>&1 | tee "$log" || rc=1
         # tee 는 파이프 첫 명령의 rc 를 가리므로 PIPESTATUS 로 실제 판정.
         [ "${PIPESTATUS[0]:-1}" -eq 0 ] || rc=1
         if [ "$rc" -ne 0 ]; then
@@ -179,8 +295,11 @@ case "${1:-}" in
             echo "# PR3c GKE 보안 smoke 증적 — $(date -u +%FT%TZ)"
             echo
             echo "- CLUSTER: ${CLUSTER:-?}  NAMESPACE: $NAMESPACE  GW_URL: $GW_URL"
-            echo "- 수행: barrier(enforcement·non-gateway 차단·공개·scrape·직접경로 도달불가) + canary(공개/보호/spoof)"
-            echo "- canary: ${CANARY_RESULT:-n/a}"
+            echo "- 수행: barrier ①(enforcement·non-gateway 차단·공개·scrape·직접경로 도달불가)"
+            echo "        + barrier ②(위조 X-Internal-Auth·평문 X-User-*·정상 서명 양성 대조군)"
+            echo "        + canary(공개/보호/spoof)"
+            echo "- barrier ②: $(cat "$CRYPTO_RESULT_FILE" 2>/dev/null || echo n/a)"
+            echo "- canary: $(cat "$RESULT_FILE" 2>/dev/null || echo n/a)"
             echo "- **미수행(운영자 주도, §8-4)**: digest 고정 배포·오류율 임계·payment webhook·refresh/logout 혼재 검증"
             echo
             echo '```'

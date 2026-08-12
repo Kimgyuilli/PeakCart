@@ -782,7 +782,7 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 
 ---
 
-## 구현 ③ Spring Cloud Gateway — PR3d-a 후속: Layer 1 동기화 (docs) — 2026-08-12
+## 구현 ③ Spring Cloud Gateway — PR3d-a 후속: Layer 1 동기화 (docs) — 2026-08-12 — [#81](https://github.com/Kimgyuilli/PeakCart/pull/81)
 
 > PR3d-a 의 미충족 #3(Layer 1 동기화 이연)을 해소했다. 클러스터 비의존이라 PR3d-b 를 기다릴 이유가 없어 별도 docs PR 로 떼어냈다.
 

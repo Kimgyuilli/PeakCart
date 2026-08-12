@@ -1,0 +1,24 @@
+// internal-token-contract — Gateway 서명 내부 토큰의 이름 계약 (ADR-0017 D1/D3 · 구현 ③ PR3d-a)
+//
+// 발행(gateway, WebFlux)과 검증(peekcart-common-auth, servlet MVC)이 서로를 의존할 수 없다(B6).
+// 양쪽에 리터럴을 따로 두면 그 자체가 drift 원천이므로(계획 loop3 #7), issuer 이름·claim 이름·헤더 이름을
+// **이 모듈에서 한 번만** 정의하고 양쪽이 컴파일 의존으로 참조한다.
+//
+// 제약: Spring/servlet/reactor 를 일절 의존하지 않는다(순수 Java). gateway 가 이 모듈을 의존해도
+// servlet 스택이 유입되지 않아야 하며, 루트 가드 assertGatewayHasNoServletDeps 의 allowlist 전제다.
+
+plugins {
+    id 'java-library'
+    id 'java-test-fixtures'
+}
+
+dependencies {
+    // main 은 의존 없음(의도) — 상수만 보유한다. 루트 가드가 project/Spring 의존을 차단한다.
+
+    // testFixtures 만 jjwt 를 쓴다 — 발행측(gateway)·검증측(common-auth)·5서비스 통합 테스트가
+    // "계약대로 서명된 토큰" 을 각자 재구현하지 않도록 서명 헬퍼를 한 곳에 둔다.
+    // Spring/servlet 은 여전히 없다 → 어느 테스트 classpath 에 올라가도 스택을 오염시키지 않는다.
+    testFixturesApi 'io.jsonwebtoken:jjwt-api:0.12.6'
+    testFixturesRuntimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    testFixturesRuntimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+}

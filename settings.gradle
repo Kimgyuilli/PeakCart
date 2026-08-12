@@ -15,3 +15,8 @@ include 'payment-service'                   // Payment peel (PR-b) — 마지막
 // 구현 ③ PR3a — Spring Cloud Gateway (ADR-0013 D3). 도메인 서비스가 아닌 *인프라 게이트웨이*.
 // WebFlux(reactive) 기반이라 :common(servlet starter-web 를 api 전이 노출)을 의존하지 않는다.
 include 'gateway'
+
+// 구현 ③ PR3d-a — 내부 토큰 이름 계약 (ADR-0017). 순수 Java(프레임워크 의존 0).
+// gateway(발행)와 peekcart-common-auth(검증)가 서로를 의존할 수 없어, issuer/claim/헤더 이름의
+// 단일 출처를 별도 모듈로 둔다(계획 loop3 #7).
+include 'internal-token-contract'

@@ -1,6 +1,7 @@
 package com.peekcart.gateway.auth;
 
 import com.peekcart.gateway.ratelimit.RateLimiterUnavailableException;
+import com.peekcart.internaltoken.InternalTokenContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -21,9 +22,9 @@ import java.util.List;
  * Gateway 인증 필터 (ADR-0013 D3 · 구현 ③ PR3a) — 검증 3단계.
  *
  * <ol>
- *   <li><b>헤더 strip</b>: 외부에서 유입된 {@code X-User-*} 를 <b>항상</b> 제거한다(공개 경로 포함).</li>
+ *   <li><b>헤더 strip</b>: 외부에서 유입된 {@code X-Internal-Auth}/{@code X-User-*} 를 <b>항상</b> 제거한다(공개 경로 포함).</li>
  *   <li><b>서명/만료 검증</b>(RS256 via JWKS, 전환기 HS512) → <b>blacklist/family deny</b>(Redis)</li>
- *   <li><b>신뢰 헤더 주입</b> + 검증된 userId 를 exchange attribute 로 노출(RateLimiter 용)</li>
+ *   <li><b>내부 토큰 주입</b>(Gateway 서명, ADR-0017) + 검증된 userId 를 exchange attribute 로 노출(RateLimiter 용)</li>
  * </ol>
  *
  * <p><b>실행 순서</b>(GW-2 c2:1/c3:2): 반드시 라우트 필터(`RequestRateLimiter`)보다 <b>먼저</b> 실행돼야
@@ -34,8 +35,10 @@ import java.util.List;
  * <p><b>응답 계약</b>(계획 P12 행렬): 서명오류·만료·exp 부재·unknown kid·deny hit → <b>401</b> /
  * JWKS·Redis 의존성 장애 → <b>503</b> / rate limit 초과 → 429(RateLimiter 소관).
  *
- * <p><b>PR3a 전환기</b>: {@code Authorization} 을 제거하지 않고 그대로 전달한다(구버전 서비스가 아직
- * Bearer 를 검증 — 계획 P18 ①). PR3d 에서 전달을 중단한다.
+ * <p><b>PR3d</b>: 다운스트림에 평문 신원을 넘기지 않는다 — Gateway 개인키로 서명한 짧은 수명 내부 토큰
+ * ({@link InternalTokenContract#HEADER})만 주입하고, {@code Authorization} 전달도 중단한다
+ * (ADR-0017 D1/D5 · ADR-0014 D2-c exit). 서비스는 사용자 토큰을 더 이상 검증하지 않으므로
+ * Authorization 을 계속 넘기면 쓰이지 않는 자격증명을 불필요하게 전파하는 셈이 된다.
  */
 @Component
 public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
@@ -51,20 +54,28 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
     /** 검증이 끝난 userId — RateLimiter 가 <b>이 값만</b> 신뢰한다(요청 헤더 직접 신뢰 금지). */
     public static final String AUTHENTICATED_USER_ID_ATTR = "peekcart.gateway.authenticatedUserId";
 
+    /**
+     * 외부 유입을 항상 제거하는 헤더. 내부 토큰 헤더가 여기 포함돼야 외부에서 위조 토큰을 실어 보내도
+     * 주입 전에 제거된다(공개 경로 포함). 평문 {@code X-User-*} 는 더 이상 주입하지 않지만,
+     * 구버전 서비스가 남아 있는 롤아웃 구간을 위해 <b>strip 대상으로는 유지</b>한다.
+     */
     static final List<String> TRUSTED_HEADERS =
-            List.of("X-User-Id", "X-User-Role", "X-User-Family-Id");
+            List.of(InternalTokenContract.HEADER, "X-User-Id", "X-User-Role", "X-User-Family-Id");
 
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final GatewayJwtVerifier verifier;
     private final TokenDenyLookup denyLookup;
+    private final InternalTokenIssuer internalTokenIssuer;
     private final List<PublicEndpointProperties.Rule> publicRules;
 
     public GatewayAuthenticationFilter(GatewayJwtVerifier verifier,
                                        TokenDenyLookup denyLookup,
+                                       InternalTokenIssuer internalTokenIssuer,
                                        PublicEndpointProperties publicEndpointProperties) {
         this.verifier = verifier;
         this.denyLookup = denyLookup;
+        this.internalTokenIssuer = internalTokenIssuer;
         this.publicRules = publicEndpointProperties.rules();
     }
 
@@ -105,7 +116,7 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
                                 ? Mono.<GatewayClaims>error(new GatewayJwtVerifier.InvalidTokenException(
                                         "차단된 토큰(blacklist/family deny)"))
                                 : Mono.just(claims)))
-                .map(claims -> withTrustedHeaders(exchange, claims));
+                .map(claims -> withInternalToken(exchange, claims));
     }
 
     /**
@@ -121,7 +132,8 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
     private static boolean isAuthFailure(Throwable e) {
         return e instanceof GatewayJwtVerifier.InvalidTokenException
                 || e instanceof JwksKeyRegistry.JwksUnavailableException
-                || e instanceof TokenDenyLookup.DenyLookupUnavailableException;
+                || e instanceof TokenDenyLookup.DenyLookupUnavailableException
+                || e instanceof InternalTokenIssuer.IssuanceRefusedException;
     }
 
     private Mono<Void> rejectByCause(ServerWebExchange exchange, Throwable e) {
@@ -130,6 +142,11 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
         if (e instanceof TokenDenyLookup.DenyLookupUnavailableException
                 || e instanceof JwksKeyRegistry.JwksUnavailableException) {
             return reject(exchange, HttpStatus.SERVICE_UNAVAILABLE, "dependency_unavailable");
+        }
+        if (e instanceof InternalTokenIssuer.IssuanceRefusedException) {
+            // 사용자 토큰 자체는 유효하나 정책상 내부 토큰을 발행하지 않는 신원(예: family-less).
+            // fail-closed — 신원 없이 다운스트림으로 보내지 않는다.
+            return reject(exchange, HttpStatus.UNAUTHORIZED, "internal_token_refused");
         }
         return reject(exchange, HttpStatus.UNAUTHORIZED, "invalid_token");
     }
@@ -156,19 +173,22 @@ public class GatewayAuthenticationFilter implements GlobalFilter, Ordered {
                 .build();
     }
 
-    /** 외부 헤더 제거 후 검증된 값으로 재주입 + RateLimiter 용 attribute 기록. */
-    private static ServerWebExchange withTrustedHeaders(ServerWebExchange exchange, GatewayClaims claims) {
+    /**
+     * 외부 헤더 제거 후 Gateway 서명 내부 토큰을 주입하고 RateLimiter 용 attribute 를 기록한다.
+     *
+     * <p>사용자 자격증명({@code Authorization})은 함께 제거한다 — 서비스는 더 이상 사용자 토큰을 검증하지
+     * 않으므로(ADR-0014 D2-c exit) 계속 전달하면 쓰이지도 않는 Bearer 토큰이 내부망 전 구간에 퍼진다.
+     *
+     * <p>서명은 이벤트 루프에서 동기 실행된다(RSA 2048 sign ≈ 수백 µs). 예산 초과가 관측되면 서명 전용
+     * bounded scheduler 로 분리한다(계획 P2 (b)).
+     */
+    private ServerWebExchange withInternalToken(ServerWebExchange exchange, GatewayClaims claims) {
+        String internalToken = internalTokenIssuer.issue(claims);
         ServerWebExchange mutated = exchange.mutate()
                 .request(r -> r.headers(headers -> {
                     TRUSTED_HEADERS.forEach(headers::remove);
-                    headers.set("X-User-Id", String.valueOf(claims.userId()));
-                    if (claims.role() != null) {
-                        headers.set("X-User-Role", claims.role());
-                    }
-                    // family-less 레거시 토큰(전환기)은 헤더를 넣지 않는다 — "null" 문자열 주입 금지
-                    if (claims.familyId() != null && !claims.familyId().isBlank()) {
-                        headers.set("X-User-Family-Id", claims.familyId());
-                    }
+                    headers.remove(HttpHeaders.AUTHORIZATION);
+                    headers.set(InternalTokenContract.HEADER, internalToken);
                 }))
                 .build();
         mutated.getAttributes().put(AUTHENTICATED_USER_ID_ATTR, String.valueOf(claims.userId()));

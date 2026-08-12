@@ -86,3 +86,10 @@ diff 를 3 chunk 로 나눠 각각 독립 리뷰했더니, **다른 chunk 에 �
 **#10 의 부분 적용(명시)**: exposure-lint 의 **레거시 13종**은 substring 대조를 유지했다. 그 기대 문구들은 서로 겹치지 않는 고유 문구라 ID 공유로 인한 false-green 위험이 없고, 전면 ID 부여는 이 PR 범위 밖의 리팩터가 된다. **CSI 계열 12종은 같은 ID 를 공유하므로 전부 횟수 대조**로 전환했다.
 
 **검증**: lint 10종 그린 · self-test 69종(exposure 25 · workload 24 · np 8 · itko 7 · dockerfile 5) · 3 렌더 그린 · 10모듈 빌드+테스트 그린 · 임베디드 python 4블록 compile + 양/음성 케이스.
+
+## 2026-08-12 15:21 — /done applied (PR https://github.com/Kimgyuilli/PeekCart/pull/83)
+
+- TASKS.md: 구현 ③ PR3d-b-1 을 🔲 → ✅ (#83). 구현 ③ 자체는 🔄 유지(b-2 잔여).
+- PHASE4.md: PR3d-b-1 작업 이력 추가(핵심 결정·리뷰 11건·미충족 4건).
+- ADR: 신규/상태 변경 없음 — ADR-0017/0013/0007 의 기존 결정 범위 안에서 구현했다.
+- Layer 1: 영향 없음 — 02/04 는 #81 에서 이미 서명 assertion·키 도메인 분리로 동기화됨.

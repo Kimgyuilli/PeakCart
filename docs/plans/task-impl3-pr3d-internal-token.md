@@ -269,3 +269,64 @@ PR3c 는 GKE 실 클러스터 증적 미확보 = **평문 header-trust 가 아�
 **진입 조건**: b-1 머지 + **GKE 재기동 + Secrets Store CSI Driver 설치 + Secret Manager 에 gateway/user 개인키 등록**. 비용상 **PR4(관측성 S9)와 같은 클러스터 세션**으로 묶는다.
 
 **완료 조건**: §6 전부 + 증적 `docs/progress/evidence/`. **렌더/lint 성공을 barrier 통과로 기록 금지.**
+
+---
+
+## 11. 내부 토큰 키 회전 runbook (P8 · ADR-0017 D2) — PR3d-b-1
+
+> **불변식**: 어느 시점에도 "gateway 가 서명하는 kid" ⊆ "모든 서비스가 수용하는 kid" 여야 한다.
+> 이 포함관계가 한 순간이라도 깨지면 전 요청이 401 이 된다. 그래서 **공개키가 항상 먼저** 간다.
+
+### 11.1 순서 (역전 금지)
+
+| 단계 | 작업 | 다음 단계 진입 gate |
+|---|---|---|
+| ① 선배포 | `internal-token-keys` ConfigMap 에 **new 공개키 파일 추가**(old 유지) + `internal-token-binding` 에 `APP_INTERNALTOKEN_PUBLICKEYS_1_KID/_1_LOCATION` 추가 | — |
+| ② 수렴 확인 | 5서비스 롤링 재시작 → **전량 수렴** | `rollout-convergence-gate.sh --workloads user-service,product-service,order-service,payment-service,notification-service` |
+| ③ 전환 | gateway `app.gateway.internal-token.active-kid` = new kid + Secret Manager 의 개인키 새 버전 → gateway 롤링 | `rollout-convergence-gate.sh --workloads gateway --gateway-signing-probe` |
+| ④ 대기 | old kid 로 서명된 토큰이 전부 만료될 때까지 대기: **ttl-seconds(30) + skew-seconds(5) + 여유** | 경과 시각 기록 |
+| ⑤ 정리 | ConfigMap 에서 **old 공개키 파일·`_0_` 쌍 제거**(new 를 `_0_` 으로 재번호) → 5서비스 롤링 | ② 와 동일 gate + `workload-key-ownership-lint` |
+
+`③` 이 `②` 보다 먼저 오면 서비스가 모르는 kid 로 서명된 토큰이 흐르고, `⑤` 가 `④` 보다 먼저 오면
+아직 유효한 old 토큰이 거부된다. **순서 역전 실패는 b-2 에서 의도적으로 1회 재현해 gate 가 실제로
+막는지 확인한다**(렌더로는 증명되지 않는다).
+
+### 11.2 overlap 구간의 성질
+
+`①~⑤` 사이에는 서비스가 **kid 2개를 동시에 수용**한다(`InternalTokenProperties.publicKeys` 가
+리스트인 이유). 이 구간은 공개키가 둘이라는 것 외에 계약이 달라지지 않는다 — 서명 검증은
+kid 로 키를 고른 뒤 alg/iss/exp/iat/수명상한을 그대로 적용한다.
+
+**왜 ConfigMap 인가**: overlap 은 리스트 항목이 1→2→1 로 변하는 일이다. `application-k8s.yml`
+(이미지 베이크)에 리스트를 고정하면 항목 추가가 곧 이미지 재빌드라, 회전이 빌드 파이프라인에 묶여
+"선배포 → 수렴 → 전환" 순서를 지킬 수 없다. 인덱스 env 는 ConfigMap 편집 + 재시작으로 끝난다.
+
+**바인딩 동작(구현 중 검증으로 정정)**: 착수 시엔 Spring 이 리스트를 **인덱스 단위로 병합**한다고
+가정하고 "이미지 기본값을 항상 1개로 유지" 를 규약으로 두려 했다. `InternalTokenPropertiesBindingTest`
+가 이를 반증했다 — 리스트는 **가장 높은 우선순위 소스가 통째로 대체**한다. 따라서 ConfigMap 이 하나라도
+항목을 주면 베이크 목록은 전부 무시되고, **ConfigMap 이 신뢰 kid 집합의 단일 출처**가 된다.
+이게 ⑤(old kid 제거)가 실제 폐기로 이어지는 근거다 — 병합이었다면 베이크된 구 키가 계속 신뢰됐다.
+
+---
+
+## 12. §7 rollback 행렬 재작성 (§9.1 근거) — PR3d-b-1
+
+§8 loop3 #3 은 "verifier 와 내부토큰 필터가 **함께 존재하는 rollback 전용 호환 이미지**" 를 고정하라고
+요구했다. 이 요구의 **전제가 소멸했다** — §9.1 에서 확인한 대로 사용자 토큰 verifier(`JwtFilter`)는
+PR3c 이후 이미 미배선이었고 PR3d-a 가 물리 삭제했다. 되돌릴 대상은 "공존 이미지" 가 아니라
+**직전 릴리스(PR3c) 이미지**다.
+
+또한 §10.1 V6 에 따라 이 롤아웃은 라이브 마이그레이션이 아니라 **fresh deploy 리허설**이므로,
+"되돌린다" 는 사용자 영향 복구가 아니라 **리허설 단계 되감기**를 뜻한다.
+
+| 출발 단계 | 증상 | 되돌림 대상 | 절차 |
+|---|---|---|---|
+| ② dual-accept 배포 후 | 서비스 부팅 실패(공개키 미배선·범위 위반) | 서비스 이미지·ConfigMap | `internal-token-binding` 을 직전 리비전으로 → 5서비스 롤링 → 수렴 gate |
+| ③ gateway 서명 주입 후 | gateway 부팅 실패(개인키 CSI 미투영) | gateway Deployment | gateway 만 직전 리비전으로 rollout undo. 서비스는 dual-accept 라 평문/서명 **양쪽**을 받으므로 함께 되돌릴 필요가 없다 |
+| ③ 후 | 서명은 되는데 다운스트림 401 | ConfigMap(kid 불일치) | `active-kid` ↔ `public-keys` kid 대조 → 불일치면 ① 로 되감기(공개키 선배포 누락) |
+| ④ signed-only 전환 후 | 일부 서비스 401 | 서비스 mode | `APP_INTERNALTOKEN_MODE=DUAL_ACCEPT` 로 되돌려 ③ 상태 복원(이미지 교체 불필요 — mode 는 env) |
+| ⑤ barrier ② 실패 | 위조가 통과 / 정상이 401 | **전체 ③ 상태** | ④ 를 되감아 dual-accept 로 복귀 후 원인 분리. barrier 실패 상태로 ⑥ 진입 금지 |
+
+**핵심 차이**: 구 행렬은 "verifier 재활성" 을 최선두에 뒀지만, verifier 가 없으므로 **되돌림의 1순위는
+`mode` env 하나**다(`SIGNED_ONLY` → `DUAL_ACCEPT`). 이미지 교체 없이 ConfigMap + 롤링으로 끝나는 것이
+이 설계의 rollback 비용이다. 각 단계는 고유 이미지 태그(digest)를 기록해 `--expect-image` 로 대조한다.

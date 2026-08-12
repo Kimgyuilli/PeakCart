@@ -68,6 +68,10 @@ jobs:
           # kid 가 아니라 SPKI fingerprint 로 비교해 "같은 키를 다른 kid 로" 우회를 막는다.
           bash scripts/internal-key-ownership-lint.sh
           bash scripts/internal-key-ownership-lint.sh --self-test
+          # settings.gradle include ↔ Dockerfile COPY 정합 — 모듈 추가 시 COPY 누락으로
+          # gradle 은 그린인데 이미지 빌드만 깨지는 실패를 build 잡에서 미리 잡는다(#80 회귀).
+          bash scripts/dockerfile-module-sync-lint.sh
+          bash scripts/dockerfile-module-sync-lint.sh --self-test
           bash scripts/servicemonitor-selector-lint.sh
           bash scripts/observability-ssot-lint.sh
           bash scripts/observability-promql-lint.sh

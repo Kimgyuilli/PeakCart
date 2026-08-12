@@ -46,3 +46,15 @@ diff 를 3 chunk 로 나눠 각각 독립 리뷰했더니, **다른 chunk 에 �
 - push `origin/feat/impl3-pr3d-a-internal-token` · PR [#80](https://github.com/Kimgyuilli/PeakCart/pull/80) (base main)
 - `/done`: TASKS ③ PR3d-a ✅[#80] 반영(③ 는 PR3d-b/PR4 남아 `🔄` 유지) · PHASE4 이력 추가
 - **Layer 1(02 / 04 §10-2) 동기화는 PR3d-b 일괄 반영으로 이연** — 사용자 결정
+
+## 2026-08-12 — CI 실패 수정 (PR #80, images 6/6)
+
+- **증상**: `build` 잡(gradle+lint 9종) 통과, **`images` 6개 전부 실패** — `Could not resolve project :internal-token-contract`
+- **원인**: `settings.gradle` 에 모듈을 추가했지만 `Dockerfile` COPY 목록을 갱신하지 않았다. Dockerfile 설정 단계가 전 모듈을 평가하므로 소스가 없으면 project 해석이 실패한다. **로컬 `./gradlew build` 그린으로는 잡히지 않는 부류**(이미지 빌드 컨텍스트 전용).
+- **수정**: `COPY internal-token-contract/build.gradle ...` + `COPY internal-token-contract/ ...` 2줄 추가.
+- **재발 방지(주석 → 검사)**: Dockerfile 은 이미 "settings.gradle 에 모듈 추가 시 COPY 목록도 동기화하라" 는 **주석**을 갖고 있었고, 그럼에도 같은 실수가 났다. → `scripts/dockerfile-module-sync-lint.sh` 신설로 CI 강제:
+  - `settings.gradle` include ↔ Dockerfile COPY **양방향** 정합(build.gradle 줄 + 소스 디렉토리 줄 각각)
+  - 역방향 검사(DMS-004)로 모듈 *제거* 시 잔존 COPY 도 잡는다
+  - self-test 5종(정상 저장소·정상 픽스처·DMS-002·**DMS-003(#80 회귀 재현)**·DMS-004), 진단 ID+횟수 대조
+  - CI `build` 잡의 policy lint 단계에 배선 → 이미지 잡보다 먼저·싸게 실패한다
+- **검증**: lint OK(모듈 10개) · self-test 5/5 · **로컬 `docker build` 2종 성공**(gateway·user-service) — 로컬 gradle 그린이 Docker 그린을 보장하지 않으므로 실제 이미지 빌드로 확인했다.

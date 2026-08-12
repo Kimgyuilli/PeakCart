@@ -227,3 +227,45 @@ PR3c 는 GKE 실 클러스터 증적 미확보 = **평문 header-trust 가 아�
 
 - PR3d-a: **없음**(즉시 착수 가능).
 - PR3d-b: PR3d-a 머지 + **GCP 프로젝트/GKE 재기동 + Secrets Store CSI Driver 설치**(PR3c 세션 종료로 클러스터 잔여 0 → 재구축 필요). 비용상 PR3d-b 는 PR4(관측성 S9)와 **같은 클러스터 세션으로 묶는 것**을 권한다.
+
+---
+
+## 10. PR3d-b 분할 확정 — b-1(코드·매니페스트) / b-2(클러스터 증적) — 2026-08-12
+
+§9.3 을 다시 **b-1 / b-2** 로 쪼갠다. 분할 축은 9 절과 같다 — **"클러스터 없이 그린이 되는가"**. PR3d-a 의 split-review 아티팩트 10건(chunk 를 나눠 리뷰하니 다른 chunk 의 파일을 "없어서 컴파일 불가"로 오판정)이 재발하지 않도록, b-1 은 **매니페스트+lint+스크립트로 자기완결**시키고 b-2 는 **증적만** 담는다.
+
+### 10.1 착수 전 코드 검증 (grep, 2026-08-12) — §9.3 전제 재확인
+
+§9.1 이 전제 3건을 뒤집은 전례가 있어 b 착수 전에도 같은 검증을 돌렸다. **5건 확인 · 1건 뒤집힘**.
+
+- **V1 (확인) P5 는 greenfield** — `k8s/` 전체에 CSI volume·`SecretProviderClass` **0건**, `secretKeyRef` 는 `infra/mysql/mysql.yml:45` 하나뿐. gateway·user-service 개인키 매니페스트가 **둘 다 부재**하므로 §9.1 의 "user 키도 b 가 정본화" 판단은 유효하고, b-1 이 매니페스트를 만들기 전에 P7 key-ownership lint 를 붙이면 검사 대상이 없어 vacuous-green 이 된다. → **매니페스트가 lint 보다 먼저**.
+- **V2 (확인) §7 ② dual-accept 는 구현되어 있다** — `InternalTokenProperties.Mode.DUAL_ACCEPT` + `InternalTokenAuthenticationFilter:62` 의 평문 3-state 분기. 단 5서비스 baked 기본값이 `SIGNED_ONLY` 라, ② 는 ConfigMap override 로 켰다가 ④ 에서 되돌리는 **왕복**이다(이미지 재빌드 아님).
+- **V3 (확인) `CANARY_RESULT` 서브셸 버그 재현** — `gke-security-smoke.sh:170` 의 `{ run_barrier && CANARY_RESULT="" && run_canary; } 2>&1 | tee "$log"` 가 파이프라인이라 서브셸에서 실행된다. :152 의 대입이 :183 부모 셸로 전파되지 않아 증적 헤더가 항상 `n/a`.
+- **V4 (확인) exposure-lint 개조 지점** — `gateway-exposure-lint.sh:211-225` "Secret 참조 전무" 블록이 P7 의 "승인 CSI 정확히 1개" 로 교체될 자리. 같은 스크립트의 `initContainers 0개` 계약과 CSI volume 추가는 충돌하지 않는다.
+- **V5 (확인) 개인키 산출물 비포함 유지** — `local-keys/` 는 `.gitignore:53`, 커밋된 `.pem` 은 testFixtures 4개와 공개키 2개뿐.
+- **V6 (뒤집힘) §7 은 "라이브 무중단 전환" 이 아니다** — PR3c 세션 종료로 **클러스터 잔여 0**. 배포된 구 gateway 이미지도, 흘러가는 트래픽도 없으므로 ②~④ 는 마이그레이션이 아니라 **fresh deploy 위에서 일부러 재현하는 리허설**이다.
+  - **결정: 단계 전부 리허설 실행**(2026-08-12). 생략하면 무중단 전환 절차·수렴 판정식(§8 loop3 #1)·rollback 행렬이 **한 번도 실행되지 않은 문서**로 남고, `DUAL_ACCEPT` 코드가 미실증 상태로 남아 §7 ⑥ 삭제 근거가 약해진다. P8 회전 overlap 도 같은 "선배포 → 수렴 확인 → 전환" 메커니즘을 쓰므로 리허설 비용이 회전 검증에 재사용된다.
+  - 다만 리허설임을 증적에 **명시**한다 — "무중단 전환을 실증했다"가 아니라 "무중단 전환 절차를 fresh deploy 위에서 재현했다". 실트래픽 하 전환은 미검증으로 남긴다.
+
+### 10.2 PR3d-b-1 — 키 배포 매니페스트 · lint · 스크립트 (클러스터 비의존)
+
+**범위**: P5 매니페스트 · P7 전량 · P8 runbook · P10 스크립트 확장 · §7 rollback 행렬 재작성.
+
+- **P5 매니페스트**: `SecretProviderClass`(GCP provider) + gateway Deployment 에 CSI read-only volume/volumeMount + `application-k8s.yml` 에 마운트 경로. **user-service 개인키도 동시에 CSI 정본화**(ad-hoc k8s Secret 탈피, ADR-0013 D2 잔여 해소 — V1 근거). 5서비스 `app.internal-token.public-keys` 운영 kid 를 ConfigMap 으로 배선(베이크 dev 키 override).
+- **P7 lint 3종**: exposure-lint 를 "승인 CSI 정확히 1개"로 개조(SPC 1 ↔ volume 1 ↔ volumeMount 1, 양쪽 `readOnly`, `secretObjects`/`nodePublishSecretRef` 금지) + 신규 key-ownership lint(전 workload 종류 전수) + property-ownership 은 PR3d-a 산출물 재사용·확장. 각 self-test 는 **고유 진단 ID × 기대 발생 횟수** 대조(§8 loop3 #6).
+- **P10 스크립트**: `gke-security-smoke.sh` 에 barrier ①/② 확장 + **V3 버그 수정**(`CANARY_RESULT` 를 파이프라인 밖에서 산출하거나 파일 경유). barrier ② 는 **정상 서명 200 양성 대조군** 필수 — PR3c 검사(5) 3상태 교훈.
+- **§7 수렴 판정식 스크립트화**(§8 loop3 #1): `observedGeneration`·replica 3종·구 RS `replicas==0`·image digest 일치 + Gateway Pod 별 synthetic 요청으로 "평문 주입 0" 확인. b-2 가 이걸 hard gate 로 호출한다.
+- **§7 rollback 행렬 재작성**(§9.1 근거): loop3 #3 의 "verifier·내부토큰 필터 공존 rollback 전용 호환 이미지" **전제 소멸** — 되돌릴 대상은 직전 릴리스(PR3c) 이미지다. 단계별 되돌림 대상을 이미지 태그로 고정.
+- **P8 runbook** 문서(① 공개키 선배포 → ② 수렴 확인 → ③ activeKid 전환 → ④ old TTL+skew 경과 → ⑤ old kid 제거).
+
+**완료 조건**: 10모듈 그린 · lint self-test 전량(음성 포함) · `kustomize build` 양성/음성(개인키 오마운트 → lint fail) · CI 배선.
+
+**명시적 미충족**: 매니페스트가 생겨도 **실 클러스터 적용은 b-2** — Secret Manager 에 키 자체가 없으므로 렌더 그린은 배포 가능이 아니다(PR3d-a 미충족 #1 과 같은 취급).
+
+### 10.3 PR3d-b-2 — GKE 증적 · 롤아웃 리허설 (클러스터 의존)
+
+**범위**: 실 키 주입 · §7 ①~⑥ 리허설 실행 · P10 barrier ①② 증적 · P8 overlap 1회 · 부하 하 event-loop lag 측정(PR3d-a 미충족 #2).
+
+**진입 조건**: b-1 머지 + **GKE 재기동 + Secrets Store CSI Driver 설치 + Secret Manager 에 gateway/user 개인키 등록**. 비용상 **PR4(관측성 S9)와 같은 클러스터 세션**으로 묶는다.
+
+**완료 조건**: §6 전부 + 증적 `docs/progress/evidence/`. **렌더/lint 성공을 barrier 통과로 기록 금지.**

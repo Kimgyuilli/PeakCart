@@ -793,3 +793,23 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **남긴 것**: `00-lagacy.md` 의 동일 문구 3곳은 아카이브라 손대지 않았다. 02 §12 트리의 여타 누락(`peekcart-common-observability`, NetworkPolicy 매니페스트 등)은 ADR-0017 표면이 아니라 범위 밖.
 
 **다음**: 변동 없음 — **PR3d-b**(GKE 재기동 + Secrets Store CSI Driver 설치 선행) → PR4(관측성 S9).
+
+---
+
+## 구현 ③ Spring Cloud Gateway — PR3d-b 분할 확정 (계획) — 2026-08-12 — [#82](https://github.com/Kimgyuilli/PeakCart/pull/82)
+
+> §9.3 의 PR3d-b 를 **b-1(코드·매니페스트) / b-2(클러스터 증적)** 로 재분할했다. 분할 축은 §9 와 동일 — "클러스터 없이 그린이 되는가". 계획서 §10 신설, 코드 변경 없음.
+
+**착수 전 grep 검증 6건 — 5건 확인, 1건 뒤집힘** (§9.1 이 전제 3건을 뒤집은 전례에 따라 b 착수 전에도 동일 검증):
+
+- **V6 (뒤집힘) §7 은 라이브 무중단 전환이 아니다** — 클러스터 잔여 0. 구 gateway 이미지도 트래픽도 없으므로 ②~④ 는 마이그레이션이 아니라 **fresh deploy 리허설**.
+  - **결정: 단계 전부 리허설 실행**. 생략하면 전환 절차·수렴 판정식(§8 loop3 #1)·rollback 행렬이 한 번도 실행 안 된 문서로 남고 `DUAL_ACCEPT` 가 미실증이라 §7 ⑥ 삭제 근거가 약해진다. P8 회전 overlap 이 같은 "선배포 → 수렴 → 전환" 메커니즘을 재사용하므로 비용도 회수된다. 증적에는 **리허설임을 명시**한다("무중단 전환 실증"이 아니라 "절차 재현"). 실트래픽 하 전환은 미검증.
+- **V1** `k8s/` 에 CSI·SPC **0건**, `secretKeyRef` 는 mysql 뿐 → gateway·user 개인키 매니페스트 **둘 다 부재**. **매니페스트가 lint 보다 먼저**여야 P7 key-ownership lint 가 vacuous-green 을 피한다(PR3d-a 에서 3번 밟은 함정).
+- **V2** `Mode.DUAL_ACCEPT` 는 `InternalTokenAuthenticationFilter:62` 에 실제 구현됨 → §7 ② 가능. baked 기본값이 `SIGNED_ONLY` 라 ② 는 ConfigMap override 왕복(이미지 재빌드 아님).
+- **V3** `gke-security-smoke.sh:170` `{ ... } | tee` 서브셸 → `CANARY_RESULT` 미전파 재현(PR3c 흡수분, b-1 수정).
+- **V4** `gateway-exposure-lint.sh:211-225` 가 "승인 CSI 정확히 1개" 교체 지점. `initContainers 0개` 계약과 충돌 없음.
+- **V5** `local-keys/` gitignored, 커밋된 `.pem` 은 testFixtures 4 + 공개키 2.
+
+**파생 정정**: §8 loop3 #3 의 "verifier + 내부토큰 필터 공존 rollback 전용 호환 이미지"는 §9.1(verifier 삭제 완료)로 **전제 소멸** — 되돌릴 대상은 직전 릴리스 이미지. 행렬은 b-1 에서 재작성.
+
+**다음**: **PR3d-b-1** 착수(진입 조건 없음) → **b-2**(GKE 재기동 + CSI Driver + Secret Manager 키 등록) → PR4(관측성 S9).

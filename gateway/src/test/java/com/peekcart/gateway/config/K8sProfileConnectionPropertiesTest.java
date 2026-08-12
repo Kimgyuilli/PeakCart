@@ -37,6 +37,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @ActiveProfiles("k8s")
 @TestPropertySource(properties = {
+        // 내부 토큰 개인키는 산출물에 없다(ADR-0013 D2) — 테스트는 공유 fixture 키를 마운트한다.
+        "app.gateway.internal-token.active-kid=gw-test-2026",
+        "app.gateway.internal-token.private-key-location=classpath:internal-token/gateway-test-private.pem",
         // 부팅 시 JWKS 폴링으로 테스트가 느려지지 않게 — 연결값 검증과 무관
         "app.gateway.jwt.jwks-initial-delay=PT1H",
         "app.gateway.jwt.jwks-refresh-interval=PT1H"

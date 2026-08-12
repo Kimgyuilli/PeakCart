@@ -15,7 +15,17 @@ import com.peekcart.gateway.ratelimit.RateLimiterUnavailableException;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import com.peekcart.internaltoken.InternalTokenContract;
+import com.peekcart.internaltoken.InternalTokenFixtures;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import org.springframework.core.io.ByteArrayResource;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -27,18 +37,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Gateway 인증 필터 계약 회귀 (계획 P12/P19).
+ * Gateway 인증 필터 계약 회귀 (계획 P12/P19 · PR3d P9).
  *
  * <p>고정하는 계약:
  * <ul>
- *   <li>외부 유입 {@code X-User-*} 는 <b>공개 경로 포함 항상</b> 제거(spoof 차단)</li>
- *   <li>검증 성공 시 신뢰 헤더 재주입, family-less 는 헤더 미주입("null" 문자열 금지)</li>
+ *   <li>외부 유입 {@code X-Internal-Auth}/{@code X-User-*} 는 <b>공개 경로 포함 항상</b> 제거(spoof 차단)</li>
+ *   <li>검증 성공 시 <b>Gateway 서명 내부 토큰만</b> 주입(평문 신원 헤더 주입 0)</li>
+ *   <li>{@code Authorization} 은 다운스트림으로 <b>전달하지 않는다</b>(ADR-0014 D2-c exit)</li>
+ *   <li>family-less 신원 → 발행 거부 401(fail-closed)</li>
  *   <li>보호 경로 무토큰/무효토큰 → 401 · 공개 경로 → 익명 통과</li>
  *   <li>의존성 장애(Redis/JWKS) → <b>503</b>, 공개 경로여도 통과시키지 않음(fail-closed)</li>
- *   <li>PR3a: {@code Authorization} 은 <b>그대로 전달</b>(구버전 서비스 병행 동작)</li>
  * </ul>
  */
-@DisplayName("GatewayAuthenticationFilter — strip/inject · 401/503 · 공개 경로")
+@DisplayName("GatewayAuthenticationFilter — strip/서명주입 · 401/503 · 공개 경로")
 class GatewayAuthenticationFilterTest {
 
     private static final String TOKEN = "valid.jwt.token";
@@ -57,8 +68,30 @@ class GatewayAuthenticationFilterTest {
                 "GET /api/v1/products",
                 "GET /api/v1/products/**",
                 "POST /api/v1/payments/webhook"));
-        filter = new GatewayAuthenticationFilter(verifier, denyLookup, publicProps);
+        filter = new GatewayAuthenticationFilter(verifier, denyLookup, issuer(true), publicProps);
         forwarded = new AtomicReference<>();
+    }
+
+    /** 실제 서명기를 쓴다 — mock 이면 "무엇이 주입됐는가" 를 검증할 수 없다. */
+    private static InternalTokenIssuer issuer(boolean requireFamilyId) {
+        return new InternalTokenIssuer(new InternalTokenProperties(
+                InternalTokenFixtures.KID,
+                new ByteArrayResource(InternalTokenFixtures.gatewayPrivateKeyPem().getBytes(StandardCharsets.UTF_8)),
+                30,
+                requireFamilyId
+        ), Clock.fixed(InternalTokenFixtures.ISSUED_AT, ZoneOffset.UTC));
+    }
+
+    /** 주입된 내부 토큰을 Gateway 공개키로 열어 본다(계약대로 서명됐는지 확인). */
+    private static Claims parseInjected(HttpHeaders headers) {
+        String token = headers.getFirst(InternalTokenContract.HEADER);
+        assertThat(token).as("내부 토큰이 주입되지 않음").isNotBlank();
+        return Jwts.parser()
+                .verifyWith(InternalTokenFixtures.gatewayPublicKey())
+                .clock(() -> Date.from(InternalTokenFixtures.ISSUED_AT))
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     private GatewayFilterChain chain() {
@@ -80,12 +113,12 @@ class GatewayAuthenticationFilterTest {
     }
 
     @Nested
-    @DisplayName("헤더 strip / inject")
+    @DisplayName("헤더 strip / 서명 주입")
     class Headers {
 
         @Test
-        @DisplayName("검증 성공 → 외부 X-User-* 제거 후 검증값으로 재주입 (spoof 무력화)")
-        void validToken_stripsSpoofAndInjects() {
+        @DisplayName("검증 성공 → 평문 X-User-* 제거 + 서명 내부 토큰만 주입 (spoof 무력화)")
+        void validToken_stripsSpoofAndInjectsSignedToken() {
             stubValid("fam-9");
             MockServerWebExchange exchange = MockServerWebExchange.from(
                     MockServerHttpRequest.get("/api/v1/orders")
@@ -97,45 +130,105 @@ class GatewayAuthenticationFilterTest {
             filter.filter(exchange, chain()).block();
 
             HttpHeaders headers = forwardedRequest().getHeaders();
-            assertThat(headers.getFirst("X-User-Id")).isEqualTo("42");
-            assertThat(headers.getFirst("X-User-Role")).isEqualTo("USER");
-            assertThat(headers.getFirst("X-User-Family-Id")).isEqualTo("fam-9");
+            assertThat(headers.containsKey("X-User-Id")).as("평문 신원 헤더는 더 이상 주입하지 않는다").isFalse();
+            assertThat(headers.containsKey("X-User-Role")).isFalse();
+            assertThat(headers.containsKey("X-User-Family-Id")).isFalse();
+
+            Claims claims = parseInjected(headers);
+            assertThat(claims.getSubject()).isEqualTo("42");
+            assertThat(claims.get(InternalTokenContract.CLAIM_ROLE, String.class)).isEqualTo("USER");
+            assertThat(claims.get(InternalTokenContract.CLAIM_FAMILY_ID, String.class)).isEqualTo("fam-9");
+            assertThat(claims.getIssuer()).isEqualTo(InternalTokenContract.ISSUER);
         }
 
         @Test
-        @DisplayName("family-less 레거시 토큰 → X-User-Family-Id 미주입 ('null' 문자열 금지)")
-        void familyLessToken_doesNotInjectFamilyHeader() {
-            stubValid(null);
+        @DisplayName("외부에서 실어 온 X-Internal-Auth 는 통째로 교체된다 (위조 토큰 통과 금지)")
+        void externalInternalTokenHeader_isReplaced() {
+            stubValid("fam-9");
             MockServerWebExchange exchange = MockServerWebExchange.from(
                     MockServerHttpRequest.get("/api/v1/orders")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN)
-                            .header("X-User-Family-Id", "evil"));
+                            .header(InternalTokenContract.HEADER, "forged.internal.token"));
 
             filter.filter(exchange, chain()).block();
 
             HttpHeaders headers = forwardedRequest().getHeaders();
-            assertThat(headers.getFirst("X-User-Id")).isEqualTo("42");
-            assertThat(headers.containsKey("X-User-Family-Id")).isFalse();
+            assertThat(headers.get(InternalTokenContract.HEADER))
+                    .as("외부 값이 남아 있으면 다운스트림이 어느 쪽을 믿을지 모호해진다")
+                    .hasSize(1);
+            assertThat(headers.getFirst(InternalTokenContract.HEADER)).isNotEqualTo("forged.internal.token");
+            assertThat(parseInjected(headers).getSubject()).isEqualTo("42");
         }
 
         @Test
-        @DisplayName("공개 경로 + 무토큰 → 외부 X-User-* 는 여전히 제거된다")
+        @DisplayName("중복 X-Internal-Auth 헤더도 전부 제거 후 1개만 주입된다")
+        void duplicateInternalTokenHeaders_areCollapsed() {
+            stubValid("fam-9");
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/v1/orders")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN)
+                            .header(InternalTokenContract.HEADER, "forged.one")
+                            .header(InternalTokenContract.HEADER, "forged.two"));
+
+            filter.filter(exchange, chain()).block();
+
+            assertThat(forwardedRequest().getHeaders().get(InternalTokenContract.HEADER)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("family-less 신원 → 발행 거부 401 (fail-closed, 신원 없이 통과시키지 않음)")
+        void familyLessToken_isRefused401() {
+            stubValid(null);
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/v1/orders")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN));
+
+            filter.filter(exchange, chain()).block();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(forwarded.get()).as("발행 실패 시 업스트림으로 새면 안 된다").isNull();
+        }
+
+        @Test
+        @DisplayName("require-family-id=false 전환기 설정이면 family-less 도 fid 없이 발행된다")
+        void familyLessToken_isIssuedWhenNotRequired() {
+            stubValid(null);
+            GatewayAuthenticationFilter transitional = new GatewayAuthenticationFilter(
+                    verifier, denyLookup, issuer(false),
+                    new PublicEndpointProperties(List.of("GET /api/v1/products")));
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/api/v1/orders")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + TOKEN));
+
+            transitional.filter(exchange, chain()).block();
+
+            Claims claims = parseInjected(forwardedRequest().getHeaders());
+            assertThat(claims.getSubject()).isEqualTo("42");
+            assertThat(claims.get(InternalTokenContract.CLAIM_FAMILY_ID, String.class)).isNull();
+        }
+
+        @Test
+        @DisplayName("공개 경로 + 무토큰 → 외부 X-User-* 와 X-Internal-Auth 는 여전히 제거된다")
         void publicPath_stillStripsSpoofedHeaders() {
             MockServerWebExchange exchange = MockServerWebExchange.from(
                     MockServerHttpRequest.get("/api/v1/products/1")
                             .header("X-User-Id", "999")
-                            .header("X-User-Role", "ADMIN"));
+                            .header("X-User-Role", "ADMIN")
+                            .header(InternalTokenContract.HEADER, "forged.internal.token"));
 
             filter.filter(exchange, chain()).block();
 
             HttpHeaders headers = forwardedRequest().getHeaders();
             assertThat(headers.containsKey("X-User-Id")).isFalse();
             assertThat(headers.containsKey("X-User-Role")).isFalse();
+            assertThat(headers.containsKey(InternalTokenContract.HEADER))
+                    .as("공개 경로로 위조 내부 토큰이 새면 서명 검증 자체가 무의미해진다")
+                    .isFalse();
         }
 
         @Test
-        @DisplayName("PR3a 전환기: Authorization 은 그대로 전달된다 (구버전 서비스 병행)")
-        void pr3a_forwardsAuthorizationHeader() {
+        @DisplayName("Authorization 은 다운스트림으로 전달되지 않는다 (ADR-0014 D2-c exit)")
+        void authorizationHeader_isNotForwarded() {
             stubValid("fam-1");
             MockServerWebExchange exchange = MockServerWebExchange.from(
                     MockServerHttpRequest.get("/api/v1/orders")
@@ -143,8 +236,9 @@ class GatewayAuthenticationFilterTest {
 
             filter.filter(exchange, chain()).block();
 
-            assertThat(forwardedRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION))
-                    .isEqualTo("Bearer " + TOKEN);
+            assertThat(forwardedRequest().getHeaders().containsKey(HttpHeaders.AUTHORIZATION))
+                    .as("서비스가 더 이상 검증하지 않는 사용자 자격증명을 내부망에 퍼뜨리지 않는다")
+                    .isFalse();
         }
     }
 
@@ -406,8 +500,8 @@ class GatewayAuthenticationFilterTest {
         }
 
         @Test
-        @DisplayName("공개 경로 + 유효 토큰 → 통과하며 신뢰 헤더도 주입된다")
-        void publicPath_validToken_injectsHeaders() {
+        @DisplayName("공개 경로 + 유효 토큰 → 통과하며 내부 토큰도 주입된다")
+        void publicPath_validToken_injectsInternalToken() {
             stubValid("fam-3");
             MockServerWebExchange exchange = MockServerWebExchange.from(
                     MockServerHttpRequest.get("/api/v1/products/1")
@@ -416,7 +510,7 @@ class GatewayAuthenticationFilterTest {
             filter.filter(exchange, chain()).block();
 
             assertThat(forwarded.get()).isNotNull();
-            assertThat(forwardedRequest().getHeaders().getFirst("X-User-Id")).isEqualTo("42");
+            assertThat(parseInjected(forwardedRequest().getHeaders()).getSubject()).isEqualTo("42");
         }
 
         @Test

@@ -24,6 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = {
         // JWKS/업스트림은 부팅에 필요 없다(최초 fetch 는 lazy/scheduled) — 주기 갱신만 늦춰 소음 제거
         "app.gateway.jwt.jwks-uri=http://localhost:1/.well-known/jwks.json",
+        // 내부 토큰 개인키는 산출물에 없다(ADR-0013 D2) — 테스트는 공유 fixture 키를 마운트한다.
+        "app.gateway.internal-token.active-kid=gw-test-2026",
+        "app.gateway.internal-token.private-key-location=classpath:internal-token/gateway-test-private.pem",
         "app.gateway.jwt.jwks-initial-delay=PT1H",
         "app.gateway.jwt.jwks-refresh-interval=PT1H"
 })

@@ -1,6 +1,7 @@
 package com.peekcart;
 
-import com.peekcart.global.auth.RedisTokenBlacklistLookupAdapter;
+import com.peekcart.global.security.InternalGatewayPublicKeyRegistry;
+import com.peekcart.global.security.InternalTokenVerifier;
 import com.peekcart.support.IntegrationTestConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Toss 프로퍼티는 별도 stub 없이 {@code application.yml} 의 placeholder 로 주입된다 — 누락 시 부팅 실패하도록 둔다
  * ({@code TossPaymentClient}/{@code WebhookService} 의 {@code @Value} 필수성 고정). 그 외:
  * <ul>
- *   <li>ADR-0014 fail-closed — common-auth {@link RedisTokenBlacklistLookupAdapter} 가 {@link RedisTemplate} 과 함께 기동.</li>
+ *   <li>ADR-0017 — common-auth 내부 토큰 검증 스택({@link InternalTokenVerifier}·{@link InternalGatewayPublicKeyRegistry})이 기동(Gateway 공개키 배선 fail-fast).</li>
  *   <li>{@link SecurityFilterChain} 정확히 1개({@code PaymentSecurityConfig}, ADR-0014 D1).</li>
  *   <li>Kafka listener container factory 배선({@code PaymentKafkaConfig} — order.created/stock.reservation.result/order.cancelled 소비).</li>
  * </ul>
@@ -62,9 +63,10 @@ class PaymentApplicationTests {
     @Autowired Map<String, SecurityFilterChain> securityFilterChains;
 
     @Test
-    @DisplayName("Redis blacklist 검증 어댑터가 RedisTemplate 과 함께 기동된다 (ADR-0014 fail-closed)")
-    void redisBlacklistAdapter_bootsWithRedisTemplate() {
-        assertThat(ctx.getBean(RedisTokenBlacklistLookupAdapter.class)).isNotNull();
+    @DisplayName("내부 토큰 검증 스택이 Gateway 공개키와 함께 기동된다 (ADR-0017 fail-fast)")
+    void internalTokenStack_bootsWithGatewayPublicKey() {
+        assertThat(ctx.getBean(InternalTokenVerifier.class)).isNotNull();
+        assertThat(ctx.getBean(InternalGatewayPublicKeyRegistry.class).kids()).isNotEmpty();
         assertThat(ctx.getBeanNamesForType(RedisTemplate.class)).isNotEmpty();
     }
 

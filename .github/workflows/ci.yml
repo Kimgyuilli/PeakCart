@@ -53,8 +53,10 @@ jobs:
         #
         # 구현 ③ PR3b: gateway base/gke 매니페스트 완성으로 IMAGE_CONTRACT_TRANSITION 제거 —
         # image-contract-lint 가 도메인 5 + 인프라 1 을 full 6/6 로 강제한다(PR3a 가 남긴 꼬리 종결).
-        # gateway-exposure-lint: 렌더 산출에서 gateway 노출 계약(8080 단일·관리포트 미노출·Secret 미주입·
-        # ConfigMap 배선)을 검사한다 — kustomize 렌더는 이 위반들을 전부 성공으로 통과시킨다.
+        # gateway-exposure-lint: 렌더 산출에서 gateway 노출 계약(8080 단일·관리포트 미노출·ConfigMap 배선)
+        # 을 검사한다 — kustomize 렌더는 이 위반들을 전부 성공으로 통과시킨다.
+        # 구현 ③ PR3d-b: 비밀 계약이 "Secret 미주입(비밀 0)" → "승인된 CSI 마운트 정확히 1개" 로 바뀌었다
+        # (gateway 가 내부 토큰 서명 개인키를 갖게 됨, ADR-0017 D2). k8s Secret 경유는 여전히 금지다.
         run: |
           bash scripts/kustomize-namespace-lint.sh
           bash scripts/image-contract-lint.sh
@@ -68,6 +70,12 @@ jobs:
           # kid 가 아니라 SPKI fingerprint 로 비교해 "같은 키를 다른 kid 로" 우회를 막는다.
           bash scripts/internal-key-ownership-lint.sh
           bash scripts/internal-key-ownership-lint.sh --self-test
+          # 개인키 소유 경계(ADR-0013 D2 · ADR-0017 D2) — 렌더된 **모든 Pod 생성 종류**에서
+          # gateway/user 개인키가 서로의 워크로드나 제3의 Job/CronJob/DaemonSet/Pod 로 새지 않는지.
+          # exposure-lint 가 gateway 한 워크로드의 표면을 보는 반면, 이건 반대로 "누가 그 키를
+          # 가져갔나" 를 본다 — 검사 대상 집합이 다르다.
+          bash scripts/workload-key-ownership-lint.sh
+          bash scripts/workload-key-ownership-lint.sh --self-test
           # settings.gradle include ↔ Dockerfile COPY 정합 — 모듈 추가 시 COPY 누락으로
           # gradle 은 그린인데 이미지 빌드만 깨지는 실패를 build 잡에서 미리 잡는다(#80 회귀).
           bash scripts/dockerfile-module-sync-lint.sh

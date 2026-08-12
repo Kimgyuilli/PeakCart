@@ -58,3 +58,31 @@ diff 를 3 chunk 로 나눠 각각 독립 리뷰했더니, **다른 chunk 에 �
   - self-test 5종(정상 저장소·정상 픽스처·DMS-002·**DMS-003(#80 회귀 재현)**·DMS-004), 진단 ID+횟수 대조
   - CI `build` 잡의 policy lint 단계에 배선 → 이미지 잡보다 먼저·싸게 실패한다
 - **검증**: lint OK(모듈 10개) · self-test 5/5 · **로컬 `docker build` 2종 성공**(gateway·user-service) — 로컬 gradle 그린이 Docker 그린을 보장하지 않으므로 실제 이미지 빌드로 확인했다.
+
+## 2026-08-13 — GW-2 (loop 1) · PR3d-b-1
+
+- 리뷰 run: `work:20260812T143408Z:2031929f-7ee5-483f-b239-ce7c0691c4bd:1` (single, 1,569줄/20파일)
+- 항목: 11건 (P0:0, P1:9, P2:2) — **분할 아티팩트 0건**(single 모드 선택 효과, PR3d-a 의 10건과 대비)
+- 사용자 선택: [2] 전체 반영
+- diff: `.cache/diffs/diff-task-impl3-pr3d-internal-token-1786544743.patch`
+- raw: `.cache/codex-reviews/diff-task-impl3-pr3d-internal-token-1786545618.json`
+
+**전량 실제 결함으로 확인**. 그중 3건이 내가 만든 검증 도구 자체의 false-green이고, 1건은 내 논증 오류다.
+
+| # | 반영 |
+|---|---|
+| 1 | SPC **내용** exact allow-list(WKO-008) — 이름만 승인하면 user SPC 의 `resourceName` 을 gateway secret 으로 바꿔 개인키를 가져가도 통과했다 |
+| 2 | 소유자 판정을 이름 → **(ns, kind, name)** — `Job/gateway`·`Pod/gateway` 우회 차단 |
+| 3 | 개인키 탐지를 이름 정규식 → **base64 decode 후 PEM marker** — `bundle.pem` 에 PKCS#8 담는 우회 차단 |
+| 4 | `csi.nodePublishSecretRef`(**inline volume**) + SPC namespace 검사 — SPC 쪽만 봐서 놓쳤다 |
+| 5 | 서비스별 배선 검사(WKO-010) + JWT 도메인 env 오염(WKO-011: `APP_JWT_RS256_PUBLICKEYS_*`·`SPRING_APPLICATION_JSON`·미승인 ConfigMap) |
+| 6 | **내 논증 오류** — "Pod 200 = 서명 주입" 은 다운스트림이 SIGNED_ONLY 일 때만 참인데 §7 ③ 은 DUAL_ACCEPT 다. 전제를 관측으로 확인(`assert_downstream_signed_only`)하고 아니면 거부하도록 수정 |
+| 7 | 구 RS 조회 0건·실패를 수렴으로 흘리던 `-le 1` → ownerReference 기반 식별 + 판정불가 분리 |
+| 8 | image digest 대조를 실행 중 Pod 의 `containerStatuses.imageID` 로 구현 + `--expect-image` 필수화(`--allow-any-image` 만 예외) |
+| 9 | P10 ② "직접경로 Bearer 거부" 추가 — 밖에서는 NetworkPolicy 로 불가하지만 **gateway Pod 안에서는 가능**(허용된 유일 peer). 내 "불가능" 판단이 틀렸다 |
+| 10 | self-test 판정을 `grep -qF`(존재) → **ID×기대 횟수 multiset**. StatefulSet/ReplicaSet/ephemeral/동명 workload 변이 추가 (workload 12→24, exposure 23→25) |
+| 11 | `APP_INTERNALTOKEN_MODE: SIGNED_ONLY` 를 ConfigMap 에서 제거 — ADR-0007 위반(동작 규약의 프로파일 유출)이고 base 기본값과 중복이라 이득도 없었다 |
+
+**#10 의 부분 적용(명시)**: exposure-lint 의 **레거시 13종**은 substring 대조를 유지했다. 그 기대 문구들은 서로 겹치지 않는 고유 문구라 ID 공유로 인한 false-green 위험이 없고, 전면 ID 부여는 이 PR 범위 밖의 리팩터가 된다. **CSI 계열 12종은 같은 ID 를 공유하므로 전부 횟수 대조**로 전환했다.
+
+**검증**: lint 10종 그린 · self-test 69종(exposure 25 · workload 24 · np 8 · itko 7 · dockerfile 5) · 3 렌더 그린 · 10모듈 빌드+테스트 그린 · 임베디드 python 4블록 compile + 양/음성 케이스.

@@ -9,8 +9,10 @@
 #   같은 키를 *다른 kid* 로 끼워 넣으면 이름 검사는 통과한다. 그래서 참조된 PEM 을 실제로 읽어
 #   SPKI DER SHA-256 fingerprint 로 비교한다(재인코딩·개행 차이에 불변).
 #
-# 범위(PR3d-a): 커밋된 서비스 설정(application*.yml)과 그 설정이 가리키는 PEM.
-#   - k8s ConfigMap override 는 PR3d-b 에서 배선되며, 그때 렌더 기반 검사가 여기 추가된다.
+# 범위: 커밋된 서비스 설정(application*.yml)과 그 설정이 가리키는 PEM — 즉 **이미지 기본값**.
+#   - 렌더된 k8s 매니페스트(ConfigMap override·워크로드 마운트) 기준 검사는 PR3d-b 에서
+#     `scripts/workload-key-ownership-lint.sh` 로 분리했다. 검사 대상(소스 설정 ↔ 클러스터 렌더)이
+#     다르고 전제(kubectl 필요)도 달라 한 스크립트에 섞으면 실패 원인이 흐려진다.
 #   - 부팅된 Spring Environment 기준 검사는 5서비스 보안 통합테스트(keyDomainsAreSeparated)가 담당한다.
 #
 # 사용: bash scripts/internal-key-ownership-lint.sh [--self-test]

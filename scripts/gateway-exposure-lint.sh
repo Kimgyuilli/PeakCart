@@ -208,21 +208,119 @@ for c in containers:
         if http.get("path") != expected_path:
             bad(f'{c.get("name")}: {probe} path={http.get("path")} (기대 {expected_path})')
 
-# --- Secret 참조 전무 (PodSpec 전체) ---
+# --- 비밀 계약: 승인된 CSI 마운트 정확히 1개 (ADR-0017 D2 · 구현 ③ PR3d-b) ---
+#
+# PR3b 의 계약은 "gateway 는 비밀을 소비하지 않는다(Secret 참조 0)" 였다. PR3d-b 에서 gateway 가
+# 내부 토큰 **서명 개인키**를 갖게 되면서 계약이 바뀐다 — 비밀은 정확히 하나, 그것도 CSI 로만.
+#
+# "승인된 provider 를 쓰는가" 까지만 보면 통과시키는 우회가 많다(계획 loop2 #4). 그래서 driver·SPC
+# 이름·provider·GCP resource ID·파일 alias·mountPath·readOnly 를 **하나의 exact allow-list** 로 묶고
+# 계수 단위를 SPC 1 ↔ volume 1 ↔ volumeMount 1 관계로 강제한다(loop3 #4) — 같은 volume 을 여러
+# 경로/컨테이너에 mount 하면 read-only tmpfs 라도 개인키 사본 표면이 늘어난다.
+APPROVED_CSI = {
+    "driver": "secrets-store.csi.k8s.io",
+    "spc": "gateway-internal-signing-key",
+    "namespace": "peekcart",
+    "provider": "gcp",
+    "resource": "projects/PROJECT_ID_PLACEHOLDER/secrets/peekcart-gateway-internal-signing-key/versions/latest",
+    "alias": "gateway-internal-private.pem",
+    "mount_path": "/etc/peekcart/gateway-keys",
+}
+
+# k8s Secret 경유는 여전히 전면 금지다 — CSI 를 도입한 이유 자체가 etcd 를 피하는 것이다.
 for c in containers + init_containers + ephemeral:
     for ef in (c.get("envFrom") or []):
         if ef.get("secretRef"):
-            bad(f'{c.get("name")}: envFrom.secretRef={ef["secretRef"].get("name")} — gateway 는 비밀을 소비하지 않는다')
+            bad(f'[GWX-CSI-001] {c.get("name")}: envFrom.secretRef={ef["secretRef"].get("name")}'
+                ' — 개인키는 CSI 로만 투영한다(k8s Secret 금지)')
     for e in (c.get("env") or []):
         ref = ((e.get("valueFrom") or {}).get("secretKeyRef") or {})
         if ref:
-            bad(f'{c.get("name")}: env {e.get("name")} 이 secretKeyRef({ref.get("name")}) 주입 — 금지')
+            bad(f'[GWX-CSI-001] {c.get("name")}: env {e.get("name")} 이 secretKeyRef({ref.get("name")}) 주입 — 금지')
 for vol in (pod.get("volumes") or []):
     if vol.get("secret"):
-        bad(f'volume {vol.get("name")} 이 Secret 마운트 — 금지')
+        bad(f'[GWX-CSI-001] volume {vol.get("name")} 이 Secret 마운트 — 금지')
     for src in ((vol.get("projected") or {}).get("sources") or []):
         if src.get("secret"):
-            bad(f'volume {vol.get("name")} 의 projected source 가 Secret — 금지')
+            bad(f'[GWX-CSI-001] volume {vol.get("name")} 의 projected source 가 Secret — 금지')
+
+# (a) CSI volume 은 정확히 1개이고 allow-list 와 정확히 일치해야 한다.
+csi_vols = [vol for vol in (pod.get("volumes") or []) if vol.get("csi")]
+if len(csi_vols) != 1:
+    bad(f"[GWX-CSI-002] gateway PodSpec 의 CSI volume 이 {len(csi_vols)}개 — 승인된 개인키 마운트는 정확히 1개다")
+csi_vol_names = set()
+for vol in csi_vols:
+    csi = vol["csi"]
+    csi_vol_names.add(vol.get("name"))
+    if csi.get("driver") != APPROVED_CSI["driver"]:
+        bad(f'[GWX-CSI-003] volume {vol.get("name")}: driver={csi.get("driver")}'
+            f' (승인 {APPROVED_CSI["driver"]}) — 미승인 provider 우회')
+    if csi.get("readOnly") is not True:
+        bad(f'[GWX-CSI-003] volume {vol.get("name")}: csi.readOnly 가 true 가 아님 — 개인키 경로가 쓰기 가능하다')
+    spc = (csi.get("volumeAttributes") or {}).get("secretProviderClass")
+    if spc != APPROVED_CSI["spc"]:
+        bad(f'[GWX-CSI-003] volume {vol.get("name")}: secretProviderClass={spc}'
+            f' (승인 {APPROVED_CSI["spc"]})')
+    # nodePublishSecretRef 는 SPC 뿐 아니라 **inline CSI volume** 에도 달 수 있다 — SPC 쪽만 보면
+    # 정적 자격증명 Secret 참조가 그대로 통과한다.
+    if csi.get("nodePublishSecretRef"):
+        bad(f'[GWX-CSI-003] volume {vol.get("name")}: csi.nodePublishSecretRef'
+            f'({csi["nodePublishSecretRef"].get("name")}) — 노드 인증은 Workload Identity 로 한다')
+
+# (b) 그 volume 을 mount 하는 지점도 정확히 1개 — 컨테이너/경로가 늘면 사본 표면이 는다.
+mounts = [
+    (c.get("name"), m)
+    for c in containers + init_containers + ephemeral
+    for m in (c.get("volumeMounts") or [])
+    if m.get("name") in csi_vol_names
+]
+if len(mounts) != 1:
+    bad(f"[GWX-CSI-004] 개인키 CSI volume 의 volumeMount 가 {len(mounts)}개 — 정확히 1개여야 한다"
+        " (여러 컨테이너/경로 마운트 금지)")
+for cname, m in mounts:
+    if m.get("mountPath") != APPROVED_CSI["mount_path"]:
+        bad(f'[GWX-CSI-004] {cname}: 개인키 mountPath={m.get("mountPath")}'
+            f' (승인 {APPROVED_CSI["mount_path"]}) — application-k8s.yml 의 경로와 어긋나면 부팅이 죽는다')
+    if m.get("readOnly") is not True:
+        bad(f'[GWX-CSI-004] {cname}: volumeMount.readOnly 가 true 가 아님'
+            " — volume 쪽만 readOnly 면 컨테이너에서 쓰기 가능한 경로가 남는다")
+
+# (c) SecretProviderClass 자체 — secretObjects/nodePublishSecretRef 는 CSI 도입 취지를 되돌린다.
+spcs = [d for d in docs
+        if d.get("kind") == "SecretProviderClass"
+        and (d.get("metadata") or {}).get("name") == APPROVED_CSI["spc"]]
+if len(spcs) != 1:
+    bad(f'[GWX-CSI-005] SecretProviderClass "{APPROVED_CSI["spc"]}" 가 {len(spcs)}개 (정확히 1개)')
+for spc_doc in spcs:
+    sspec = spc_doc.get("spec") or {}
+    # namespace 까지 고정한다 — 다른 NS 의 동명 SPC 는 Pod 에서 해석되지 않아 마운트가 조용히 비고,
+    # 이름만 보는 검사는 그걸 정상으로 통과시킨다.
+    spc_ns = (spc_doc.get("metadata") or {}).get("namespace")
+    if spc_ns != APPROVED_CSI["namespace"]:
+        bad(f'[GWX-CSI-005] SPC namespace={spc_ns} (승인 {APPROVED_CSI["namespace"]})')
+    if sspec.get("provider") != APPROVED_CSI["provider"]:
+        bad(f'[GWX-CSI-005] SPC provider={sspec.get("provider")} (승인 {APPROVED_CSI["provider"]})')
+    if sspec.get("secretObjects"):
+        bad("[GWX-CSI-005] SPC 에 secretObjects 가 있다 — CSI 가 도로 k8s Secret 을 만들어 etcd 회피가 무의미해진다")
+    if (sspec.get("parameters") or {}).get("nodePublishSecretRef"):
+        bad("[GWX-CSI-005] SPC 에 nodePublishSecretRef 가 있다 — 노드 인증은 Workload Identity 로 한다")
+    raw = (sspec.get("parameters") or {}).get("secrets") or ""
+    try:
+        entries = yaml.safe_load(raw) or []
+    except yaml.YAMLError:
+        entries = None
+    if not isinstance(entries, list):
+        bad(f"[GWX-CSI-005] SPC parameters.secrets 를 목록으로 파싱할 수 없다: {raw!r}")
+    elif len(entries) != 1:
+        bad(f"[GWX-CSI-005] SPC parameters.secrets entry 가 {len(entries)}개 — 개인키 1개만 승인된다")
+    else:
+        entry = entries[0] or {}
+        if entry.get("resourceName") != APPROVED_CSI["resource"]:
+            bad(f'[GWX-CSI-005] SPC resourceName={entry.get("resourceName")}'
+                f' (승인 {APPROVED_CSI["resource"]}) — 다른 secret 을 끌어오는 우회')
+        if entry.get("path") != APPROVED_CSI["alias"]:
+            bad(f'[GWX-CSI-005] SPC path={entry.get("path")} (승인 {APPROVED_CSI["alias"]})'
+                " — 파일 alias 가 바뀌면 마운트 경로는 같아도 키 파일을 못 찾는다")
 if pod.get("automountServiceAccountToken") is not False:
     bad("automountServiceAccountToken 이 false 가 아님 — gateway 는 k8s API 를 쓰지 않는다")
 
@@ -341,6 +439,50 @@ elif mut == "bare_pod":
                      "labels": {"app": "gateway"}},
         "spec": {"hostNetwork": True, "containers": [{"name": "dbg", "image": "busybox"}]},
     })
+elif mut in ("csi_zero", "csi_two", "wrong_spc", "csi_writable",
+             "wrong_mount_path", "mount_writable", "mount_twice",
+             "spc_secret_objects", "spc_two_entries", "spc_wrong_resource",
+             "inline_node_publish", "spc_wrong_namespace"):
+    # --- 개인키 CSI allow-list 우회 10종 (PR3d-b P7) ---
+    csi_vol = next(v for v in pod["volumes"] if v.get("csi"))
+    mount = next(m for m in c["volumeMounts"] if m["name"] == csi_vol["name"])
+    spc = next(d for d in docs if d["kind"] == "SecretProviderClass"
+               and d["metadata"]["name"] == "gateway-internal-signing-key")
+    if mut == "csi_zero":
+        pod["volumes"] = [v for v in pod["volumes"] if not v.get("csi")]
+    elif mut == "csi_two":
+        dup = yaml.safe_load(yaml.safe_dump(csi_vol))
+        dup["name"] = csi_vol["name"] + "-2"
+        pod["volumes"].append(dup)
+    elif mut == "wrong_spc":
+        csi_vol["csi"]["volumeAttributes"]["secretProviderClass"] = "some-other-spc"
+    elif mut == "csi_writable":
+        csi_vol["csi"]["readOnly"] = False
+    elif mut == "wrong_mount_path":
+        mount["mountPath"] = "/tmp/keys"
+    elif mut == "mount_writable":
+        mount.pop("readOnly", None)
+    elif mut == "mount_twice":
+        # 같은 컨테이너에 같은 volume 을 두 경로로 — "컨테이너 1개" 검사에 걸리지 않는 우회.
+        extra = yaml.safe_load(yaml.safe_dump(mount))
+        extra["mountPath"] = "/etc/peekcart/gateway-keys-copy"
+        c["volumeMounts"].append(extra)
+    elif mut == "spc_secret_objects":
+        spc["spec"]["secretObjects"] = [
+            {"secretName": "gateway-key-sync", "type": "Opaque",
+             "data": [{"objectName": "gateway-internal-private.pem", "key": "key"}]}]
+    elif mut == "spc_two_entries":
+        entries = yaml.safe_load(spc["spec"]["parameters"]["secrets"])
+        entries.append({"resourceName": "projects/x/secrets/other/versions/latest", "path": "other.pem"})
+        spc["spec"]["parameters"]["secrets"] = yaml.safe_dump(entries)
+    elif mut == "spc_wrong_resource":
+        entries = yaml.safe_load(spc["spec"]["parameters"]["secrets"])
+        entries[0]["resourceName"] = "projects/x/secrets/peekcart-user-jwt-signing-key/versions/latest"
+        spc["spec"]["parameters"]["secrets"] = yaml.safe_dump(entries)
+    elif mut == "inline_node_publish":
+        csi_vol["csi"]["nodePublishSecretRef"] = {"name": "static-creds"}
+    elif mut == "spc_wrong_namespace":
+        spc["metadata"]["namespace"] = "default"
 elif mut == "label_drift":
     # 세 맵이 서로 어긋나지만 부분집합 판정만으로는 통과하는 조합(3자 정확 일치 검사 대상).
     dep["spec"]["template"]["metadata"]["labels"]["surface"] = "public"
@@ -369,10 +511,31 @@ PY
         [cronjob_host_port]="리소스가 2개"
         [bare_pod]="리소스가 2개"
         [label_drift]="정확히 일치해야 함"
+        # 개인키 CSI allow-list (PR3d-b) — 진단 ID 로 대조한다. 조작 하나가 여러 검사를 동시에
+        # 건드리는 경우(예: csi_zero 는 volume 과 mount 를 함께 깬다)에도 "의도한 검사"가 살아
+        # 있는지 증명되려면 문구가 아니라 ID 여야 한다(계획 loop3 #6).
+        # CSI 계열은 여러 조작이 **같은 ID** 를 공유하므로 존재 여부만 보면 분기 하나가 죽어도
+        # 다른 분기가 내는 같은 ID 로 그린이 된다 → "ID:횟수" 형식으로 정확히 대조한다.
+        # (위 레거시 항목들은 서로 겹치지 않는 고유 문구라 substring 대조를 유지한다.)
+        [csi_zero]="GWX-CSI-002:1 GWX-CSI-004:1"
+        [csi_two]="GWX-CSI-002:1"
+        [wrong_spc]="GWX-CSI-003:1"
+        [csi_writable]="GWX-CSI-003:1"
+        [wrong_mount_path]="GWX-CSI-004:1"
+        [mount_writable]="GWX-CSI-004:1"
+        [mount_twice]="GWX-CSI-004:2"
+        [spc_secret_objects]="GWX-CSI-005:1"
+        [spc_two_entries]="GWX-CSI-005:1"
+        [spc_wrong_resource]="GWX-CSI-005:1"
+        [inline_node_publish]="GWX-CSI-003:1"
+        [spc_wrong_namespace]="GWX-CSI-005:1"
     )
     MUTATIONS=(target_port_8081 selector_mismatch two_containers second_service second_workload
                host_port init_secret container_secret projected_secret no_configmap
-               cronjob_host_port bare_pod label_drift)
+               cronjob_host_port bare_pod label_drift
+               csi_zero csi_two wrong_spc csi_writable wrong_mount_path mount_writable
+               mount_twice spc_secret_objects spc_two_entries spc_wrong_resource
+               inline_node_publish spc_wrong_namespace)
 
     # baseline: 무변조 입력은 반드시 통과해야 한다(전부 실패하는 lint 는 아무것도 증명 못 한다).
     if ! OVERLAY_NAME="gke" OVERLAY_OUT="$TMP/base.yml" python3 "$CHECKER" >/dev/null 2>&1; then
@@ -387,9 +550,21 @@ PY
         if OVERLAY_NAME="gke" OVERLAY_OUT="$TMP/mutated.yml" python3 "$CHECKER" >/dev/null 2>"$TMP/diag"; then
             echo "$TAG self-test FAILED — 조작 입력 '$m' 을 통과시킴(vacuous green)" >&2
             failures=$((failures + 1))
+            continue
+        fi
+        # 기대값이 "ID:횟수" 형식이면 정확 횟수로, 아니면(레거시 고유 문구) substring 으로 대조한다.
+        mismatch=""
+        if [[ "${EXPECT[$m]}" == GWX-* ]]; then
+            for spec in ${EXPECT[$m]}; do
+                want_id="${spec%%:*}"; want_n="${spec##*:}"
+                got_n=$(grep -c "\[${want_id}\]" "$TMP/diag" || true)
+                [ "$got_n" = "$want_n" ] || mismatch="$mismatch ${want_id}(기대 ${want_n}, 실제 ${got_n})"
+            done
         elif ! grep -qF "${EXPECT[$m]}" "$TMP/diag"; then
-            echo "$TAG self-test FAILED — '$m' 이 실패하긴 했으나 의도한 검사가 아니다" >&2
-            echo "  기대 진단: ${EXPECT[$m]}" >&2
+            mismatch=" 기대 문구 '${EXPECT[$m]}' 부재"
+        fi
+        if [ -n "$mismatch" ]; then
+            echo "$TAG self-test FAILED — '$m' 의 진단이 기대와 다르다:$mismatch" >&2
             sed 's/^/  실제: /' "$TMP/diag" >&2
             failures=$((failures + 1))
         else

@@ -38,8 +38,20 @@ spec:
       # Kubernetes API 를 호출하지 않는다 — 토큰 자동 마운트 불필요.
       automountServiceAccountToken: false
       # initContainers 없음(계약): gateway 는 마이그레이션·비밀 복사 등 선행 작업이 없다.
-      # RS256 개인키는 user-service Pod 전용이고(ADR-0013 D2) gateway 는 공개키를 JWKS 로만 받으므로
-      # 이 Pod 에는 Secret 참조가 하나도 없어야 한다(scripts/gateway-exposure-lint.sh 가 강제).
+      #
+      # 비밀 계약(scripts/gateway-exposure-lint.sh 가 강제) — PR3d-b 에서 변경됨:
+      #   구: "Secret 참조 0" (gateway 가 소비하는 비밀이 없었다)
+      #   신: "승인된 CSI 마운트 **정확히 1개**" — 내부 토큰 서명 개인키(ADR-0017 D2).
+      # k8s Secret(`secretKeyRef`/`secret:` volume/projected Secret)·env 주입은 여전히 **금지**다.
+      # 사용자 access token 개인키는 user-service Pod 전용이고(ADR-0013 D2) 여기 오면 안 된다 —
+      # 두 키의 배타적 소유를 scripts/internal-key-ownership-lint.sh 가 전 workload 에서 검사한다.
+      volumes:
+        - name: internal-signing-key
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: gateway-internal-signing-key
       containers:
         - name: gateway
           image: ghcr.io/kimgyuilli/peekcart-gateway:latest
@@ -51,6 +63,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: gateway-config
+          volumeMounts:
+            # readOnly 는 volume·volumeMount 양쪽에 있어야 한다 — 한쪽만이면 쓰기 가능한 경로가 남는다.
+            - name: internal-signing-key
+              mountPath: /etc/peekcart/gateway-keys
+              readOnly: true
           resources:
             requests:
               cpu: 250m

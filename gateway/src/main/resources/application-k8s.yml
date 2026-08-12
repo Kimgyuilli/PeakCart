@@ -26,5 +26,8 @@ app:
     # k8s Secret·env 를 경유하지 않는다(k8s/base/services/gateway/secretproviderclass.yml).
     # 마운트 경로/파일명은 SPC 의 `path:` 와 Deployment 의 `mountPath` 가 함께 결정한다 —
     # 셋 중 하나만 바뀌면 부팅 시 fail-fast 로 드러난다(InternalTokenIssuer 개인키 로딩).
+    # env override seam 을 유지한다(PR3d-a 선례): 기본값은 k8s 의 CSI 마운트 경로이되,
+    # 컨테이너 스모크처럼 CSI 가 없는 환경은 GATEWAY_INTERNAL_PRIVATE_KEY_LOCATION 으로 갈아끼운다.
+    # 하드코딩하면 프로파일이 base 의 ${...} 치환을 덮어써서 주입이 무시되고 부팅이 fail-fast 한다.
     internal-token:
-      private-key-location: file:/etc/peekcart/gateway-keys/gateway-internal-private.pem
+      private-key-location: ${GATEWAY_INTERNAL_PRIVATE_KEY_LOCATION:file:/etc/peekcart/gateway-keys/gateway-internal-private.pem}

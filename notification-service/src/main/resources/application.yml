@@ -45,17 +45,15 @@ springdoc:
     path: /api-docs
 
 app:
-  jwt:
-    secret: ${JWT_SECRET:peekcart-secret-key-must-be-at-least-256-bits-long-xxxxxxxxxxxxxxx}
-    access-token-expiry: 1800000    # 30분 (ms) — 검증 전용 서비스이나 단일 계약(JwtAuthProperties) 바인딩
-    refresh-token-expiry: 604800000 # 7일 (ms)
-    # RS256 검증 계약 (ADR-0013 D1) — 검증 전용(개인키 없음). k8s 는 공개키 파일 마운트 오버라이드(구현 ③ PR3).
-    rs256:
-      active-kid: peekcart-dev-2026
-      hs256-fallback-enabled: false
-      public-keys:
-        - kid: peekcart-dev-2026
-          location: classpath:keys/dev-jwt-public.pem
+  # Gateway 서명 내부 토큰 검증 (ADR-0017 D3 · 구현 ③ PR3d).
+  # 공개키는 비밀이 아니므로 이미지에 베이크한다(운영 kid 교체는 k8s ConfigMap — PR3d-b).
+  # [중요] gateway kid 를 app.jwt.rs256.public-keys 에 넣지 않는다 — User JWKS 가 레지스트리를 전량
+  # 게시하므로 내부 신뢰 앵커가 외부에 노출된다(ADR-0017 D3, internal-key-ownership-lint 로 강제).
+  internal-token:
+    mode: SIGNED_ONLY
+    public-keys:
+      - kid: peekcart-gateway-dev-2026
+        location: classpath:keys/dev-gateway-internal-public.pem
   # processed_events 멱등성 보존 정책 (ADR-0012 D5 · 구현 ② PR3) — 동작 정책이므로 base 소유(ADR-0007).
   # notification 은 소비 전용(outbox 미소유) → outbox retention 없음.
   idempotency:

@@ -37,3 +37,12 @@ diff 를 3 chunk 로 나눠 각각 독립 리뷰했더니, **다른 chunk 에 �
 - 검증: 10모듈 `./gradlew build` 그린 · 가드 5종 그린 · `internal-key-ownership-lint` self-test 7/7
 - diff: `.cache/diffs/diff-task-impl3-pr3d-internal-token-1786473047.patch`
 - raw: `.cache/codex-reviews/diff-task-impl3-pr3d-internal-token-17864762{57,584}-c{1,2}.json` · `-1786477192-c3.json`
+
+## 2026-08-12 — /ship --execute (PR #80)
+
+- GS-1 consistency precheck `ok` (자동 통과) · GS-2 partition 승인 · GS-3 PR 본문 승인
+- 5 커밋: `feat(gateway)` / `feat(auth)` / `test(auth)` / `chore(ci)` / `docs(plan)`
+- **커밋 재분할 1회**: 최초 p1 이 `internal-token-contract/src/testFixtures/**` 7개를 흡수해 src↔test 혼합 → push 전 `git reset --soft main` 후 계약 모듈 testFixtures 를 p3 으로 이동해 재커밋(분류 순도 확인: p1 src 10 / p2 src 27 / p3 test 29+build 1 / p4 chore 3 / p5 docs 2)
+- push `origin/feat/impl3-pr3d-a-internal-token` · PR [#80](https://github.com/Kimgyuilli/PeakCart/pull/80) (base main)
+- `/done`: TASKS ③ PR3d-a ✅[#80] 반영(③ 는 PR3d-b/PR4 남아 `🔄` 유지) · PHASE4 이력 추가
+- **Layer 1(02 / 04 §10-2) 동기화는 PR3d-b 일괄 반영으로 이연** — 사용자 결정

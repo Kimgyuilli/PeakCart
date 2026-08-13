@@ -38,7 +38,7 @@ public class PaymentFixture {
     /** 재고 예약이 확정되어 결제 진행 가능한(reserve→pay 게이트 통과) PENDING 결제. */
     public static Payment readyPaymentWithId() {
         Payment payment = pendingPaymentWithId();
-        payment.markReadyForPayment();
+        payment.markReadyForPayment(null);
         return payment;
     }
 

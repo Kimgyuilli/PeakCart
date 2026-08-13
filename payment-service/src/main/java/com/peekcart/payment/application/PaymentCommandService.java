@@ -11,6 +11,7 @@ import com.peekcart.payment.infrastructure.toss.TossConfirmResponse;
 import com.peekcart.payment.infrastructure.toss.TossPaymentClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,12 +23,14 @@ import java.time.OffsetDateTime;
 @Slf4j
 @Service
 @Transactional
+@EnableConfigurationProperties(PaymentApprovalProperties.class)
 @RequiredArgsConstructor
 public class PaymentCommandService {
 
     private final PaymentRepository paymentRepository;
     private final TossPaymentClient tossPaymentClient;
     private final PaymentOutboxEventPublisher outboxEventPublisher;
+    private final PaymentApprovalProperties approvalProperties;
 
     /**
      * 결제를 승인한다. 소유자·예약 확정·취소 게이트는 모두 payment-로컬 상태로 검증하고
@@ -42,7 +45,7 @@ public class PaymentCommandService {
 
         payment.verifyOwner(userId);
         payment.validateAmount(command.amount());
-        payment.ensureConfirmable();
+        payment.ensureConfirmable(approvalProperties.getLeaseApprovalMargin());
         outboxEventPublisher.publishPaymentRequested(payment, userId);
         payment.assignPaymentKey(command.paymentKey());
 

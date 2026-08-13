@@ -65,7 +65,7 @@ class OrderEventConsumerTest {
     @DisplayName("payment.requested: 예약 확정된 PENDING → PAYMENT_REQUESTED 전이")
     void paymentRequested_reservationConfirmed_transitions() {
         Order order = OrderFixture.orderWithId();
-        order.confirmReservation();
+        order.confirmReservation(null);
         given(orderRepository.findById(OrderFixture.DEFAULT_ORDER_ID)).willReturn(Optional.of(order));
         stubPaymentRequested();
 

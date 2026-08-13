@@ -55,6 +55,15 @@ public class Order {
     @Column(name = "reservation_confirmed_at")
     private LocalDateTime reservationConfirmedAt;
 
+    /**
+     * Product 가 부여한 재고 예약 lease 만료 시각 (stock.reservation.result, ADR-0012 D3).
+     * 예약 확정 후 결제를 시작하지 않은 PENDING 주문의 수명 상한이다 — Order 가 이 시각을 근거로
+     * 스스로 취소해야 Product sweeper(유예 후 회수)가 살아있는 주문의 재고를 뺏지 않는다.
+     * null = lease 미수신(구 메시지) → 만료 판정에서 제외한다.
+     */
+    @Column(name = "reservation_expires_at")
+    private LocalDateTime reservationExpiresAt;
+
     @Column(name = "payment_requested_at")
     private LocalDateTime paymentRequestedAt;
 
@@ -67,6 +76,14 @@ public class Order {
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
+
+    /**
+     * 상태 전이 동시성 차단 (L-013, 계획 P2). {@code payment.completed} 소비와 타임아웃 취소가
+     * 같은 스냅샷을 읽고 각자 커밋하면 나중 커밋이 앞 커밋을 조용히 덮는다(실측: 계획 §5 P1).
+     * 전이 규칙은 트랜잭션 <i>스냅샷</i> 기준이라 가드가 되지 못하므로 버전으로 막는다.
+     */
+    @Version
+    private long version;
 
     private Order(Long userId, String orderNumber, String receiverName, String phone,
                   String zipcode, String address, List<OrderItemData> itemDataList) {
@@ -113,9 +130,13 @@ public class Order {
      * 재고 예약 확정을 기록한다 (stock.reservation.result reserved=true).
      * 예약 미확정 PENDING 주문의 타임아웃 수렴에서 조기 취소를 막는 표식이다.
      * payment.requested 가 선도착해 pending marker 가 켜져 있으면 여기서 PAYMENT_REQUESTED 로 수렴한다.
+     *
+     * @param reservationExpiresAt Product 가 부여한 lease 만료 시각. null 이면 lease 미수신(구 메시지)으로
+     *                             간주해 만료 판정 대상에서 제외한다(하위 호환)
      */
-    public void confirmReservation() {
+    public void confirmReservation(LocalDateTime reservationExpiresAt) {
         this.reservationConfirmedAt = LocalDateTime.now();
+        this.reservationExpiresAt = reservationExpiresAt;
         if (this.paymentRequestedPending && this.status == OrderStatus.PENDING) {
             this.paymentRequestedPending = false;
             markPaymentRequested();

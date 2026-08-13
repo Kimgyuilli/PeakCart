@@ -7,6 +7,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -43,6 +44,14 @@ public class Payment {
     /** reserve→pay 게이트: stock.reservation.result(reserved=true) 수신 시 true (ADR-0012 §D3). */
     @Column(name = "ready_for_payment", nullable = false)
     private boolean readyForPayment;
+
+    /**
+     * 공유받은 재고 예약 lease 만료 시각 (계획 P4). 이 시각 이후 승인은 거부한다 —
+     * Product sweeper 가 만료 예약을 회수한 뒤에도 승인이 통과하면 재판매된 재고와 이중 판매가 된다.
+     * null = lease 미수신(구 메시지) → 만료 판정하지 않는다(하위 호환).
+     */
+    @Column(name = "reservation_expires_at")
+    private LocalDateTime reservationExpiresAt;
 
     @Column
     private String method;
@@ -132,22 +141,40 @@ public class Payment {
         }
     }
 
-    /** 재고 예약 확정(reserved=true)을 로컬에 반영한다 (reserve→pay 게이트, ADR-0012 §D3). */
-    public void markReadyForPayment() {
+    /**
+     * 재고 예약 확정(reserved=true)을 로컬에 반영한다 (reserve→pay 게이트, ADR-0012 §D3).
+     *
+     * @param reservationExpiresAt 공유받은 lease 만료 시각. null 이면 만료 판정을 하지 않는다(구 메시지)
+     */
+    public void markReadyForPayment(LocalDateTime reservationExpiresAt) {
         this.readyForPayment = true;
+        this.reservationExpiresAt = reservationExpiresAt;
     }
 
     /**
      * 결제 진행 가능 여부를 검증한다 (동기 {@code markPaymentRequested} 게이트의 payment-로컬 복원).
      *
-     * @throws PaymentException 취소/종료 상태면 {@code PAY-009}, 예약 미확정이면 {@code PAY-008}
+     * <p><b>이 검사는 fence 가 아니다.</b> 승인은 이 검사 이후 같은 트랜잭션에서 PG 를 호출하므로, 검사와
+     * 승인 성공 사이에 Order 의 lease 만료 취소({@code order.cancelled} → Product release → 재고 복구 →
+     * 재판매)가 끼어들 수 있다. 그래서 "아직 안 만료"가 아니라 <b>남은 lease 가 승인 소요를 덮을 만큼
+     * 넉넉한지</b>를 본다({@code approvalMargin}). 이는 경합 창을 마진 이내로 <b>줄이는</b> 조치이지
+     * 제거하는 조치가 아니다 — 진짜 fence(예약을 승인 전용 상태로 CAS 전이) 는 saga 프로토콜 변경이라
+     * 별도 ADR 로 다룬다(계획 §2.6 잔여 위험 R-1).
+     *
+     * @param approvalMargin PG 승인에 허용하는 최대 소요 시간. 남은 lease 가 이보다 짧으면 시작하지 않는다
+     * @throws PaymentException 취소/종료 상태면 {@code PAY-009}, 예약 미확정이면 {@code PAY-008},
+     *                          lease 가 만료됐거나 마진보다 적게 남았으면 {@code PAY-010}
      */
-    public void ensureConfirmable() {
+    public void ensureConfirmable(Duration approvalMargin) {
         if (this.status != PaymentStatus.PENDING) {
             throw new PaymentException(ErrorCode.PAY_009);
         }
         if (!this.readyForPayment) {
             throw new PaymentException(ErrorCode.PAY_008);
+        }
+        if (this.reservationExpiresAt != null
+                && LocalDateTime.now().plus(approvalMargin).isAfter(this.reservationExpiresAt)) {
+            throw new PaymentException(ErrorCode.PAY_010);
         }
     }
 

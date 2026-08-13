@@ -77,6 +77,12 @@
 - **Check**: (1) sweep 패턴이 **escaped quote** 를 매치하는가 — JSON(`grafana-*.json`)·ConfigMap 내장 yaml(`data["alerts.yaml"]`)은 `application=\"peekcart\"` 로 저장돼 literal `application="peekcart"` grep 이 **0 을 반환해도 실제로는 잔존**(false-green). `grep -E 'key=\\?"val"'` 로 escaped/unescaped 양쪽 매치. (2) 치환 대상 라벨이 **하나가 아니다** — `application` 만 sweep 하면 `service="peekcart"`·`namespace="peekcart"` 형제 라벨 잔존을 놓침. 완료 조건이 "application/service 고정값 0" 이면 sweep 도 `(application|service)` 둘 다 봐야 함. (3) **브랜드 문자열 제외** — uid/tags 의 `peekcart-high-error-rate` 같은 네이밍은 라벨 값이 아니므로 sweep 매치에서 배제(`="peekcart"` 형태만 대상).
 - **출처**: task-impl1-pr3c-observability — 모계획 PR3c 검증이 `grep 'application="peekcart"' → 0` 을 제시했으나 alert/dashboard 는 `application=\"peekcart\"`(escaped) 12+회 + `service=\"peekcart\"`(`grafana-alerts.yml:101,128`) 잔존. literal grep 이 false-green. Codex GP-2 #5 가 `service` 누락 지적 → sweep 을 `(application|service)` + escaped 패턴으로 확장.
 
+## B12 — 진입 시점 게이트 검사를 "경합 차단"으로 착각: 검사와 부작용 사이가 열려 있다
+- **Trigger**: "X 가 유효한지 확인하고 → 외부 호출/부작용" 형태의 코드에서, X 의 유효성을 **다른 프로세스가 동시에 무효화**할 수 있을 때(만료·취소·회수·잔액 등). 특히 외부 호출(PG/외부 API)이 **같은 트랜잭션 안**에 있고, 그 사이 상대 도메인은 아직 옛 상태를 보고 있는 경우.
+- **Check**: 게이트 검사를 넣었다면 **"검사 통과 시각 ~ 부작용 확정 시각" 구간에 상대가 무엇을 할 수 있나"** 를 한 줄로 적어라. 그 구간에 상대의 회수/취소가 가능하면 그 검사는 **fence 가 아니라 창 축소**다. 계획서에 "닫혔다"로 쓰지 말고 (a) 남은 창의 크기 (b) 창이 열렸을 때의 결과 (c) 진짜 fence 의 형태(공유 자원을 **배타 상태로 CAS 전이** 후 부작용) 를 명시. 상태 전이 순서에 의존하는 게이트는 특히 위험 — 비동기 전이(outbox→poller→Kafka)면 게이트 대상은 검사 시점에 **아직 옛 상태**다.
+- **부수 함정**: 이런 완화를 넣으면 테스트도 "만료됨 → 거부 / 안 만료 → 통과" 만 짜게 되는데, 이 테스트는 **경합 경로에서도 통과**한다(순서를 주입하지 않으므로). 완화의 검증은 "무엇이 통과/거부를 가르는가"(마진 같은 변수)의 **대조**여야 하고, 경합 자체의 검증은 크로스서비스 E2E 로 명시 이관하라.
+- **출처**: task-impl4-choreography-saga ④-a — 예약 lease 만료 후 결제 승인을 막으려 `ensureConfirmable()` 에 만료 검사를 넣고 계획서에 "oversell 이 닫혔다"고 기록. 실제로는 `confirmPayment` 가 검사 후 **같은 트랜잭션에서** PG 를 호출하고, 그 시점 주문은 `payment.requested` 가 outbox→poller→Kafka 를 거치기 전이라 여전히 `PENDING` → 만료 취소 잡이 취소 → release → 재고 복구 → 재판매 → 승인 성공(과금+이중판매)이 성립. Codex diff 리뷰 P0 가 지적. 승인 마진으로 창만 줄이고 fence 는 ADR 선행 별건으로 분리(계획 §2.6 R-1).
+
 ---
 
 ## 자동 검사로 승격된 항목 (참고 — 더 이상 수동 점검 불필요)

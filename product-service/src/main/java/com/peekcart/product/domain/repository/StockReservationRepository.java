@@ -2,6 +2,8 @@ package com.peekcart.product.domain.repository;
 
 import com.peekcart.product.domain.model.StockReservation;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -35,4 +37,13 @@ public interface StockReservationRepository {
      * @return 마킹된 행 수 (0 또는 1; 1 = 최초 보상)
      */
     int markCompensatedIfAbsent(Long orderId);
+
+    /**
+     * lease 가 만료된 {@code RESERVED} 예약을 조회한다 (계획 P4 sweeper).
+     * {@code expiresAt} 이 null 인 행(lease 미부여 기존 행)은 제외한다 — 회수 근거가 없으므로 안전측.
+     *
+     * @param cutoff  이 시각 이전에 만료된 예약만 대상 (= now - sweeperGrace)
+     * @param limit   1회 실행당 회수 상한
+     */
+    List<StockReservation> findExpiredReserved(LocalDateTime cutoff, int limit);
 }

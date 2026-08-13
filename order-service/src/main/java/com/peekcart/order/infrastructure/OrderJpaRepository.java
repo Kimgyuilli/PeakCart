@@ -23,4 +23,8 @@ public interface OrderJpaRepository extends JpaRepository<Order, Long> {
     @Query("SELECT o FROM Order o WHERE o.status = com.peekcart.order.domain.model.OrderStatus.PENDING "
             + "AND o.reservationConfirmedAt IS NULL AND o.orderedAt < :cutoff")
     List<Order> findUnconfirmedReservationBefore(@Param("cutoff") LocalDateTime cutoff);
+
+    @Query("SELECT o FROM Order o WHERE o.status = com.peekcart.order.domain.model.OrderStatus.PENDING "
+            + "AND o.reservationExpiresAt IS NOT NULL AND o.reservationExpiresAt < :now")
+    List<Order> findExpiredReservationLease(@Param("now") LocalDateTime now);
 }

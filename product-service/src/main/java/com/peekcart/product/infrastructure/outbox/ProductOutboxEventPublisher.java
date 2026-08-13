@@ -36,12 +36,14 @@ public class ProductOutboxEventPublisher {
     /**
      * 재고 예약 결과를 발행한다.
      *
-     * @param reason 실패 사유 (성공 시 null)
+     * @param reason               실패 사유 (성공 시 null)
+     * @param reservationExpiresAt 예약 lease 만료 시각 (실패 시 null, 계획 P4)
      */
     public void publishStockReservationResult(Long orderId, boolean reserved,
-                                              List<ReservedItemPayload> items, String reason) {
+                                              List<ReservedItemPayload> items, String reason,
+                                              LocalDateTime reservationExpiresAt) {
         StockReservationResultPayload payload = new StockReservationResultPayload(
-                orderId, reserved, items, reason, LocalDateTime.now());
+                orderId, reserved, items, reason, LocalDateTime.now(), reservationExpiresAt);
 
         MdcSnapshot.Snapshot mdc = MdcSnapshot.current();
         OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, orderId.toString(),

@@ -15,6 +15,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,6 +36,7 @@ public class StockReservationService {
     private final ProductOutboxEventPublisher publisher;
     private final ObjectMapper objectMapper;
     private final SlackPort slackPort;
+    private final ReservationLeaseProperties leaseProperties;
 
     /**
      * order.created 수신 시 재고를 예약(차감)한다. all-or-nothing.
@@ -48,7 +50,7 @@ public class StockReservationService {
         if (items == null || items.isEmpty()) {
             // malformed/빈 order.created — 빈 items 가 allMatch 로 예약 성공처럼 수렴하는 것을 막는다
             reservationRepository.save(StockReservation.failed(orderId, "[]", sourceEventId));
-            publisher.publishStockReservationResult(orderId, false, List.of(), "INVALID_ITEMS");
+            publisher.publishStockReservationResult(orderId, false, List.of(), "INVALID_ITEMS", null);
             log.warn("빈 예약 품목 — reserved=false 수렴, orderId={}", orderId);
             return;
         }
@@ -56,7 +58,7 @@ public class StockReservationService {
         if (existing.isPresent()) {
             if (existing.get().getStatus() == ReservationStatus.CANCEL_REQUESTED) {
                 log.debug("취소 선도착 tombstone — 예약 skip, orderId={}", orderId);
-                publisher.publishStockReservationResult(orderId, false, items, "CANCELLED");
+                publisher.publishStockReservationResult(orderId, false, items, "CANCELLED", null);
             }
             // RESERVED/FAILED/RELEASED 는 이미 처리됨 → 멱등 no-op
             return;
@@ -66,7 +68,7 @@ public class StockReservationService {
                 .allMatch(i -> inventoryService.hasSufficientStock(i.productId(), i.quantity()));
         if (!allAvailable) {
             reservationRepository.save(StockReservation.failed(orderId, toJson(items), sourceEventId));
-            publisher.publishStockReservationResult(orderId, false, items, "OUT_OF_STOCK");
+            publisher.publishStockReservationResult(orderId, false, items, "OUT_OF_STOCK", null);
             log.debug("재고 부족으로 예약 실패 — orderId={}", orderId);
             return;
         }
@@ -74,9 +76,43 @@ public class StockReservationService {
         for (ReservedItemPayload item : items) {
             inventoryLockFacade.decreaseStock(item.productId(), item.quantity());
         }
-        reservationRepository.save(StockReservation.reserved(orderId, toJson(items), sourceEventId));
-        publisher.publishStockReservationResult(orderId, true, items, null);
-        log.debug("재고 예약 성공 — orderId={}", orderId);
+        StockReservation reservation =
+                StockReservation.reserved(orderId, toJson(items), sourceEventId, leaseProperties.getTtl());
+        reservationRepository.save(reservation);
+        // lease 만료 시각을 결과와 함께 공유한다 — Order 는 이 시각으로 자기 주문을 먼저 취소하고,
+        // Payment 는 만료 후 승인을 거부한다(계획 P4).
+        publisher.publishStockReservationResult(orderId, true, items, null, reservation.getExpiresAt());
+        log.debug("재고 예약 성공 — orderId={}, lease 만료={}", orderId, reservation.getExpiresAt());
+    }
+
+    /**
+     * lease 가 만료된 예약을 회수한다 (계획 P4 sweeper — <b>안전망</b>).
+     *
+     * <p>정상 경로에서 재고를 되돌리는 주체는 Order 의 취소({@code order.cancelled} → release) 이므로
+     * 이 잡의 회수 건수는 <b>0 이어야 정상</b>이다. 0 이 아니라는 것은 취소 이벤트 경로가 유실됐다는 뜻이라
+     * 그 자체가 알림 대상이다. 회수 권한은 기존 {@code RESERVED → RELEASED} CAS 로만 부여되므로
+     * 동시 도착한 정상 release 와 이중 복구되지 않는다.
+     *
+     * @return 회수한 예약 수
+     */
+    public int sweepExpiredLeases() {
+        LocalDateTime cutoff = LocalDateTime.now().minus(leaseProperties.getSweeperGrace());
+        List<StockReservation> expired =
+                reservationRepository.findExpiredReserved(cutoff, leaseProperties.getSweeperBatchSize());
+
+        int reclaimed = 0;
+        for (StockReservation reservation : expired) {
+            if (tryReleaseReserved(reservation.getOrderId())) {
+                reclaimed++;
+                log.warn("만료 lease 회수 — orderId={}, 만료={}", reservation.getOrderId(), reservation.getExpiresAt());
+            }
+        }
+        if (reclaimed > 0) {
+            slackPort.send(String.format(
+                    "[예약 lease 만료] %d건 회수 — 정상 경로(주문 취소 → release)가 동작했다면 0이어야 합니다. "
+                            + "취소 이벤트 유실 여부 확인 요망.", reclaimed));
+        }
+        return reclaimed;
     }
 
     /**

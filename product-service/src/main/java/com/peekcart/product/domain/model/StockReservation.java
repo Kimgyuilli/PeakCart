@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 /**
@@ -38,6 +39,13 @@ public class StockReservation {
     @Column(name = "reserved_at")
     private LocalDateTime reservedAt;
 
+    /**
+     * 예약 lease 만료 시각 (계획 P4). Product 가 부여하고 {@code stock.reservation.result} 로 공유한다.
+     * sweeper 는 이 시각(+유예) 을 근거로만 회수하며, null 이면 회수 대상이 아니다(기존 행 안전측).
+     */
+    @Column(name = "expires_at")
+    private LocalDateTime expiresAt;
+
     @Column(name = "confirmed_at")
     private LocalDateTime confirmedAt;
 
@@ -54,7 +62,8 @@ public class StockReservation {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    private StockReservation(Long orderId, ReservationStatus status, String items, String sourceEventId) {
+    private StockReservation(Long orderId, ReservationStatus status, String items, String sourceEventId,
+                             Duration leaseTtl) {
         this.orderId = orderId;
         this.status = status;
         this.items = items;
@@ -62,21 +71,26 @@ public class StockReservation {
         this.createdAt = LocalDateTime.now();
         if (status == ReservationStatus.RESERVED) {
             this.reservedAt = this.createdAt;
+            this.expiresAt = this.createdAt.plus(leaseTtl);
         }
     }
 
-    /** 예약 성공 원장. */
-    public static StockReservation reserved(Long orderId, String itemsJson, String sourceEventId) {
-        return new StockReservation(orderId, ReservationStatus.RESERVED, itemsJson, sourceEventId);
+    /**
+     * 예약 성공 원장.
+     *
+     * @param leaseTtl 예약 유효기간. 만료 시각이 {@code stock.reservation.result} 로 공유된다
+     */
+    public static StockReservation reserved(Long orderId, String itemsJson, String sourceEventId, Duration leaseTtl) {
+        return new StockReservation(orderId, ReservationStatus.RESERVED, itemsJson, sourceEventId, leaseTtl);
     }
 
     /** 재고 부족으로 실패한 원장. */
     public static StockReservation failed(Long orderId, String itemsJson, String sourceEventId) {
-        return new StockReservation(orderId, ReservationStatus.FAILED, itemsJson, sourceEventId);
+        return new StockReservation(orderId, ReservationStatus.FAILED, itemsJson, sourceEventId, Duration.ZERO);
     }
 
     /** 예약 도착 전 취소가 먼저 온 tombstone. */
     public static StockReservation cancelTombstone(Long orderId) {
-        return new StockReservation(orderId, ReservationStatus.CANCEL_REQUESTED, null, null);
+        return new StockReservation(orderId, ReservationStatus.CANCEL_REQUESTED, null, null, Duration.ZERO);
     }
 }

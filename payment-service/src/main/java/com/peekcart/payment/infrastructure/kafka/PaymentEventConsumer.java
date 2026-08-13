@@ -16,6 +16,8 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 /**
  * 주문/재고 관련 Kafka 이벤트를 소비해 결제 로컬 상태를 갱신하는 Consumer.
  * <p>
@@ -81,8 +83,9 @@ public class PaymentEventConsumer {
             // 소비가 지연되면 미존재 가능 → 예외로 재시도(backoff)해 수렴시킨다.
             Payment payment = paymentRepository.findByOrderId(orderId)
                     .orElseThrow(() -> new PaymentException(ErrorCode.PAY_003));
-            payment.markReadyForPayment();
-            log.debug("결제 준비 완료(reserved=true) — orderId={}", orderId);
+            LocalDateTime expiresAt = readReservationExpiresAt(payload);
+            payment.markReadyForPayment(expiresAt);
+            log.debug("결제 준비 완료(reserved=true) — orderId={}, lease 만료={}", orderId, expiresAt);
         });
     }
 
@@ -115,5 +118,17 @@ public class PaymentEventConsumer {
                 log.debug("order.cancelled 선도착 — 취소 marker 영속, orderId={}", orderId);
             });
         });
+    }
+
+    /**
+     * lease 만료 시각을 읽는다. 필드 부재/null 은 lease 미부여(구 메시지)로 간주해 {@code null} 을 돌려주며,
+     * 이 경우 만료 판정 없이 기존 동작을 유지한다(하위 호환, ADR-0012 D2).
+     */
+    private LocalDateTime readReservationExpiresAt(JsonNode payload) {
+        JsonNode node = payload.get("reservationExpiresAt");
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        return LocalDateTime.parse(node.asText());
     }
 }

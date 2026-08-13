@@ -3,9 +3,11 @@ package com.peekcart.product.infrastructure;
 import com.peekcart.product.domain.model.StockReservation;
 import com.peekcart.product.domain.repository.StockReservationRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -40,5 +42,10 @@ public class StockReservationRepositoryImpl implements StockReservationRepositor
     @Override
     public int markCompensatedIfAbsent(Long orderId) {
         return jpaRepository.markCompensatedIfAbsent(orderId, LocalDateTime.now());
+    }
+
+    @Override
+    public List<StockReservation> findExpiredReserved(LocalDateTime cutoff, int limit) {
+        return jpaRepository.findExpiredReserved(cutoff, PageRequest.of(0, limit));
     }
 }

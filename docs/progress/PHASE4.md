@@ -846,3 +846,32 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 4. 부하 하 event-loop lag 미측정(PR3d-a 승계).
 
 **다음**: **PR3d-b-2** — 진입 조건 GKE 재기동 + Secrets Store CSI Driver 설치 + Secret Manager 키 등록. PR4(관측성 S9)와 같은 클러스터 세션 권장.
+
+---
+
+## 구현 ④ Choreography Saga — ④-a: 예약 lease · 주문 상태 전이 낙관 락 — 2026-08-13 — [#84](https://github.com/Kimgyuilli/PeakCart/pull/84)
+
+> 계획서 `task-impl4-choreography-saga.md` P1~P4·P13(일부). **착수 전 코드 검증이 범위 자체를 바꿨다** — ADR-0012 §Consequences 가 지정한 ④ 산출물 4개 중 2개(예약/확정/복구 consumer·`stock.reservation.result`)는 strangler-1~5 에서 이미 완료였고, 실질 잔여는 "saga 를 만드는 것"이 아니라 **이미 도는 saga 가 미결 종료 상태를 남기는 구멍**이었다.
+
+**L-013 은 게이트대로 실측하고 승격했다.** TASKS 보류 항목은 "실측 후 승격"이 조건이라, `@Version` 을 먼저 넣지 않고 재현부터 했다. 두 `EntityManager` 가 커밋 전 같은 스냅샷을 읽도록 강제한 **결정적** 재현(확률적 재현의 음성은 기각 근거로 못 쓴다) 결과 **양방향 lost update**: 취소 선커밋 → 최종 `PAYMENT_COMPLETED`(취소 유실), 결제 선커밋 → 최종 `CANCELLED`(과금된 주문이 취소로 표시). `OrderStatus.canTransitionTo` 는 각 트랜잭션의 *스냅샷* 기준이라 전이 가드를 통과하면서 결과가 틀린다 — 가드로는 막을 수 없는 종류다.
+
+**핵심 결정**:
+- **고정 TTL sweeper 를 폐기하고 lease 계약으로 전환** — 초안은 `reserved_at + 30분` 을 Product 가 혼자 판정하게 했는데, `OrderJpaRepository` 의 두 만료 조회가 **"예약은 확정됐으나 결제를 시작하지 않은 `PENDING`"** 구간을 아무도 안 잡는다(하나는 `reservationConfirmedAt IS NULL` 만, 다른 하나는 `PAYMENT_REQUESTED` 만). 그 구간의 재고를 sweeper 가 회수하면 살아있는 주문의 재고를 뺏는 **oversell** 이다. → 만료 시각을 Product 가 부여해 **saga 참여자가 공유**하고, Order 가 먼저 취소하고, Payment 는 만료 lease 승인을 거부하고, sweeper 는 만료+유예 후에만 회수한다. **정상 경로에서 sweeper 회수 건수는 0이어야 정상**이며 0이 아니면 그 자체가 알림 대상이다.
+- **알림은 종료 상태의 근거가 못 된다** — 취소된 주문에 결제 완료가 도착하는 경로를 처음엔 `SlackPort` 알림 + `return` 으로 처리했다. 그런데 order-service 의 `SlackPort` 는 배포 구성상 **no-op**(PR3b 게이팅)이고, 소비가 커밋되면 `processed_events` 때문에 **같은 이벤트를 다시 소비할 수 없다** → 환불 구현(P8)이 입력을 잃는다. 소비와 같은 트랜잭션에 `order_compensations` 원장을 남기는 것으로 교체했다.
+- **`@Version` 만으로 수렴 규칙이 서지 않는다** — 낙관 락은 "먼저 커밋한 쪽이 이긴다"일 뿐이다. 진 쪽 처리를 명시했다: 타임아웃 취소는 **재시도 포기**(결제가 이겼다는 뜻), 결제 완료는 `ORD-003` DLQ 대신 **보상 원장**.
+
+**리뷰가 내 결론을 뒤집었다 (P0)**: 계획서에 "P4 로 oversell 이 닫혔다"고 적었으나 **틀렸다**. `PaymentCommandService.confirmPayment` 는 `ensureConfirmable()` 이후 **같은 트랜잭션 안에서** PG 를 호출하고, 그 시점 주문은 `payment.requested` 가 outbox→poller→Kafka 를 거치기 전이라 여전히 `PENDING` 이다 → 검사 통과 → 만료 취소 → release → 재고 복구 → 타 주문 재예약 → 승인 성공. **진입 시점 검사는 fence 가 아니다.** 승인 마진(남은 lease > 2분)으로 창을 줄였을 뿐이고, 진짜 fence(예약을 승인 전용 상태로 CAS 전이)는 saga 프로토콜 변경이라 ADR 선행 별도 PR 로 분리했다. 계획 §1 명제는 이 경로에서 **미달성**이며 §2.6 R-1 로 명시했다. 이 함정은 `PLAN-BLINDSPOTS.md` **B12** 로 승격.
+
+**프로세스**: `/work` single 리뷰(1,701줄) — 1차 **timeout(exit 124)** 으로 GW-2b degraded(risk=high) → 예산 600s→1500s 확대 재시도 → 5건(P0 1·P1 3·P2 1) **전량 반영**. `/ship` dry-run 에서 drift `partially_live` 가 떴으나 실제 drift 아님(브랜치 커밋 0 + `scheduler/` 디렉토리 통째 untracked 라 `git status` 가 디렉토리로 접어 보고) → `add -N` 후 재캡처로 `all_live` 정상화.
+
+**검증**: 10모듈 **604 테스트 0 실패**(신규 17) · lint 10종 그린 · 마이그레이션 4종(order V3/V4·product V3·payment V3, legacy backfill 포함).
+
+**미충족(명시)**:
+1. **R-1 fence 미구현** — 승인↔회수 경합 창이 마진 이내로 남는다. ADR 선행 후 별도 PR.
+2. **R-2 배포 의존성** — ④-a 단독 배포 시 `order_compensations` 가 `OPEN` 으로 쌓이기만 하고 환불은 수동. ④-c(P8)를 같은 릴리스 주기에 배포해야 한다.
+3. **R-3 롤아웃 창** — 구 Product 가 발행한 메시지는 lease 필드 부재로 만료 판정 제외. Product 선배포로 닫힌다.
+4. 크로스서비스 경합 순서 주입(승인↔취소↔sweeper)은 단일 모듈 재현 불가 → ④-d E2E 이관.
+
+**신규 부채**: **D-020**(결제 승인 ↔ 로컬 커밋 불일치 — Toss 승인 후 커밋 실패 시 과금 잔존·롤백, 웹훅 reconciliation 부재). GW-1 리뷰 #3 에서 발견했으나 PG reconciliation 표면이라 ④ 범위 밖으로 분리.
+
+**다음**: **④-b**(이벤트 계약 — `OrderCancelledPayload` `items[]`(ADR-0012 D2 명문)·`reason` enum·`payment.failed` 취소의 `order.cancelled` 발행 여부 결정) → ④-c(환불 요청 경로·DLQ 원장·runbook) → ④-d(관측·E2E·saga-contract 게이트·문서).

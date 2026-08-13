@@ -1,12 +1,14 @@
 package com.peekcart.product.infrastructure;
 
 import com.peekcart.product.domain.model.StockReservation;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -32,4 +34,9 @@ public interface StockReservationJpaRepository extends JpaRepository<StockReserv
     @Query("UPDATE StockReservation r SET r.compensatedAt = :now "
             + "WHERE r.orderId = :orderId AND r.compensatedAt IS NULL")
     int markCompensatedIfAbsent(@Param("orderId") Long orderId, @Param("now") LocalDateTime now);
+
+    @Query("SELECT r FROM StockReservation r "
+            + "WHERE r.status = com.peekcart.product.domain.model.ReservationStatus.RESERVED "
+            + "AND r.expiresAt IS NOT NULL AND r.expiresAt < :cutoff ORDER BY r.expiresAt ASC")
+    List<StockReservation> findExpiredReserved(@Param("cutoff") LocalDateTime cutoff, Pageable pageable);
 }

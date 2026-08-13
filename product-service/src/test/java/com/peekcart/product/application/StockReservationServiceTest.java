@@ -15,6 +15,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 
@@ -41,6 +44,9 @@ class StockReservationServiceTest {
     @Mock SlackPort slackPort;
 
     StockReservationService service;
+    ReservationLeaseProperties leaseProperties;
+
+    private static final Duration LEASE_TTL = Duration.ofMinutes(30);
 
     private static final Long ORDER_ID = 100L;
     private static final String EVENT_ID = "evt-1";
@@ -50,8 +56,11 @@ class StockReservationServiceTest {
 
     @BeforeEach
     void setUp() {
+        leaseProperties = new ReservationLeaseProperties();
+        leaseProperties.setTtl(LEASE_TTL);
+        leaseProperties.setSweeperGrace(Duration.ofMinutes(5));
         service = new StockReservationService(reservationRepository, inventoryService,
-                inventoryLockFacade, publisher, new ObjectMapper(), slackPort);
+                inventoryLockFacade, publisher, new ObjectMapper(), slackPort, leaseProperties);
     }
 
     @Test
@@ -65,7 +74,7 @@ class StockReservationServiceTest {
         then(inventoryLockFacade).should().decreaseStock(1L, 2);
         then(inventoryLockFacade).should().decreaseStock(2L, 3);
         then(reservationRepository).should().save(any(StockReservation.class));
-        then(publisher).should().publishStockReservationResult(ORDER_ID, true, items, null);
+        then(publisher).should().publishStockReservationResult(eq(ORDER_ID), eq(true), eq(items), isNull(), any(LocalDateTime.class));
     }
 
     @Test
@@ -78,7 +87,7 @@ class StockReservationServiceTest {
         service.reserve(ORDER_ID, EVENT_ID, items);
 
         then(inventoryLockFacade).should(never()).decreaseStock(anyLong(), anyInt());
-        then(publisher).should().publishStockReservationResult(ORDER_ID, false, items, "OUT_OF_STOCK");
+        then(publisher).should().publishStockReservationResult(ORDER_ID, false, items, "OUT_OF_STOCK", null);
     }
 
     @Test
@@ -87,7 +96,7 @@ class StockReservationServiceTest {
         service.reserve(ORDER_ID, EVENT_ID, List.of());
 
         then(inventoryLockFacade).should(never()).decreaseStock(anyLong(), anyInt());
-        then(publisher).should().publishStockReservationResult(eq(ORDER_ID), eq(false), any(), eq("INVALID_ITEMS"));
+        then(publisher).should().publishStockReservationResult(eq(ORDER_ID), eq(false), any(), eq("INVALID_ITEMS"), isNull());
     }
 
     @Test
@@ -100,26 +109,26 @@ class StockReservationServiceTest {
 
         then(inventoryLockFacade).should(never()).decreaseStock(anyLong(), anyInt());
         then(reservationRepository).should(never()).save(any(StockReservation.class));
-        then(publisher).should().publishStockReservationResult(ORDER_ID, false, items, "CANCELLED");
+        then(publisher).should().publishStockReservationResult(ORDER_ID, false, items, "CANCELLED", null);
     }
 
     @Test
     @DisplayName("reserve: 이미 예약된 주문이면 멱등 no-op")
     void reserve_alreadyReserved_idempotentNoop() {
         given(reservationRepository.findByOrderId(ORDER_ID))
-                .willReturn(Optional.of(StockReservation.reserved(ORDER_ID, "[]", EVENT_ID)));
+                .willReturn(Optional.of(StockReservation.reserved(ORDER_ID, "[]", EVENT_ID, LEASE_TTL)));
 
         service.reserve(ORDER_ID, EVENT_ID, items);
 
         then(inventoryLockFacade).should(never()).decreaseStock(anyLong(), anyInt());
-        then(publisher).should(never()).publishStockReservationResult(anyLong(), anyBoolean(), any(), any());
+        then(publisher).should(never()).publishStockReservationResult(anyLong(), anyBoolean(), any(), any(), any());
     }
 
     @Test
     @DisplayName("release: RESERVED → RELEASED CAS 1건 성공 시 재고 복구")
     void release_reserved_casSucceeds_restores() {
         StockReservation reserved = StockReservation.reserved(ORDER_ID,
-                "[{\"productId\":1,\"quantity\":2},{\"productId\":2,\"quantity\":3}]", EVENT_ID);
+                "[{\"productId\":1,\"quantity\":2},{\"productId\":2,\"quantity\":3}]", EVENT_ID, LEASE_TTL);
         given(reservationRepository.markReleasedIfReserved(ORDER_ID)).willReturn(1);
         given(reservationRepository.findByOrderId(ORDER_ID)).willReturn(Optional.of(reserved));
 

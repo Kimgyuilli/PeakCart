@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -14,6 +15,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("Payment 도메인 단위 테스트")
 class PaymentTest {
+
+    /** 마진과 무관한 게이트를 검증할 때 쓰는 값. 마진 자체의 검증은 LeaseApprovalMargin 참고. */
+    private static final Duration NO_MARGIN = Duration.ZERO;
 
     @Nested
     @DisplayName("create")
@@ -219,8 +223,8 @@ class PaymentTest {
         @DisplayName("예약 확정(ready)된 PENDING 이면 통과한다")
         void readyPending_passes() {
             Payment payment = PaymentFixture.pendingPayment();
-            payment.markReadyForPayment();
-            payment.ensureConfirmable();
+            payment.markReadyForPayment(null);
+            payment.ensureConfirmable(NO_MARGIN);
         }
 
         @Test
@@ -228,7 +232,7 @@ class PaymentTest {
         void notReady_throwsPAY008() {
             Payment payment = PaymentFixture.pendingPayment();
 
-            assertThatThrownBy(payment::ensureConfirmable)
+            assertThatThrownBy(() -> payment.ensureConfirmable(NO_MARGIN))
                     .isInstanceOf(PaymentException.class)
                     .extracting(e -> ((PaymentException) e).getErrorCode())
                     .isEqualTo(ErrorCode.PAY_008);
@@ -238,13 +242,85 @@ class PaymentTest {
         @DisplayName("취소(CANCELLED)된 결제면 PAY-009 예외가 발생한다")
         void cancelled_throwsPAY009() {
             Payment payment = PaymentFixture.pendingPayment();
-            payment.markReadyForPayment();
+            payment.markReadyForPayment(null);
             payment.cancelBeforePayment();
 
-            assertThatThrownBy(payment::ensureConfirmable)
+            assertThatThrownBy(() -> payment.ensureConfirmable(NO_MARGIN))
                     .isInstanceOf(PaymentException.class)
                     .extracting(e -> ((PaymentException) e).getErrorCode())
                     .isEqualTo(ErrorCode.PAY_009);
+        }
+
+        @Test
+        @DisplayName("예약 lease 가 만료됐으면 PAY-010 — 회수된 재고에 과금하는 것을 막는다 (계획 P4)")
+        void expiredLease_throwsPAY010() {
+            Payment payment = PaymentFixture.pendingPayment();
+            payment.markReadyForPayment(LocalDateTime.now().minusSeconds(1));
+
+            assertThatThrownBy(() -> payment.ensureConfirmable(NO_MARGIN))
+                    .isInstanceOf(PaymentException.class)
+                    .extracting(e -> ((PaymentException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.PAY_010);
+        }
+
+        @Test
+        @DisplayName("lease 가 남아있으면 통과한다 (만료 게이트의 음성 대조)")
+        void unexpiredLease_passes() {
+            Payment payment = PaymentFixture.pendingPayment();
+            payment.markReadyForPayment(LocalDateTime.now().plusMinutes(30));
+
+            payment.ensureConfirmable(NO_MARGIN);
+        }
+
+        @Test
+        @DisplayName("lease 미수신(null)이면 만료 판정 없이 통과한다 (구 메시지 하위 호환)")
+        void noLease_passes() {
+            Payment payment = PaymentFixture.pendingPayment();
+            payment.markReadyForPayment(null);
+
+            payment.ensureConfirmable(NO_MARGIN);
+        }
+    }
+
+    @Nested
+    @DisplayName("승인 마진 (GW-2 #1 — 경합 창 축소, fence 아님)")
+    class LeaseApprovalMargin {
+
+        private static final Duration MARGIN = Duration.ofMinutes(2);
+
+        @Test
+        @DisplayName("남은 lease 가 마진보다 짧으면 승인을 시작하지 않는다 (PAY-010)")
+        void remainingLeaseShorterThanMargin_throwsPAY010() {
+            Payment payment = PaymentFixture.pendingPayment();
+            // 아직 만료 전이지만(1분 남음) 승인 소요(2분)를 덮지 못한다 → 시작 금지.
+            payment.markReadyForPayment(LocalDateTime.now().plusMinutes(1));
+
+            assertThatThrownBy(() -> payment.ensureConfirmable(MARGIN))
+                    .isInstanceOf(PaymentException.class)
+                    .extracting(e -> ((PaymentException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.PAY_010);
+        }
+
+        @Test
+        @DisplayName("남은 lease 가 마진보다 길면 통과한다 (경계의 음성 대조)")
+        void remainingLeaseLongerThanMargin_passes() {
+            Payment payment = PaymentFixture.pendingPayment();
+            payment.markReadyForPayment(LocalDateTime.now().plusMinutes(3));
+
+            payment.ensureConfirmable(MARGIN);
+        }
+
+        @Test
+        @DisplayName("마진이 0이면 만료 직전에도 통과한다 — 마진이 실제로 창을 좁히는 변수임을 고정")
+        void zeroMargin_passesRightBeforeExpiry() {
+            Payment payment = PaymentFixture.pendingPayment();
+            payment.markReadyForPayment(LocalDateTime.now().plusMinutes(1));
+
+            payment.ensureConfirmable(Duration.ZERO);
+
+            // 같은 상태가 마진 2분에서는 거부된다 → 통과/거부를 가르는 것이 마진임이 대조로 드러난다.
+            assertThatThrownBy(() -> payment.ensureConfirmable(MARGIN))
+                    .isInstanceOf(PaymentException.class);
         }
     }
 

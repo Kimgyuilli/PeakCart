@@ -123,7 +123,7 @@ class OrderTest {
     @DisplayName("markPaymentRequested: 예약 확정된 PENDING 이면 PAYMENT_REQUESTED 전이 + paymentRequestedAt 기록")
     void markPaymentRequested_reservationConfirmed_success() {
         Order order = OrderFixture.order();
-        order.confirmReservation();
+        order.confirmReservation(null);
 
         order.markPaymentRequested();
 
@@ -165,7 +165,7 @@ class OrderTest {
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
         assertThat(order.isPaymentRequestedPending()).isTrue();
 
-        order.confirmReservation();            // 예약 확정 → 수렴
+        order.confirmReservation(null);            // 예약 확정 → 수렴
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PAYMENT_REQUESTED);
         assertThat(order.getPaymentRequestedAt()).isNotNull();
@@ -177,7 +177,7 @@ class OrderTest {
     void confirmReservation_withoutPending_staysPending() {
         Order order = OrderFixture.order();
 
-        order.confirmReservation();
+        order.confirmReservation(null);
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
         assertThat(order.getReservationConfirmedAt()).isNotNull();

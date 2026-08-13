@@ -11,11 +11,12 @@ import com.peekcart.payment.infrastructure.toss.TossConfirmResponse;
 import com.peekcart.payment.infrastructure.toss.TossPaymentClient;
 import com.peekcart.support.ServiceTest;
 import com.peekcart.support.fixture.PaymentFixture;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 
+import java.time.Duration;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,10 +31,21 @@ import static org.mockito.Mockito.never;
 @DisplayName("PaymentCommandService 단위 테스트")
 class PaymentCommandServiceTest {
 
-    @InjectMocks PaymentCommandService paymentCommandService;
+    PaymentCommandService paymentCommandService;
     @Mock PaymentRepository paymentRepository;
     @Mock TossPaymentClient tossPaymentClient;
     @Mock PaymentOutboxEventPublisher outboxEventPublisher;
+
+    /** 승인 마진(계획 GW-2 #1). 마진 자체의 경계 검증은 PaymentTest 소관이라 여기선 0으로 둔다. */
+    private PaymentApprovalProperties approvalProperties;
+
+    @BeforeEach
+    void setUp() {
+        approvalProperties = new PaymentApprovalProperties();
+        approvalProperties.setLeaseApprovalMargin(Duration.ZERO);
+        paymentCommandService = new PaymentCommandService(
+                paymentRepository, tossPaymentClient, outboxEventPublisher, approvalProperties);
+    }
 
     @Test
     @DisplayName("confirmPayment: 성공 시 payment.requested 발행 후 APPROVED 상태와 payment.completed Outbox 이벤트가 발행된다")

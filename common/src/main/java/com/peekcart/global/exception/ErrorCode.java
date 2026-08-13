@@ -46,6 +46,7 @@ public enum ErrorCode {
     PAY_007(HttpStatus.NOT_FOUND, "PAY-007", "본인 주문의 결제 정보가 아닙니다."),
     PAY_008(HttpStatus.CONFLICT, "PAY-008", "재고 예약이 아직 확정되지 않아 결제를 진행할 수 없습니다. 잠시 후 다시 시도해주세요."),
     PAY_009(HttpStatus.CONFLICT, "PAY-009", "결제를 진행할 수 없는 주문 상태입니다."),
+    PAY_010(HttpStatus.CONFLICT, "PAY-010", "재고 예약 유효기간이 만료되어 결제를 진행할 수 없습니다. 주문을 다시 시도해주세요."),
 
     // System
     SYS_001(HttpStatus.INTERNAL_SERVER_ERROR, "SYS-001", "내부 서버 오류가 발생했습니다."),

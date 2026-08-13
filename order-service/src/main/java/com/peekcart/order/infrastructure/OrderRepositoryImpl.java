@@ -49,4 +49,9 @@ public class OrderRepositoryImpl implements OrderRepository {
     public List<Order> findUnconfirmedReservationBefore(LocalDateTime cutoff) {
         return orderJpaRepository.findUnconfirmedReservationBefore(cutoff);
     }
+
+    @Override
+    public List<Order> findExpiredReservationLease(LocalDateTime now) {
+        return orderJpaRepository.findExpiredReservationLease(now);
+    }
 }

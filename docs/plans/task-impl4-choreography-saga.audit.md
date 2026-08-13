@@ -1,0 +1,55 @@
+# task-impl4-choreography-saga — 리뷰 audit
+
+## 2026-08-13 — GP-2 (loop 1)
+
+- 리뷰 항목: 12건 (P0:2, P1:8, P2:2)
+- 사용자 선택: [2] 전체 반영 — 단 #3 은 ④ 범위 밖 신규 부채(D-020)로 등재
+- P0 무시 사유: 없음 (P0 2건 전량 반영)
+- raw: `.cache/codex-reviews/plan-task-impl4-choreography-saga-1786552384.json`
+- run_id: `plan:20260812T163304Z:c2036491-547e-4f3f-b005-365144d529e2:1`
+
+### 반영 내역
+
+| # | sev | 지적 | 처분 |
+|---|---|---|---|
+| 1 | P0 | PAID_BUT_UNRESERVED 를 완료 보상으로 오판 — 실제는 marker+Slack, 자동 환불 없음(ADR-0012 D3 ④ 미이행) | §2.1 정정 + **P8 환불 요청 경로** 신설 |
+| 2 | P0 | `reservedAt+30분` sweeper 는 oversell 유발 — 예약 확정 후 결제 미시작 `PENDING` 은 수명 상한 없음 | §2.3-A 재작성 + **P3**(상한 부재 해소)·**P4**(lease 계약) 로 분리, 고정 TTL 폐기 |
+| 3 | P1 | Toss 승인 ↔ 로컬 커밋 불일치 (과금 잔존·롤백) | **범위 밖 판정** — §2.4 에 근거 명시 + **D-020** 신규 부채 등재(P15) |
+| 4 | P1 | P4 "items 추가 안 함"이 ADR-0012 D2(items[] 추가 명문)와 충돌, ADR-0016 이 D2 유효 유지 | **P5 로 계약대로 `items[]` 추가**. 새 ADR 우회 폐기 |
+| 5 | P1 | `payment.failed` 취소가 `order.cancelled` 미발행 → reason 4종 중 PAYMENT_FAILURE 발행 경로 부재 | §2.2-4 신설 + **P7**(발행 여부 선결정) · **P6**(진입점별 enum 전달) |
+| 6 | P1 | "DLQ 를 아무도 보지 않는다" 부정확 — 라우팅 시점 log+Slack 기존재, 발행 서비스 4곳, 테스트 listener 1건 | §2.2-1 정정("재소비/영구 원장 0건"), 영향 파일에 notification 포함 |
+| 7 | P1 | 공유 DLQ 토폴로지에서 failed consumer group 식별 불가 → 중복 기록·알림, 재-DLQ 재귀 위험 | §2.3-C 신설 + **P9** 식별자 `originalTopic+eventId+failedConsumerGroup` · 전용 factory |
+| 8 | P1 | 수동 수렴 계약 공백 — runbook 이 P8(구) 문서 목록에 없음, retention 7일 창 규칙 부재 | **P10** runbook 신설(상태머신·재발행 규칙·SLA), §4 에 경로 고정 |
+| 9 | P1 | "이벤트 계약 수준 검증으로 대체 가능"이 Exit Criteria 미충족 | **P12** 로 cross-service E2E 필수화, 대체 문구 삭제 |
+| 10 | P1 | `@Version` 만으로 "결제 완료 우선" 미성립, 확률적 재현 음성으로 기각 불가 | §2.3-D/E 신설 + **P1** barrier/latch 결정적 재현 · **P2** 충돌 정책·양 순서 수렴 |
+| 11 | P2 | DLQ 원장 마이그레이션 누락, `stock_reservations` (status,reserved_at) 인덱스 부재 | **P13** 신설(스키마·인덱스·배치 상한) |
+| 12 | P2 | §5 "금지"가 prose 라 강제 불가 | **P14** saga-contract 게이트(매트릭스 + CI 실패 조건) |
+
+---
+
+## 2026-08-13 — GW-2 (loop 1, ④-a diff)
+
+- 리뷰 run: `work:...:1` **timeout(exit 124)** → GW-2b degraded(risk=high) → 사용자 선택 [재시도·예산 확대] → `work:...:2` ok
+- 항목: 5건 (P0:1, P1:3, P2:1) · **5건 전량 반영**
+- diff: `.cache/diffs/diff-task-impl4-choreography-saga-1786556518.patch` (1,701줄, single 모드)
+- raw: `.cache/codex-reviews/diff-task-impl4-choreography-saga-1786604776.json`
+
+| # | sev | 지적 | 처분 |
+|---|---|---|---|
+| 1 | P0 | `ensureConfirmable` 은 일회성 검사일 뿐 fence 가 아니다 — 검사 통과 후 PG 호출 중 Order 만료취소→release→재판매→승인성공 이 성립 | **부분 반영 + 잔여 명시**. PG 전 "남은 lease > 마진(2m)" 요구(`PaymentApprovalProperties`, PAY-010)로 창 축소. 진짜 fence(`PAYMENT_IN_PROGRESS` CAS)는 ADR-0012 D3 재기록 필요 → 별도 PR. 계획 **§2.6 R-1** 로 미달성 명시 |
+| 2 | P1 | CANCELLED 주문의 payment.completed 를 Slack+return 처리 — order-service SlackPort 는 no-op, processed_events 는 커밋돼 P8 재소비 불가 | **영속 원장 신설**. `order_compensations`(V4, `(order_id, reason)` 유니크) + 소비와 동일 트랜잭션 기록. 배포 의존성(④-a→④-c)은 **§2.6 R-2** |
+| 3 | P1 | 마이그레이션이 기존 행을 NULL lease 로 남겨 legacy saga 는 수명 상한 미획득 (자체 발견과 동일 건, 범위 더 넓음 — NULL lease 결제는 만료검사 없이 승인) | **3개 마이그레이션에 backfill 추가**(orders/stock_reservations/payments, 동일 기준 +30m). 롤아웃 창 잔여는 **§2.6 R-3** |
+| 4 | P1 | lease 테스트가 경합 순서를 주입하지 않아 #1 경로에서도 통과 | 마진 경계 3종(`LeaseApprovalMargin`) + 실 DB sweeper 경계 4종(`StockReservationLeaseSweepIntegrationTest`) 추가. **크로스서비스 순서 주입(승인↔취소↔sweeper)은 ④-d E2E 로 명시 이관** — 단일 모듈에서 재현 불가 |
+| 5 | P2 | 낙관 락 테스트가 consumer 재시도·보상 분기를 실행하지 않음 | consumer 경로 통합테스트 추가(`OrderPaidButCancelledIntegrationTest`: 예외 없음·원장 OPEN·재소비 멱등) + 스케줄러 충돌 포기 정책 단위테스트 |
+
+### 검증 메모 (GW-2)
+
+반영 전 P0 을 직접 반증했다 — `confirmPayment` 가 `ensureConfirmable` 이후 **같은 트랜잭션**에서 Toss 를 호출하고, 그 시점 주문은 `payment.requested` 가 outbox→poller→Kafka 를 거치기 전이라 여전히 `PENDING` 이다. **지적이 정확하고 초안이 틀렸다.** #2 의 "SlackPort no-op" 도 PR3b 게이팅 결정과 대조해 확인했다.
+
+**중요**: ④-a 는 계획 §1 명제를 이 경로에 대해 **달성하지 못한다**. 완화만 하고 잔여를 문서화한 것이며, 이를 "닫았다"로 기록하지 않는다.
+
+### 검증 메모
+
+반영 전 4건을 직접 재확인(#4 ADR-0012 D2 원문 · #5 `OrderEventConsumer#handlePaymentFailed` · #2 `OrderJpaRepository` 2쿼리 · #6 `kafkaErrorHandler` Slack + notification DLQ) — **전부 Codex 가 정확하고 초안이 틀렸다**. 분할 아티팩트 0건(single 파일 리뷰).
+
+작업 항목 P8 → P15 로 증가(8 → 15).

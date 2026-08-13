@@ -59,6 +59,11 @@ app:
     public-keys:
       - kid: peekcart-gateway-dev-2026
         location: classpath:keys/dev-gateway-internal-public.pem
+  # 결제 승인 정책 (계획 ④-a) — 동작 정책이므로 base 소유(ADR-0007).
+  # 남은 예약 lease 가 이 마진보다 짧으면 승인을 시작하지 않는다(PAY-010).
+  # fence 가 아니라 경합 창 축소이며, 잔여 위험은 계획 §2.6 R-1 로 추적한다.
+  payment:
+    lease-approval-margin: 2m
   # processed_events 멱등성 보존 정책 (ADR-0012 D5 · 구현 ② PR3) — 동작 정책이므로 base 소유(ADR-0007).
   idempotency:
     retention: 7d          # floor 4창 max(=7d) 이상 — 미만이면 부팅 실패(fail-fast)

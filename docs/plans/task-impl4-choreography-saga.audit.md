@@ -85,3 +85,13 @@
 ### P7 결정 기록
 
 `payment.failed` 취소도 `order.cancelled` 를 **발행**한다(ADR-0010 D3-4 복원). 무해성 근거 3가지를 코드로 확인: Product 는 예약 원장 `RESERVED→RELEASED` CAS 라 두 번째 release 가 no-op · Payment 는 자기 상태가 `FAILED` 라 `cancelBeforePayment()` 가 no-op(APPROVED 오탐 없음) · Notification 은 `reason=PAYMENT_FAILED` 를 스킵해 중복 알림 차단. **중복 부작용을 차단하는 장치가 P6 의 `reason` 이므로 P6 없이 P7 을 먼저 넣으면 성립하지 않는다.**
+
+---
+
+## 2026-08-14 — /done applied (PR https://github.com/Kimgyuilli/PeekCart/pull/85)
+
+- **TASKS.md**: 구현 ④ 행에 ④-b 완료 요약 추가(P5·P6·P7·리뷰 2건·617 테스트), ④-c/d 대기 유지. Task 상태는 `🔄` 유지
+- **PHASE4.md**: ④-b 이력 추가 — P7 결정 근거(기능 필요가 아니라 계약 단순성)·P6→P7 의존 순서·하위호환 방향(침묵보다 알림)·GW-2 #2 가 반증한 false-green·미충족 3건
+- **ADR**: 신규 없음, 상태 변경 없음. P5/P6 은 ADR-0012 D2 이행, P7 은 ADR-0010 D3-4 복원이라 둘 다 기존 결정의 범위 내
+- **Layer 1**: 미갱신 — P15(④-d) 이연(`02`/`03`/`04` payload 표기 드리프트를 미충족 1로 명시)
+- 커밋 5개(p1~p5), 브랜치 `feat/impl4-b-cancel-event-contract`

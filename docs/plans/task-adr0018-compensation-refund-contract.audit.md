@@ -54,3 +54,13 @@
 **#3 은 내 논증 오류다**(④-b #2, ④-a P0 에 이은 같은 패턴). 서로 다른 DB 의 제약을 하나의 보장처럼 서술했다 — DB-per-service 에서는 **어느 DB 의 제약인지**가 보장 범위를 규정한다.
 
 **#4·#6 은 "종결"의 정의를 흐린 지점**이었다. 실패한 환불을 `RESOLVED` 로 닫고, 미해결을 나갈 길 없는 상태로 두는 것은 둘 다 원장을 신뢰할 수 없게 만든다.
+
+---
+
+## 2026-08-15 — /done applied (PR https://github.com/Kimgyuilli/PeekCart/pull/86)
+
+- **TASKS.md**: 구현 ④ 행에 ④-c 착수 전 검증 결과(감지 3지점·Toss 취소 API 부재) + ADR-0018 ✅ + ④-c-1/④-c-2 재분할 기록. Task 상태 `🔄` 유지
+- **PHASE4.md**: ADR 선행 판단 근거(④-a lease refine 과의 차이)·dispatcher 분리·보장 문구 재정의·결과별 종결·리뷰가 잡은 내 오류 2건·미충족 3건
+- **ADR**: **ADR-0018 신규(Accepted)**. ADR-0012 는 refine 판정으로 **Status 무변경**
+- **Layer 1**: 미갱신 — 코드가 없으므로 ④-c-1 이후
+- 커밋 2개(ADR+인덱스 / 계획서+audit), 브랜치 `docs/adr0018-compensation-refund-contract`

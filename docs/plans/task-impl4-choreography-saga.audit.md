@@ -63,3 +63,25 @@
 - **ADR**: 신규 없음. ADR-0012 상태 변경 없음(D2/D3 위임 범위 내 refine). **R-1 fence 는 ADR-0012 D3 재기록이 필요하므로 착수 시 새 ADR 선행**
 - **Layer 1**: 미갱신 — 계획 P15(④-d) 소관으로 이연(05 신규 컬럼·04 saga 흐름)
 - 커밋 9개(p1~p8 + docs), 브랜치 `feat/impl4-a-reservation-lease`
+
+---
+
+## 2026-08-14 14:56 — GW-2 (loop 1) — ④-b 이벤트 계약
+
+- 리뷰 run: `work:20260814T114621Z:7f13f5ef-e868-4a79-81f0-03bb78f51440:1` (single, 686줄 / 12파일, exit 0)
+- 항목: 2건 (P0:0, P1:0, P2:2) — **자동 통과 조건이었으나 2건 전량 반영**
+- diff: `.cache/diffs/diff-task-impl4-choreography-saga-1786707325.patch`
+- raw: `.cache/codex-reviews/diff-task-impl4-choreography-saga-1786708013.json`
+
+| # | sev | 지적 | 처분 |
+|---|---|---|---|
+| 1 | P2 | `handlePaymentFailed` 가 `order.cancel()` 을 무조건 호출 — 사용자/타임아웃/예약실패 취소가 선커밋됐으면 `ORD-002` 로 트랜잭션이 롤백돼 DLQ 행. 같은 클래스의 `reserved=false` 경로는 이미 CANCELLED 를 no-op 처리하는데 규약이 어긋난다 | **반영**. `CANCELLED` 면 정상 처리로 종료(no-op) + 단위테스트 추가. P7 로 발행이 붙으면서 이 경합의 대가가 "중복 발행"이 아니라 "DLQ"로 커지므로 형제 경로와 규약을 맞췄다 |
+| 2 | P2 | P7 의 "동일 트랜잭션 Outbox" 요구(계획 §5.2)가 실제로는 미검증 — `@InjectMocks` 단위테스트는 Spring 프록시도 DB 도 없어 `@Transactional` 을 떼도 통과하는 false-green | **반영**. `OrderCancelledEventContractIntegrationTest` 신설 — 성공 시 `CANCELLED`+Outbox 1행 동시 커밋·payload `items[]`/`reason` 계약 확인, `@MockitoSpyBean` 으로 Outbox 저장 실패를 주입해 주문 상태·`processed_events` 까지 전량 롤백 확인 |
+
+### 검증 메모 (GW-2)
+
+두 건 다 **지적이 정확했다**. #1 은 기존 코드의 무조건 `cancel()` 이 남긴 경합이고(P7 이전에도 존재), #2 는 내가 추가한 단위테스트가 계획서가 요구한 검증을 실제로 수행하지 못한다는 지적이다 — ④-a 의 "내 검증도구 false-green" 패턴이 또 나왔다(누적 4회째: PR3d-a 3건, b-1 3건, ④-a, ④-b).
+
+### P7 결정 기록
+
+`payment.failed` 취소도 `order.cancelled` 를 **발행**한다(ADR-0010 D3-4 복원). 무해성 근거 3가지를 코드로 확인: Product 는 예약 원장 `RESERVED→RELEASED` CAS 라 두 번째 release 가 no-op · Payment 는 자기 상태가 `FAILED` 라 `cancelBeforePayment()` 가 no-op(APPROVED 오탐 없음) · Notification 은 `reason=PAYMENT_FAILED` 를 스킵해 중복 알림 차단. **중복 부작용을 차단하는 장치가 P6 의 `reason` 이므로 P6 없이 P7 을 먼저 넣으면 성립하지 않는다.**

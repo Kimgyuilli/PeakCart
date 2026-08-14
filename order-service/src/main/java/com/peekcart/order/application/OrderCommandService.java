@@ -1,6 +1,7 @@
 package com.peekcart.order.application;
 
 import com.peekcart.global.exception.ErrorCode;
+import com.peekcart.global.outbox.dto.OrderCancelReason;
 import com.peekcart.order.application.dto.CreateOrderCommand;
 import com.peekcart.order.application.dto.OrderDetailDto;
 import com.peekcart.order.domain.exception.OrderException;
@@ -93,7 +94,7 @@ public class OrderCommandService {
         order.cancel();
 
         // 재고 복구는 동기로 하지 않고 order.cancelled → Product release Saga 가 담당한다 (ADR-0012 D3).
-        outboxEventPublisher.publishOrderCancelled(order);
+        outboxEventPublisher.publishOrderCancelled(order, OrderCancelReason.USER_REQUESTED);
     }
 
     /**
@@ -110,7 +111,7 @@ public class OrderCommandService {
 
         order.cancel();
 
-        outboxEventPublisher.publishOrderCancelled(order);
+        outboxEventPublisher.publishOrderCancelled(order, OrderCancelReason.TIMEOUT);
     }
 
     private String generateOrderNumber() {

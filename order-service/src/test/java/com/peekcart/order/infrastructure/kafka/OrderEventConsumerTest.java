@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.peekcart.global.idempotency.IdempotencyChecker;
 import com.peekcart.global.kafka.KafkaMessageParser;
+import com.peekcart.global.outbox.dto.OrderCancelReason;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderRepository;
@@ -103,6 +104,33 @@ class OrderEventConsumerTest {
     }
 
     @Test
+    @DisplayName("payment.failed → 주문 취소 + order.cancelled(reason=PAYMENT_FAILED) 발행 (P7, ADR-0010 D3-4)")
+    void paymentFailed_cancelsAndPublishes() {
+        Order order = OrderFixture.paymentRequestedOrderWithId();
+        given(orderRepository.findById(OrderFixture.DEFAULT_ORDER_ID)).willReturn(Optional.of(order));
+        stubPaymentRequested();
+
+        consumer.handlePaymentFailed("msg");
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        then(outboxEventPublisher).should().publishOrderCancelled(order, OrderCancelReason.PAYMENT_FAILED);
+    }
+
+    @Test
+    @DisplayName("payment.failed + 이미 CANCELLED → 멱등 no-op (ORD-002 로 DLQ 가지 않음, 발행 없음)")
+    void paymentFailed_alreadyCancelled_noop() {
+        Order order = OrderFixture.orderWithId();
+        order.cancel();  // 사용자/타임아웃 취소가 선커밋된 상태
+        given(orderRepository.findById(OrderFixture.DEFAULT_ORDER_ID)).willReturn(Optional.of(order));
+        stubPaymentRequested();
+
+        consumer.handlePaymentFailed("msg");  // 예외 없이 통과
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        then(outboxEventPublisher).should(never()).publishOrderCancelled(any(), any());
+    }
+
+    @Test
     @DisplayName("reserved=false + PENDING → 주문 취소 + order.cancelled 발행")
     void reservedFalse_pending_cancels() {
         Order order = OrderFixture.orderWithId();
@@ -112,7 +140,7 @@ class OrderEventConsumerTest {
         consumer.handleStockReservationResult("msg");
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-        then(outboxEventPublisher).should().publishOrderCancelled(order);
+        then(outboxEventPublisher).should().publishOrderCancelled(order, OrderCancelReason.RESERVATION_FAILED);
     }
 
     @Test
@@ -126,7 +154,7 @@ class OrderEventConsumerTest {
         consumer.handleStockReservationResult("msg");  // 예외 없이 통과
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-        then(outboxEventPublisher).should(never()).publishOrderCancelled(any());
+        then(outboxEventPublisher).should(never()).publishOrderCancelled(any(), any());
     }
 
     @Test
@@ -140,6 +168,6 @@ class OrderEventConsumerTest {
 
         assertThat(order.getReservationConfirmedAt()).isNotNull();
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
-        then(outboxEventPublisher).should(never()).publishOrderCancelled(any());
+        then(outboxEventPublisher).should(never()).publishOrderCancelled(any(), any());
     }
 }

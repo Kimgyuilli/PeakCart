@@ -1,6 +1,7 @@
 package com.peekcart.order.application;
 
 import com.peekcart.global.exception.ErrorCode;
+import com.peekcart.global.outbox.dto.OrderCancelReason;
 import com.peekcart.order.application.dto.CreateOrderCommand;
 import com.peekcart.order.application.dto.OrderDetailDto;
 import com.peekcart.order.domain.exception.OrderException;
@@ -23,6 +24,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -108,7 +110,7 @@ class OrderCommandServiceTest {
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
         // 재고 복구는 동기로 하지 않는다 — order.cancelled → Product release Saga (ADR-0012 D3)
-        then(outboxEventPublisher).should().publishOrderCancelled(any(Order.class));
+        then(outboxEventPublisher).should().publishOrderCancelled(any(Order.class), eq(OrderCancelReason.USER_REQUESTED));
     }
 
     @Test
@@ -121,7 +123,7 @@ class OrderCommandServiceTest {
                 .extracting(e -> ((OrderException) e).getErrorCode())
                 .isEqualTo(ErrorCode.ORD_001);
 
-        then(outboxEventPublisher).should(never()).publishOrderCancelled(any(Order.class));
+        then(outboxEventPublisher).should(never()).publishOrderCancelled(any(Order.class), any());
     }
 
     @Test
@@ -133,7 +135,7 @@ class OrderCommandServiceTest {
         orderCommandService.cancelExpiredOrder(OrderFixture.DEFAULT_ORDER_ID);
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-        then(outboxEventPublisher).should().publishOrderCancelled(any(Order.class));
+        then(outboxEventPublisher).should().publishOrderCancelled(any(Order.class), eq(OrderCancelReason.TIMEOUT));
     }
 
     @Test
@@ -146,6 +148,6 @@ class OrderCommandServiceTest {
                 .extracting(e -> ((OrderException) e).getErrorCode())
                 .isEqualTo(ErrorCode.ORD_001);
 
-        then(outboxEventPublisher).should(never()).publishOrderCancelled(any(Order.class));
+        then(outboxEventPublisher).should(never()).publishOrderCancelled(any(Order.class), any());
     }
 }

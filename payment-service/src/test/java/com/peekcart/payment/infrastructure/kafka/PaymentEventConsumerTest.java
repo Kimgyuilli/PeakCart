@@ -60,11 +60,27 @@ class PaymentEventConsumerTest {
         runIdempotent();
     }
 
+    /** 구 메시지 형태(items·reason 부재) — 하위호환 대조군 (계획 P5·P6). */
     private void stubOrderCancelled() {
         ObjectNode root = om.createObjectNode();
         root.put("eventId", "evt-oc-1");
         ObjectNode payload = root.putObject("payload");
         payload.put("orderId", PaymentFixture.DEFAULT_ORDER_ID);
+        given(kafkaMessageParser.parse("msg")).willReturn((JsonNode) root);
+        runIdempotent();
+    }
+
+    /** 신 메시지 형태(items·reason 포함) — Payment 는 orderId 만 읽으므로 동작이 같아야 한다. */
+    private void stubOrderCancelledWithItemsAndReason() {
+        ObjectNode root = om.createObjectNode();
+        root.put("eventId", "evt-oc-2");
+        ObjectNode payload = root.putObject("payload");
+        payload.put("orderId", PaymentFixture.DEFAULT_ORDER_ID);
+        payload.put("orderNumber", "ORD-001");
+        payload.put("reason", "PAYMENT_FAILED");
+        ObjectNode item = payload.putArray("items").addObject();
+        item.put("productId", 11L);
+        item.put("quantity", 2);
         given(kafkaMessageParser.parse("msg")).willReturn((JsonNode) root);
         runIdempotent();
     }
@@ -125,6 +141,19 @@ class PaymentEventConsumerTest {
 
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.APPROVED);
         then(slackPort).should().send(anyString());
+    }
+
+    @Test
+    @DisplayName("order.cancelled 에 items·reason 이 추가돼도 동작이 같다 (계약 확장 내성, P5·P6)")
+    void orderCancelled_withItemsAndReason_behavesSame() {
+        Payment payment = PaymentFixture.pendingPaymentWithId();
+        given(paymentRepository.findByOrderId(PaymentFixture.DEFAULT_ORDER_ID)).willReturn(Optional.of(payment));
+        stubOrderCancelledWithItemsAndReason();
+
+        consumer.handleOrderCancelled("msg");
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
+        then(slackPort).should(never()).send(anyString());
     }
 
     @Test

@@ -875,3 +875,28 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 **신규 부채**: **D-020**(결제 승인 ↔ 로컬 커밋 불일치 — Toss 승인 후 커밋 실패 시 과금 잔존·롤백, 웹훅 reconciliation 부재). GW-1 리뷰 #3 에서 발견했으나 PG reconciliation 표면이라 ④ 범위 밖으로 분리.
 
 **다음**: **④-b**(이벤트 계약 — `OrderCancelledPayload` `items[]`(ADR-0012 D2 명문)·`reason` enum·`payment.failed` 취소의 `order.cancelled` 발행 여부 결정) → ④-c(환불 요청 경로·DLQ 원장·runbook) → ④-d(관측·E2E·saga-contract 게이트·문서).
+
+---
+
+## 구현 ④ Choreography Saga — ④-b: order.cancelled 이벤트 계약 — 2026-08-14 — [#85](https://github.com/Kimgyuilli/PeakCart/pull/85)
+
+> 계획서 `task-impl4-choreography-saga.md` P5·P6·P7. ④-a 가 "상태 수렴 + lease"였다면 ④-b 는 **계약**이다 — ADR 이 명문화했으나 코드가 이행하지 않은 두 항목(`items[]`, `payment.failed` 취소의 발행)을 닫고, 취소 사유를 payload 에 넣어 소비자가 추론을 그만두게 했다.
+
+**P7 은 결정이 먼저였다.** 계획서가 "발행 여부를 먼저 결정하라"고 요구한 항목이라, 코드를 쓰기 전에 두 대안의 결과를 대조했다. ADR-0010 D3-4 는 발행을 명문화했지만, ADR-0012 D3 refine 이후 Product 는 `payment.failed` 를 직접 소비해 release 하므로 **기능적으로는 발행하지 않아도 구멍이 없다**. 그래서 근거는 "필요해서"가 아니라 **계약의 단순성**이다 — `order.cancelled` 를 *모든* 취소의 단일 lifecycle 이벤트로 두면, 취소를 알고 싶은 소비자가 경로별로 다른 토픽을 구독할 필요가 없다.
+
+**대신 중복 부작용을 소비자별로 실증했다**: Product 는 예약 원장 `RESERVED→RELEASED` CAS 라 두 번째 release 가 no-op, Payment 는 자기 상태가 `FAILED` 라 `cancelBeforePayment()` 가 no-op(APPROVED 오탐 알림이 뜨지 않는지 확인), Notification 은 `reason=PAYMENT_FAILED` 를 스킵. **세 번째가 P6 에 의존하므로 P6 없이 P7 만 넣으면 중복 알림이 그대로 나간다** — 두 항목의 순서가 우연이 아니다.
+
+**하위호환 방향을 명시했다.** 구 메시지(`reason` 부재)와 **모르는 값**은 둘 다 알림 발송으로 처리한다. 스킵을 기본값으로 두면 미래에 사유가 추가될 때 알림이 조용히 사라진다 — 하위호환에서 안전한 쪽은 침묵이 아니라 알림이다.
+
+**리뷰가 내 테스트를 반증했다 (GW-2 #2)**: 계획 §5.2 는 P7 에 "동일 트랜잭션 Outbox 증명"을 요구하는데, 내가 추가한 단위 테스트는 `@InjectMocks` 객체를 직접 호출해 **Spring 프록시도 DB 트랜잭션도 없다** — `@Transactional` 을 떼도, 주문 저장과 Outbox 저장이 분리돼도 계속 통과하는 false-green 이었다. `OrderCancelledEventContractIntegrationTest` 로 교체: 성공 시 `CANCELLED` + Outbox 1행 동시 커밋 + payload 계약, `@MockitoSpyBean` 으로 Outbox 저장을 실패시켜 주문 상태와 `processed_events` 까지 전량 롤백됨을 확인한다. **내 검증도구가 false-green 이었던 게 누적 4회째**(PR3d-a·b-1·④-a·④-b).
+
+**#1(P2)도 반영**: `handlePaymentFailed` 가 `order.cancel()` 을 무조건 호출해, 사용자·타임아웃 취소가 선커밋된 경합에서 `ORD-002` 로 롤백돼 DLQ 로 갔다. P7 이전에도 있던 결함이지만 **발행이 붙으면서 대가가 "중복 발행"에서 "DLQ"로 커졌다**. 형제 경로(`reserved=false`)가 이미 쓰던 no-op 규약으로 맞췄다.
+
+**검증**: 10모듈 **617 테스트 0 실패**(신규 10) · lint 10종 그린(매니페스트 미변경) · 마이그레이션 없음(payload-only 변경).
+
+**미충족(명시)**:
+1. **Layer 1 문서 드리프트** — `02`/`03`/`04` 의 `order.cancelled` payload 표기는 아직 구 계약. P15(④-d) 소관으로 이연(④-a 와 동일 취급).
+2. **R-2 배포 의존성 유지** — 본 PR 은 ④-a 의 원장→환불 의존성을 바꾸지 않는다.
+3. **크로스서비스 중복 발행 실증은 단위/통합 대조까지** — 실제 Kafka 위에서 Product/Payment/Notification 이 동시에 두 이벤트를 받는 순서 주입은 ④-d E2E(P12) 소관.
+
+**다음**: **④-c**(P8 환불 요청 경로 · P9/P10 DLQ 원장+runbook · P13 나머지) → ④-d(관측·E2E·saga-contract 게이트·문서).

@@ -6,6 +6,7 @@ import com.peekcart.global.kafka.MdcSnapshot;
 import com.peekcart.global.outbox.OutboxEvent;
 import com.peekcart.global.outbox.OutboxEventRepository;
 import com.peekcart.global.outbox.dto.KafkaEventEnvelope;
+import com.peekcart.global.outbox.dto.OrderCancelReason;
 import com.peekcart.global.outbox.dto.OrderCancelledPayload;
 import com.peekcart.global.outbox.dto.OrderCreatedPayload;
 import com.peekcart.global.outbox.dto.OrderItemPayload;
@@ -28,12 +29,7 @@ public class OrderOutboxEventPublisher {
     private final ObjectMapper objectMapper;
 
     public void publishOrderCreated(Order order) {
-        List<OrderItemPayload> items = order.getOrderItems().stream()
-                .map(item -> new OrderItemPayload(
-                        item.getProductId(),
-                        item.getQuantity(),
-                        item.getUnitPrice()))
-                .toList();
+        List<OrderItemPayload> items = toItemPayloads(order);
 
         OrderCreatedPayload payload = new OrderCreatedPayload(
                 order.getId(),
@@ -47,13 +43,29 @@ public class OrderOutboxEventPublisher {
         saveOutboxEvent(ORDER_CREATED, order.getId().toString(), payload);
     }
 
-    public void publishOrderCancelled(Order order) {
+    /**
+     * 주문 취소를 발행한다 (계획 P5·P6).
+     *
+     * @param reason 취소 사유. 진입점이 명시적으로 전달한다 — 소비자가 사유를 추론하지 않게 하기 위함이다
+     */
+    public void publishOrderCancelled(Order order, OrderCancelReason reason) {
         OrderCancelledPayload payload = new OrderCancelledPayload(
                 order.getId(),
                 order.getOrderNumber(),
-                order.getUserId());
+                order.getUserId(),
+                toItemPayloads(order),
+                reason);
 
         saveOutboxEvent(ORDER_CANCELLED, order.getId().toString(), payload);
+    }
+
+    private List<OrderItemPayload> toItemPayloads(Order order) {
+        return order.getOrderItems().stream()
+                .map(item -> new OrderItemPayload(
+                        item.getProductId(),
+                        item.getQuantity(),
+                        item.getUnitPrice()))
+                .toList();
     }
 
     private void saveOutboxEvent(String eventType, String aggregateId, Object payload) {

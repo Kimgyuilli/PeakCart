@@ -83,7 +83,13 @@ public class NotificationConsumer {
         });
     }
 
-    /** 주문 취소 알림을 발송한다. */
+    /**
+     * 주문 취소 알림을 발송한다.
+     *
+     * <p>결제 실패발 취소({@code reason=PAYMENT_FAILED})는 같은 사건을 {@code payment.failed} 로 이미
+     * 알렸으므로 스킵한다 — Order 가 모든 취소를 {@code order.cancelled} 로 발행하게 되면서(계획 P7)
+     * 생기는 중복 알림을 사유 필드로 차단한다.
+     */
     @KafkaListener(topics = "order.cancelled", groupId = GROUP_ORDER_CANCELLED)
     @Transactional
     public void handleOrderCancelled(String message) {
@@ -92,10 +98,23 @@ public class NotificationConsumer {
         JsonNode payload = root.get("payload");
 
         idempotencyChecker.executeIfNew(eventId, GROUP_ORDER_CANCELLED, () -> {
+            if (isPaymentFailedCancel(payload)) {
+                log.debug("결제 실패발 취소 — payment.failed 알림과 중복이므로 스킵");
+                return;
+            }
             Long userId = payload.get("userId").asLong();
             String orderNumber = payload.get("orderNumber").asText();
             String msg = String.format("주문이 취소되었습니다. [주문번호: %s]", orderNumber);
             notificationCommandService.createNotification(userId, NotificationType.ORDER_CANCELLED, msg);
         });
+    }
+
+    /**
+     * 취소 사유가 결제 실패인지 판정한다. 필드 부재/null(구 메시지) 과 모르는 값은 <b>false</b> 로 보고
+     * 알림을 발송한다 — 하위호환 방향에서 안전한 쪽은 "알리지 않음"이 아니라 "알림"이다 (ADR-0012 D2).
+     */
+    private boolean isPaymentFailedCancel(JsonNode payload) {
+        JsonNode reason = payload.get("reason");
+        return reason != null && !reason.isNull() && "PAYMENT_FAILED".equals(reason.asText());
     }
 }

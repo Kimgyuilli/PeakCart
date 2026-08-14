@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.global.idempotency.IdempotencyChecker;
 import com.peekcart.global.kafka.KafkaMessageParser;
+import com.peekcart.global.outbox.dto.OrderCancelReason;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.CompensationReason;
@@ -102,8 +103,14 @@ public class OrderEventConsumer {
     }
 
     /**
-     * 결제 실패 시 주문을 취소한다.
-     * 재고 복구는 Product 가 {@code payment.failed} 를 직접 소비해 release Saga 로 처리한다 (ADR-0012 D3).
+     * 결제 실패 시 주문을 취소하고 {@code order.cancelled}(reason={@code PAYMENT_FAILED})를 발행한다.
+     *
+     * <p>발행 결정(계획 P7): {@code order.cancelled} 를 <b>모든 취소의 단일 lifecycle 이벤트</b>로 두고
+     * ADR-0010 D3-4 의 명문 경로를 복원한다. 재고 복구 자체는 Product 가 {@code payment.failed} 를 직접
+     * 소비해 이미 수행하므로(ADR-0012 D3 refine) 이 발행은 중복 트리거지만, 소비자별로 무해하다 —
+     * Product 는 예약 원장 {@code RESERVED→RELEASED} CAS 라 두 번째 release 가 no-op 이고, Payment 는
+     * 이미 {@code FAILED} 라 {@code cancelBeforePayment()} 가 no-op 이며, Notification 은 중복 알림을
+     * 피하려고 {@code reason=PAYMENT_FAILED} 를 스킵한다(사유 필드가 있어야 성립하는 분기라 P6 선행).
      */
     @KafkaListener(topics = "payment.failed", groupId = GROUP_PAYMENT_FAILED)
     @Transactional
@@ -116,7 +123,15 @@ public class OrderEventConsumer {
             Long orderId = payload.get("orderId").asLong();
             Order order = orderRepository.findById(orderId)
                     .orElseThrow(() -> new OrderException(ErrorCode.ORD_001));
+            if (order.getStatus() == OrderStatus.CANCELLED) {
+                // 사용자·타임아웃·예약 실패 취소가 먼저 커밋된 뒤 payment.failed 가 도착하는 경합.
+                // 목표 상태(CANCELLED)는 이미 달성됐으므로 ORD-002 로 던져 DLQ 로 보내지 않는다 —
+                // 재시도해도 상태는 같고, 취소 발행은 선행 경로가 이미 했다(reserved=false 경로와 동일 규약).
+                log.debug("결제 실패 수신했으나 주문이 이미 취소됨 — no-op, orderId={}", orderId);
+                return;
+            }
             order.cancel();
+            outboxEventPublisher.publishOrderCancelled(order, OrderCancelReason.PAYMENT_FAILED);
             log.debug("결제 실패로 주문 취소 — orderId={}", orderId);
         });
     }
@@ -148,7 +163,7 @@ public class OrderEventConsumer {
                 log.debug("예약 실패 수신했으나 주문이 이미 취소됨 — no-op, orderId={}", orderId);
             } else {
                 order.cancel();
-                outboxEventPublisher.publishOrderCancelled(order);
+                outboxEventPublisher.publishOrderCancelled(order, OrderCancelReason.RESERVATION_FAILED);
                 log.debug("재고 예약 실패로 주문 취소 — orderId={}", orderId);
             }
         });

@@ -8,8 +8,11 @@ import com.peekcart.global.outbox.OutboxEventRepository;
 import com.peekcart.global.outbox.dto.KafkaEventEnvelope;
 import com.peekcart.global.outbox.dto.PaymentCompletedPayload;
 import com.peekcart.global.outbox.dto.PaymentFailedPayload;
+import com.peekcart.global.outbox.dto.PaymentRefundedPayload;
 import com.peekcart.global.outbox.dto.PaymentRequestedPayload;
+import com.peekcart.global.outbox.dto.RefundResult;
 import com.peekcart.payment.domain.model.Payment;
+import com.peekcart.payment.domain.model.PaymentRefund;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +26,7 @@ public class PaymentOutboxEventPublisher {
     private static final String PAYMENT_COMPLETED = "payment.completed";
     private static final String PAYMENT_FAILED = "payment.failed";
     private static final String PAYMENT_REQUESTED = "payment.requested";
+    private static final String PAYMENT_REFUNDED = "payment.refunded";
 
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
@@ -55,6 +59,24 @@ public class PaymentOutboxEventPublisher {
                 payment.getAmount());
 
         saveOutboxEvent(PAYMENT_FAILED, payment.getOrderId().toString(), payload);
+    }
+
+    /**
+     * 환불 결과를 Order·Product·Notification 에 회신한다 (ADR-0018 D1/D4).
+     *
+     * <p>{@code UNRESOLVED} 는 발행하지 않는다 — 확정되지 않은 결과로 소비자 원장을 닫으면
+     * 그 원장이 거짓이 된다. 호출자가 확정 상태에서만 부른다.
+     */
+    public void publishPaymentRefunded(PaymentRefund refund, RefundResult result) {
+        PaymentRefundedPayload payload = new PaymentRefundedPayload(
+                refund.getOrderId(),
+                refund.getUserId(),
+                result,
+                result == RefundResult.SUCCEEDED ? refund.getAmount() : null,
+                refund.getFailureCode(),
+                refund.getResolvedAt());
+
+        saveOutboxEvent(PAYMENT_REFUNDED, refund.getOrderId().toString(), payload);
     }
 
     private void saveOutboxEvent(String eventType, String aggregateId, Object payload) {

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.global.idempotency.IdempotencyChecker;
 import com.peekcart.global.kafka.KafkaMessageParser;
+import com.peekcart.payment.application.PaymentRefundService;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.payment.domain.exception.PaymentException;
 import com.peekcart.payment.domain.model.Payment;
@@ -37,6 +38,7 @@ public class PaymentEventConsumer {
     private final PaymentCancellationRepository paymentCancellationRepository;
     private final IdempotencyChecker idempotencyChecker;
     private final KafkaMessageParser kafkaMessageParser;
+    private final PaymentRefundService paymentRefundService;
     private final SlackPort slackPort;
 
     /** 주문 생성 시 {@code PENDING} 상태의 Payment를 생성한다 (소유자 검증용 userId 포함). */
@@ -104,10 +106,12 @@ public class PaymentEventConsumer {
             Long orderId = payload.get("orderId").asLong();
             paymentRepository.findByOrderId(orderId).ifPresentOrElse(payment -> {
                 if (payment.cancelBeforePayment()) {
-                    // APPROVED 후 취소(과금-후-취소): 상태는 덮지 않고 보상으로 수렴 — 운영 알림 발행(ADR-0012 §D3 ④).
-                    // 환불 트리거 자체는 구현 ④ 범위이며, 본 PR 은 운영 알림 경로를 연결한다.
-                    slackPort.send("[보상 필요] 과금 완료(APPROVED) 후 주문 취소 수신 — 환불 처리 필요, orderId=" + orderId);
-                    log.warn("과금-후-취소 감지 — 운영 알림 발행, 환불 보상 필요(ADR-0012 §D3 ④), orderId={}", orderId);
+                    // APPROVED 후 취소(과금-후-취소) → 환불 원장에 REQUESTED 를 영속한다 (ADR-0018 D4).
+                    // Slack 은 배포 구성상 no-op 이라 종결은커녕 기록도 되지 못했다 — 원장이 진실이다.
+                    // PG 호출은 여기서 하지 않는다: 소비 트랜잭션이 롤백되면 fence 행이 사라져
+                    // fence 자체가 무효가 된다(ADR-0018 D3). 실행은 dispatcher 소관.
+                    paymentRefundService.requestRefund(payment, "PAID_BUT_CANCELLED");
+                    log.warn("과금-후-취소 감지 — 환불 요청 기록(ADR-0018 D4), orderId={}", orderId);
                 }
             }, () -> {
                 // order.cancelled 가 order.created 보다 선도착(Payment 미존재): orderId 기준 취소 marker 를 영속화.

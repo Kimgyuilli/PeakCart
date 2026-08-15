@@ -7,6 +7,7 @@ import com.peekcart.global.idempotency.IdempotencyChecker;
 import com.peekcart.global.kafka.KafkaMessageParser;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.payment.domain.exception.PaymentException;
+import com.peekcart.payment.application.PaymentRefundService;
 import com.peekcart.payment.domain.model.Payment;
 import com.peekcart.payment.domain.model.PaymentCancellation;
 import com.peekcart.payment.domain.model.PaymentStatus;
@@ -40,6 +41,7 @@ class PaymentEventConsumerTest {
     @Mock IdempotencyChecker idempotencyChecker;
     @Mock KafkaMessageParser kafkaMessageParser;
     @Mock SlackPort slackPort;
+    @Mock PaymentRefundService paymentRefundService;
 
     private final ObjectMapper om = new ObjectMapper();
 
@@ -127,20 +129,23 @@ class PaymentEventConsumerTest {
         consumer.handleOrderCancelled("msg");
 
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
-        then(slackPort).should(never()).send(anyString());
+        // 결제 시작 전 취소 — 과금이 없으므로 환불 요청을 만들지 않는다
+        then(paymentRefundService).should(never()).requestRefund(any(), anyString());
     }
 
     @Test
-    @DisplayName("order.cancelled + APPROVED(과금-후-취소) → APPROVED 유지 + 운영 알림 발행")
-    void orderCancelled_approved_keepsApprovedAndAlerts() {
+    @DisplayName("order.cancelled + APPROVED(과금-후-취소) → APPROVED 유지 + 환불 요청 기록(ADR-0018 D4)")
+    void orderCancelled_approved_keepsApprovedAndRequestsRefund() {
         Payment payment = PaymentFixture.approvedPayment();
         given(paymentRepository.findByOrderId(PaymentFixture.DEFAULT_ORDER_ID)).willReturn(Optional.of(payment));
         stubOrderCancelled();
 
         consumer.handleOrderCancelled("msg");
 
+        // 과금은 살아있으므로 상태를 덮지 않고, 환불 요청을 원장에 남긴다.
+        // Slack 은 배포 구성상 no-op 이라 종결 근거가 못 된다(ADR-0018 C1/D4).
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.APPROVED);
-        then(slackPort).should().send(anyString());
+        then(paymentRefundService).should().requestRefund(payment, "PAID_BUT_CANCELLED");
     }
 
     @Test
@@ -153,7 +158,8 @@ class PaymentEventConsumerTest {
         consumer.handleOrderCancelled("msg");
 
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
-        then(slackPort).should(never()).send(anyString());
+        // 결제 시작 전 취소 — 과금이 없으므로 환불 요청을 만들지 않는다
+        then(paymentRefundService).should(never()).requestRefund(any(), anyString());
     }
 
     @Test

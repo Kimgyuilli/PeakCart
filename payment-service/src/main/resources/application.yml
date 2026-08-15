@@ -64,6 +64,21 @@ app:
   # fence 가 아니라 경합 창 축소이며, 잔여 위험은 계획 §2.6 R-1 로 추적한다.
   payment:
     lease-approval-margin: 2m
+  # 환불 경로 동작 정책 (ADR-0018 · 구현 ④-c-1a) — 동작 정책이므로 base 소유(ADR-0007).
+  # claim-lease 는 PG 호출 최악 소요(pg-timeout × max-attempts + 백오프 총합)보다 길어야 한다 —
+  # 짧으면 살아있는 claim 을 다른 인스턴스가 회수해 같은 결제에 취소를 두 번 시도한다(부팅 시 fail-fast).
+  refund:
+    claim-lease: 5m
+    pg-timeout: 10s
+    max-attempts: 3
+    retry-backoff: 2s
+    batch-size: 5
+    max-batches-per-run: 2     # 앞 배치가 계속 미확정이어도 뒤 배치가 굶지 않게 한다
+    unresolved-limit: 24h      # 초과 시 자동 확정 포기 → 운영 알림 + 수동 종결(감사 필드 필수)
+    dispatch-interval-ms: 30000
+    reconcile-interval-ms: 300000
+    lock-at-most-for: 20m      # 1회 실행 최악(건당 66s × 5 × 2 = 11m) 보다 길어야 함(부팅 시 fail-fast)
+
   # processed_events 멱등성 보존 정책 (ADR-0012 D5 · 구현 ② PR3) — 동작 정책이므로 base 소유(ADR-0007).
   idempotency:
     retention: 7d          # floor 4창 max(=7d) 이상 — 미만이면 부팅 실패(fail-fast)

@@ -120,6 +120,19 @@ public class Payment {
     }
 
     /**
+     * 환불이 확정된 결제를 종결 상태로 전이한다 (ADR-0018 D2).
+     * 환불의 <i>진행</i> 상태는 {@code payment_refunds} 원장이 소유하며, 여기에는 확정만 반영한다.
+     *
+     * @throws PaymentException APPROVED 가 아니면 {@code PAY-004}
+     */
+    public void markRefunded() {
+        if (!this.status.canTransitionTo(PaymentStatus.REFUNDED)) {
+            throw new PaymentException(ErrorCode.PAY_004);
+        }
+        this.status = PaymentStatus.REFUNDED;
+    }
+
+    /**
      * 요청 금액이 결제 금액과 일치하는지 검증한다.
      *
      * @throws PaymentException 금액 불일치 시 {@code PAY-001}

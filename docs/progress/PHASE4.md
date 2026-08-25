@@ -957,7 +957,7 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 
 ---
 
-## 구현 ④ Choreography Saga — ④-c-1b: 크로스서비스 환불 계약 — 2026-08-25
+## 구현 ④ Choreography Saga — ④-c-1b: 크로스서비스 환불 계약 — 2026-08-25 — [#88](https://github.com/Kimgyuilli/PeekCart/pull/88)
 
 > ④-c-1a 가 payment-service 안에서 닫은 실행 엔진에 **트리거와 회신**을 붙여 R-2 를 닫는다.
 > ④-a 가 남긴 "`order_compensations` 가 `OPEN` 으로 쌓이기만 하고 환불은 수동" 이 여기서 해소된다.

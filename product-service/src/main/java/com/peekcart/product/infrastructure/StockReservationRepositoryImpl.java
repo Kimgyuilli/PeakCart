@@ -40,8 +40,8 @@ public class StockReservationRepositoryImpl implements StockReservationRepositor
     }
 
     @Override
-    public int markCompensatedIfAbsent(Long orderId) {
-        return jpaRepository.markCompensatedIfAbsent(orderId, LocalDateTime.now());
+    public int markCompensatedIfAbsent(Long orderId, LocalDateTime detectedAt) {
+        return jpaRepository.markCompensatedIfAbsent(orderId, detectedAt);
     }
 
     @Override

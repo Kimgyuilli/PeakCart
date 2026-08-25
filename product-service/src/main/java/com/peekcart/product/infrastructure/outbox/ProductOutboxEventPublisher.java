@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.kafka.MdcSnapshot;
 import com.peekcart.global.outbox.OutboxEvent;
 import com.peekcart.global.outbox.OutboxEventRepository;
+import com.peekcart.global.outbox.dto.CompensationReason;
+import com.peekcart.global.outbox.dto.CompensationRequestedPayload;
 import com.peekcart.global.outbox.dto.KafkaEventEnvelope;
 import com.peekcart.global.outbox.dto.ProductUpdatedPayload;
 import com.peekcart.global.outbox.dto.ReservedItemPayload;
@@ -29,6 +31,7 @@ public class ProductOutboxEventPublisher {
     private static final String AGGREGATE_TYPE = "PRODUCT";
     private static final String STOCK_RESERVATION_RESULT = "stock.reservation.result";
     private static final String PRODUCT_UPDATED = "product.updated";
+    private static final String STOCK_COMPENSATION_REQUESTED = "stock.compensation.requested";
 
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
@@ -76,6 +79,26 @@ public class ProductOutboxEventPublisher {
         OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, product.getId().toString(),
                 PRODUCT_UPDATED, mdc.traceId(), mdc.userId(),
                 eventId -> serialize(new KafkaEventEnvelope(eventId, PRODUCT_UPDATED,
+                        LocalDateTime.now(), payload)));
+        outboxEventRepository.save(outboxEvent);
+    }
+
+    /**
+     * 환불 보상을 요청한다 (ADR-0018 D1). <b>감지 marker 기록과 같은 트랜잭션</b>에서 호출돼야 한다 —
+     * 부분 커밋은 "감지했는데 요청이 없는" 영구 미결을 만든다.
+     *
+     * <p>aggregateType/aggregateId 는 {@code PRODUCT}/{@code orderId} 로 고정한다. backfill SQL 의
+     * {@code NOT EXISTS} 조건이 <b>같은 키</b>를 쓰기 때문에, 여기를 바꾸면 backfill 멱등이 깨진다.
+     *
+     * @param detectedAt 감지 시각 (발행 시각이 아니다)
+     */
+    public void publishCompensationRequested(Long orderId, CompensationReason reason, LocalDateTime detectedAt) {
+        CompensationRequestedPayload payload = new CompensationRequestedPayload(orderId, reason, detectedAt);
+
+        MdcSnapshot.Snapshot mdc = MdcSnapshot.current();
+        OutboxEvent outboxEvent = OutboxEvent.create(AGGREGATE_TYPE, orderId.toString(),
+                STOCK_COMPENSATION_REQUESTED, mdc.traceId(), mdc.userId(),
+                eventId -> serialize(new KafkaEventEnvelope(eventId, STOCK_COMPENSATION_REQUESTED,
                         LocalDateTime.now(), payload)));
         outboxEventRepository.save(outboxEvent);
     }

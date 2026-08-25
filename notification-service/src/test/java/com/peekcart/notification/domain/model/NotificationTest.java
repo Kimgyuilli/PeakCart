@@ -44,13 +44,14 @@ class NotificationTest {
     class TypeValues {
 
         @Test
-        @DisplayName("4가지 알림 유형이 존재한다")
-        void hasFourTypes() {
+        @DisplayName("5가지 알림 유형이 존재한다")
+        void hasFiveTypes() {
             assertThat(NotificationType.values()).containsExactly(
                     NotificationType.ORDER_CREATED,
                     NotificationType.PAYMENT_COMPLETED,
                     NotificationType.PAYMENT_FAILED,
-                    NotificationType.ORDER_CANCELLED
+                    NotificationType.ORDER_CANCELLED,
+                    NotificationType.PAYMENT_REFUNDED
             );
         }
     }

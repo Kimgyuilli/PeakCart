@@ -25,7 +25,8 @@ import java.time.LocalDateTime;
 /**
  * 결제·재고예약 관련 Kafka 이벤트를 소비하여 주문 상태를 전이하는 Consumer.
  * <p>
- * 소비 토픽: {@code payment.requested}, {@code payment.completed}, {@code payment.failed}, {@code stock.reservation.result}
+ * 소비 토픽: {@code payment.requested}, {@code payment.completed}, {@code payment.failed},
+ * {@code stock.reservation.result}, {@code payment.refunded}
  */
 @Slf4j
 @Component
@@ -36,6 +37,7 @@ public class OrderEventConsumer {
     private static final String GROUP_PAYMENT_COMPLETED = "order-svc-payment-completed-group";
     private static final String GROUP_PAYMENT_FAILED = "order-svc-payment-failed-group";
     private static final String GROUP_STOCK_RESULT = "order-svc-stock-result-group";
+    private static final String GROUP_PAYMENT_REFUNDED = "order-svc-payment-refunded-group";
 
     private final OrderRepository orderRepository;
     private final OrderCompensationRepository compensationRepository;
@@ -170,6 +172,50 @@ public class OrderEventConsumer {
     }
 
     /**
+     * 환불 결과 회신을 소비해 보상 원장을 <b>종결</b>한다 (ADR-0018 D4). ④-a 가 남긴 R-2 —
+     * {@code order_compensations} 가 {@code OPEN} 으로 쌓이기만 하던 문제 — 가 여기서 닫힌다.
+     *
+     * <p>결과별 종착이 다르다: {@code SUCCEEDED} 는 {@code RESOLVED}("환불 완료"),
+     * {@code FAILED} 는 {@code REFUND_FAILED}("닫혔지만 해결되지 않음"), {@code UNRESOLVED} 는
+     * <b>전이하지 않는다</b> — Payment 가 확정한 뒤 다시 발행하므로 여기서 닫으면 거짓이 된다.
+     * (Payment 는 UNRESOLVED 를 발행하지 않지만, 계약상 값이 존재하므로 방어한다.)
+     *
+     * <p>원장이 없는 회신은 정상이다 — 감지 지점이 3곳이라 Payment 로컬 감지나 Product 감지만으로
+     * 시작된 환불의 회신이 Order 에도 도착한다. 예외로 던져 DLQ 로 보낼 이유가 없다.
+     */
+    @KafkaListener(topics = "payment.refunded", groupId = GROUP_PAYMENT_REFUNDED)
+    @Transactional
+    public void handlePaymentRefunded(String message) {
+        JsonNode root = kafkaMessageParser.parse(message);
+        String eventId = root.get("eventId").asText();
+        JsonNode payload = root.get("payload");
+
+        idempotencyChecker.executeIfNew(eventId, GROUP_PAYMENT_REFUNDED, () -> {
+            Long orderId = payload.get("orderId").asLong();
+            String result = readText(payload, "result");
+            OrderCompensation compensation = compensationRepository
+                    .findByOrderIdAndReason(orderId, CompensationReason.PAID_BUT_CANCELLED)
+                    .orElse(null);
+            if (compensation == null) {
+                log.debug("환불 회신 수신했으나 Order 보상 원장 없음 — 다른 감지 지점발 환불, orderId={}", orderId);
+                return;
+            }
+            LocalDateTime resolvedAt = readResolvedAt(payload);
+            if ("SUCCEEDED".equals(result)) {
+                compensation.resolveByRefund(resolvedAt);
+                log.info("환불 성공 회신 — 보상 해소(RESOLVED), orderId={}", orderId);
+            } else if ("FAILED".equals(result)) {
+                compensation.failByRefund(readText(payload, "failureCode"), resolvedAt);
+                log.error("환불 영구 실패 회신 — 보상 미해결 종착(REFUND_FAILED), orderId={}, code={}",
+                        orderId, compensation.getFailureCode());
+            } else {
+                // UNRESOLVED · 모르는 값 · 필드 부재 — 전이하지 않는다. 확정 회신이 뒤따른다.
+                log.warn("확정되지 않은 환불 회신 — 전이 없음, orderId={}, result={}", orderId, result);
+            }
+        });
+    }
+
+    /**
      * 취소된 주문에 도착한 결제 완료를 <b>영속</b> 보상 원장으로 남긴다 (GW-2 #2).
      *
      * <p>소비와 같은 트랜잭션이라 {@code processed_events} 커밋과 원장 기록이 함께 성립하거나 함께
@@ -181,12 +227,34 @@ public class OrderEventConsumer {
         boolean alreadyOpen = compensationRepository
                 .findByOrderIdAndReason(orderId, CompensationReason.PAID_BUT_CANCELLED).isPresent();
         if (!alreadyOpen) {
-            compensationRepository.save(OrderCompensation.open(orderId, CompensationReason.PAID_BUT_CANCELLED,
-                    "취소된 주문에 payment.completed 도착 — 환불 필요"));
+            OrderCompensation compensation = compensationRepository.save(
+                    OrderCompensation.open(orderId, CompensationReason.PAID_BUT_CANCELLED,
+                            "취소된 주문에 payment.completed 도착 — 환불 필요"));
+            // 감지 원장과 요청 Outbox 는 같은 트랜잭션이다(ADR-0018 D1 원자성 불변식) — 부분 커밋은
+            // "감지했는데 아무도 환불하지 않는" 영구 미결을 만든다. detectedAt 은 원장에 기록된
+            // 값 그대로 실어, 두 기록이 같은 사실임을 코드로 고정한다.
+            outboxEventPublisher.publishCompensationRequested(orderId,
+                    com.peekcart.global.outbox.dto.CompensationReason.PAID_BUT_CANCELLED,
+                    compensation.getDetectedAt());
         }
-        log.error("PAID_BUT_CANCELLED — 취소된 주문에 결제 완료 도착, 환불 보상 필요(원장 기록). orderId={}", orderId);
-        slackPort.send("[보상 필요] PAID_BUT_CANCELLED orderId=" + orderId
-                + " — 취소된 주문의 결제가 승인됨. 환불 확인 요망.");
+        log.error("PAID_BUT_CANCELLED — 취소된 주문에 결제 완료 도착, 환불 요청 발행(원장 기록). orderId={}", orderId);
+        slackPort.send("[보상 요청] PAID_BUT_CANCELLED orderId=" + orderId
+                + " — 취소된 주문의 결제가 승인됨. 환불 요청 발행.");
+    }
+
+    /** 문자열 필드를 읽는다. 부재/null 은 {@code null} — 구 메시지 내성(ADR-0012 D2). */
+    private String readText(JsonNode payload, String field) {
+        JsonNode node = payload.get(field);
+        return node == null || node.isNull() ? null : node.asText();
+    }
+
+    /**
+     * 확정 시각을 읽는다. 부재/null 이면 소비 시각으로 대체한다 — 종결 시각이 비면 "닫혔는데
+     * 언제인지 모르는" 원장이 되어 운영 조회가 불가능해진다.
+     */
+    private LocalDateTime readResolvedAt(JsonNode payload) {
+        String raw = readText(payload, "resolvedAt");
+        return raw == null ? LocalDateTime.now() : LocalDateTime.parse(raw);
     }
 
     /**

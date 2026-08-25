@@ -27,6 +27,9 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class OrderCompensation {
 
+    /** 실패 회신에 사유 코드가 없을 때 쓰는 대체값 — 근거 없는 미해결 종착을 만들지 않는다. */
+    private static final String UNKNOWN_FAILURE_CODE = "UNKNOWN";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -51,6 +54,10 @@ public class OrderCompensation {
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
 
+    /** 환불 영구 실패 사유 코드 ({@code REFUND_FAILED} 일 때만). */
+    @Column(name = "failure_code", length = 60)
+    private String failureCode;
+
     private OrderCompensation(Long orderId, CompensationReason reason, String detail) {
         this.orderId = orderId;
         this.reason = reason;
@@ -59,8 +66,42 @@ public class OrderCompensation {
         this.detectedAt = LocalDateTime.now();
     }
 
-    /** 미해소(OPEN) 보상 건을 생성한다. 해소(RESOLVED) 전이는 환불 요청 경로(P8) 소관이다. */
+    /** 미해소(OPEN) 보상 건을 생성한다. 종결 전이는 {@code payment.refunded} 회신이 수행한다. */
     public static OrderCompensation open(Long orderId, CompensationReason reason, String detail) {
         return new OrderCompensation(orderId, reason, detail);
+    }
+
+    /**
+     * 환불 성공 회신으로 해소한다 (ADR-0018 D4). 이미 종결된 건은 no-op —
+     * 회신이 재전달돼도(DLQ 재발행·재소비) 종착 상태와 시각이 흔들리지 않는다.
+     */
+    public void resolveByRefund(LocalDateTime resolvedAt) {
+        if (isClosed()) {
+            return;
+        }
+        this.status = CompensationStatus.RESOLVED;
+        this.resolvedAt = resolvedAt;
+    }
+
+    /**
+     * 환불 영구 실패 회신으로 닫는다 (ADR-0018 D4). <b>해결됨이 아니다</b> — 운영이 처리할
+     * 대상으로 남기며 사유 코드를 함께 기록한다.
+     *
+     * <p>사유 코드가 비면 {@code UNKNOWN} 으로 정규화한다 — 미해결 종착은 운영이 보고 처리해야 하는데
+     * 근거 없이 고정되면 무엇을 처리해야 할지 알 수 없고, {@link #isClosed()} 때문에 이후 정상 회신도
+     * no-op 이라 되돌릴 수 없다. 값을 비워 두느니 "모른다"를 명시적으로 남긴다.
+     */
+    public void failByRefund(String failureCode, LocalDateTime resolvedAt) {
+        if (isClosed()) {
+            return;
+        }
+        this.status = CompensationStatus.REFUND_FAILED;
+        this.failureCode = (failureCode == null || failureCode.isBlank()) ? UNKNOWN_FAILURE_CODE : failureCode;
+        this.resolvedAt = resolvedAt;
+    }
+
+    /** 종착 여부. {@code OPEN} 만 미종결이다. */
+    public boolean isClosed() {
+        return status != CompensationStatus.OPEN;
     }
 }

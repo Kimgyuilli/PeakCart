@@ -31,6 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -117,11 +118,14 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
         JsonNode payload = objectMapper.readTree(event.getPayload()).get("payload");
         assertThat(payload.get("orderId").asLong()).isEqualTo(orderId);
         assertThat(payload.get("reason").asText()).isEqualTo("PAID_BUT_CANCELLED");
-        // detectedAt 은 원장의 감지 시각과 같은 사실이어야 한다
+        // detectedAt 은 원장의 감지 시각과 같은 사실이어야 한다.
+        // 비교 정밀도를 마이크로초로 맞추는 이유: payload 는 인메모리 LocalDateTime 을 그대로 직렬화하고
+        // (Linux 는 나노초 분해능) 원장은 DATETIME(6) 에서 마이크로초로 잘려 돌아온다. 저장소가 담지
+        // 못하는 자릿수까지 같기를 요구하면 OS 시계 분해능에 따라 결과가 갈리는 단언이 된다.
         OrderCompensation ledger = compensationRepository
                 .findByOrderIdAndReason(orderId, CompensationReason.PAID_BUT_CANCELLED).orElseThrow();
-        assertThat(LocalDateTime.parse(payload.get("detectedAt").asText()))
-                .isEqualTo(ledger.getDetectedAt());
+        assertThat(LocalDateTime.parse(payload.get("detectedAt").asText()).truncatedTo(ChronoUnit.MICROS))
+                .isEqualTo(ledger.getDetectedAt().truncatedTo(ChronoUnit.MICROS));
     }
 
     @Test

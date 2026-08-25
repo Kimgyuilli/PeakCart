@@ -97,3 +97,36 @@
 - **ADR**: 신규 없음(ADR-0018 이행). Status 변경 없음
 - **Layer 1**: 미갱신 — 1b 에서 크로스서비스 표면이 완성된 뒤(계획 P15)
 - 커밋 6개, 브랜치 `feat/impl4-c1a-refund-engine`
+
+---
+
+## 2026-08-25 — GW-2 (④-c-1b, loop 1)
+
+- 리뷰 run: `work:20260825T085006Z:...:1:c1` · `:c2` · `:c3` (split 3 chunk, 32파일 전수 — unreviewed_scope 0)
+- 항목: **14건** (P0 2 · P1 11 · P2 1) — **13건 반영 · 1건 기각**
+- 사용자 선택: [1] 전체 반영
+- diff: `.cache/diffs/diff-task-impl4-c1-refund-path-1787647647.patch` (2,367줄)
+- raw: `.cache/codex-reviews/diff-c1b-c{1,2,3}-*.json`
+
+| # | sev | 지적 | 처분 |
+|---|---|---|---|
+| c1:1 | **P0** | `payment.refunded` 가 `payment.completed` 보다 선도착하면 소비자 원장이 없어 no-op → 뒤늦게 만든 `OPEN` 원장은 fence 에 막혀 회신을 못 받음 → **영구 미결(R-2 복귀)** | **반영**. 종결된 fence 에 요청이 오면 회신 재발행(`republishIfAlreadyResolved`) |
+| c1:2 | P0 | "patch 만으로 컴파일 불가" | **기각** — 3-chunk 분할 아티팩트 |
+| c1:5·c2:1·c3:1 | P1×3 | backfill 1단계가 `PENDING`+`payload='{}'` 를 노출 → 구 poller 가 **빈 이벤트를 발행하고 PUBLISHED 로 봉인** | **반영**. 1단계를 `BACKFILL` 로, 2단계가 payload+`PENDING` 을 한 UPDATE 에서 전환 |
+| c2:2 | P1 | 요청 소비가 `reason`/`detectedAt` 미검증, `orderId` null→0 축약 채로 금전 동작 개시 | **반영**. 필수 필드·양수 검증, **미지 enum 만** `UNKNOWN` 정규화 |
+| c2:3 | P1 | `failByRefund` 가 null failureCode 로 종착 고정 | **반영**. `UNKNOWN` 정규화 |
+| c3:3 | P1 | Notification `asLong()` 강제 변환 → 사용자 0 에게 0원 알림 | **반영**. 타입·양수 검증 후 위반 시 예외(DLQ) |
+| c3:4 | P1 | Product 종결이 `SUCCEEDED`+failureCode 같은 모순 조합 허용 | **반영**. 도메인에서 결과별 불변식 강제 |
+| c1:3·c2:4 | P1×2 | 회신·요청 테스트가 listener 직접 호출 → group/factory 배선 false-green | **반영**. 3서비스에 실제 Kafka 왕복 배선 테스트 추가(조합 전수는 직접 호출 유지) |
+| c1:4·c3:2 | P1×2 | backfill 테스트가 마이그레이션 SQL **복제본** 실행 | **반영**. 테스트가 V4/V5 파일을 읽어 DML 을 추출·실행(SSOT 1개) |
+| c1:6 | P2 | Notification 음성 테스트가 총계만 확인 | **반영**. 살아남은 알림의 orderId 단언 + null userId 케이스 추가 |
+
+### 검증 메모 (loop 1)
+
+**c1:1 은 이 PR 의 존재 이유를 되돌리는 건이었다.** ④-c-1b 는 R-2(=`order_compensations` 가 `OPEN` 으로 쌓이는 문제)를 닫으려고 만든 PR 인데, 특정 도착 순서에서 정확히 그 상태가 다시 생긴다. 내가 "세 진입점이 하나의 fence 로 수렴한다"를 계약으로 적어놓고 **fence 가 요청을 흡수한 뒤 회신이 없는 경우**는 보지 않았다.
+
+수정 중 **가드 순서 때문에 1차 수정이 실패**했다(테스트가 잡음): 환불이 성공하면 `payments` 는 `REFUNDED` 로 옮겨가므로 기존 `APPROVED` 가드가 먼저 걸려 재발행 경로에 닿지 못했다. 종결 검사를 상태 가드보다 앞에 둬야 성립한다.
+
+**c1:5/c2:1/c3:1 은 내가 "2단계 분리는 재실행에 안전하다"고 적으면서 poller 노출을 보지 않은 것이다.** 재실행 안전성만 따지고 *두 문장 사이에 다른 프로세스가 존재한다*는 사실을 계산에 넣지 않았다. 수정 중 `BACKFILL` 문자열이 enum 에 없어 엔티티 조회가 깨지는 것도 테스트가 잡아, 값을 `OutboxEventStatus` 에 등재했다(어떤 조회도 대상으로 하지 않지만 매핑 없는 값이 DB 에 남으면 안 된다).
+
+**c2:2·c1:4 는 "테스트가 계약이 아니라 구현을 기술" 의 재발이다.** ④-c-1a 라운드1 에서 같은 지적(stale CLAIMED 재호출)을 받았는데, 이번엔 ① 필수 필드 부재를 "관용"으로 고정한 테스트 ② 마이그레이션 SQL 복제본을 검증 대상으로 삼은 테스트 두 형태로 나타났다. 후자는 **검증 대상과 검증 도구가 같은 출처가 아니면 성립하지 않는다**는 점에서 앞선 false-green 들과 같은 구조다.

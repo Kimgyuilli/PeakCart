@@ -252,6 +252,9 @@ erDiagram
     timestamp confirmed_at
     timestamp released_at
     timestamp compensated_at
+    string refund_result
+    timestamp refund_resolved_at
+    string refund_failure_code
     timestamp created_at
     timestamp updated_at
   }
@@ -279,7 +282,7 @@ erDiagram
   products ||--|| inventories : tracks
 ```
 
-> Product 가 Phase 4 에서 `product.updated`/`stock.reservation.result` 발행 + `order.created`/`payment.*` 소비를 하므로 `outbox_events`/`processed_events` 를 소유한다. 재고 예약은 `inventories` 의 예약 컬럼이 아니라 **별도 `stock_reservations` 테이블**(orderId 단위 예약 원장)로 구현됐다 (see ADR-0012 §D1/§D3, **ADR-0016** — 재기록). `order_id`/`source_event_id` 는 교차 도메인 ID 참조(FK 없음, 구현 ② PR1 V13).
+> Product 가 Phase 4 에서 `product.updated`/`stock.reservation.result` 발행 + `order.created`/`payment.*` 소비를 하므로 `outbox_events`/`processed_events` 를 소유한다. 재고 예약은 `inventories` 의 예약 컬럼이 아니라 **별도 `stock_reservations` 테이블**(orderId 단위 예약 원장)로 구현됐다 (see ADR-0012 §D1/§D3, **ADR-0016** — 재기록). `order_id`/`source_event_id` 는 교차 도메인 ID 참조(FK 없음, 구현 ② PR1 V13). **`compensated_at` 은 감지 marker 이지 종결 표시가 아니며**, 환불 종결은 `refund_result`/`refund_resolved_at`/`refund_failure_code`(V4, 구현 ④-c-1b)에 별도로 남습니다 (see ADR-0018 §D4).
 
 ### Order DB
 
@@ -322,6 +325,16 @@ erDiagram
     int quantity
     bigint unit_price
   }
+  order_compensations {
+    bigint id PK
+    bigint order_id "UK(order_id, reason)"
+    string reason
+    string status
+    string detail
+    string failure_code
+    timestamp detected_at
+    timestamp resolved_at
+  }
   product_price_cache {
     bigint product_id PK
     bigint unit_price
@@ -353,7 +366,7 @@ erDiagram
   orders ||--o{ order_items : contains
 ```
 
-> Order DB 는 strangler 컬럼(V6 `reservation_confirmed_at`·V9 `payment_requested_at`·V11 `payment_requested_pending`)과 로컬 가격 캐시 `product_price_cache`(CQRS ⑤, strangler-2 — product.updated 구독으로 채워짐)를 소유합니다. `user_id`/`product_id` 는 교차 도메인 ID 참조(FK 없음, 구현 ② PR1 V13). outbox_events 의 `trace_id`/`user_id` 는 ADR-0008 trace context.
+> Order DB 는 strangler 컬럼(V6 `reservation_confirmed_at`·V9 `payment_requested_at`·V11 `payment_requested_pending`)과 로컬 가격 캐시 `product_price_cache`(CQRS ⑤, strangler-2 — product.updated 구독으로 채워짐)를 소유합니다. `user_id`/`product_id` 는 교차 도메인 ID 참조(FK 없음, 구현 ② PR1 V13). outbox_events 의 `trace_id`/`user_id` 는 ADR-0008 trace context. `order_compensations`(V4, 구현 ④-a)는 "보상이 필요하다"를 영속 사실로 남기는 원장이며, 종결은 `payment.refunded` 회신이 `RESOLVED`(환불 완료) 또는 `REFUND_FAILED`(+`failure_code`, 닫혔지만 미해결)로 수행합니다 (V5, 구현 ④-c-1b, see ADR-0018 §D4).
 
 ### Payment DB
 
@@ -375,6 +388,24 @@ erDiagram
   payment_cancellations {
     bigint order_id PK
     timestamp cancelled_at
+  }
+  payment_refunds {
+    bigint id PK
+    bigint order_id UK
+    string payment_key
+    bigint user_id
+    bigint amount
+    string status
+    int attempts
+    bigint generation
+    timestamp claimed_at
+    string failure_code
+    string last_error
+    string pg_response
+    timestamp requested_at
+    timestamp resolved_at
+    string resolved_by
+    string resolution_reason
   }
   outbox_events {
     bigint id PK
@@ -406,7 +437,7 @@ erDiagram
   }
 ```
 
-> **`payment_failures` 미구현 → `payment_cancellations`**: ADR-0012 D1 은 Payment 에 `payment_failures` 를 두었으나 구현은 `payments.status='FAILED'` 로 실패를 표현하고, 대신 `payment_cancellations`(order.cancelled 선도착 silent-charge 방지 marker, strangler)를 둔다 (see ADR-0012 §D1, **ADR-0016** — 재기록). `order_id`/`user_id` 는 교차 도메인 ID 참조(FK 없음, 구현 ② PR1 V13).
+> **`payment_failures` 미구현 → `payment_cancellations`**: ADR-0012 D1 은 Payment 에 `payment_failures` 를 두었으나 구현은 `payments.status='FAILED'` 로 실패를 표현하고, 대신 `payment_cancellations`(order.cancelled 선도착 silent-charge 방지 marker, strangler)를 둔다 (see ADR-0012 §D1, **ADR-0016** — 재기록). **`payment_refunds`**(V4, 구현 ④-c-1a)는 환불 진행 상태를 소유하는 별도 원장으로, `order_id` UNIQUE 가 "동일 논리 환불 1건" fence 이고 `generation` 이 fencing token 입니다. `payments.status` 에는 종결 상태 `REFUNDED` 만 추가됩니다 (see ADR-0018 §D2/§D3). `order_id`/`user_id` 는 교차 도메인 ID 참조(FK 없음, 구현 ② PR1 V13).
 
 ### Notification DB
 

@@ -93,21 +93,21 @@ ADR-0018 이 확정한 보상/환불 계약을 코드로 구현한다. **④-a �
 
 ### ④-c-1b — 크로스서비스 계약
 
-- [ ] **P10.** **요청 이벤트 DTO + 토픽/NewTopic + 소비** — `:common` 에 `CompensationRequestedPayload(orderId, reason, detectedAt)` + `CompensationReason{PAID_BUT_UNRESERVED, PAID_BUT_CANCELLED}`. NewTopic: Product `stock.compensation.requested`(+dlq) · Order `order.compensation.requested`(+dlq). Payment 소비 2경로(정규명 group, ADR-0018 D1) → **P3 과 동일한 원자 fence 로 수렴**
-- [ ] **P11.** **트리거 발행 2경로 + 원자성 + backfill** —
+- [x] **P10.** **요청 이벤트 DTO + 토픽/NewTopic + 소비** — `:common` 에 `CompensationRequestedPayload(orderId, reason, detectedAt)` + `CompensationReason{PAID_BUT_UNRESERVED, PAID_BUT_CANCELLED}`. NewTopic: Product `stock.compensation.requested`(+dlq) · Order `order.compensation.requested`(+dlq). Payment 소비 2경로(정규명 group, ADR-0018 D1) → **P3 과 동일한 원자 fence 로 수렴**
+- [x] **P11.** **트리거 발행 2경로 + 원자성 + backfill** —
   - Product `compensatePaidButUnreserved` / Order `recordPaidButCancelled` 가 **감지 기록과 동일 트랜잭션에서** 요청 Outbox 생성
   - **aggregateType/aggregateId 표 고정**(§2.1-o): Product=`PRODUCT`/`orderId`, Order=`ORDER`/`orderId`. **런타임 발행과 backfill SQL 이 같은 키를 쓴다**
   - backfill: Product `compensated_at IS NOT NULL` · Order `status='OPEN'` 기존 행 → 각 producer 마이그레이션(Product V4·Order V5)에서 요청 Outbox 1회 생성. 멱등 조건 = **`NOT EXISTS (aggregate_type + aggregate_id + event_type 일치)`**(Payment 유니크는 DB 경계를 넘지 못한다). 필요 시 이 조회를 위한 복합 인덱스 추가
-- [ ] **P12.** **회신 소비 3곳 + 종결 스키마** —
+- [x] **P12.** **회신 소비 3곳 + 종결 스키마** —
   - **Order V5**: `order_compensations.failure_code` 신설 + 엔티티 매핑, `CompensationStatus.REFUND_FAILED` 추가. 소비: `SUCCEEDED→RESOLVED` / `FAILED→REFUND_FAILED`(+failure_code) / `UNRESOLVED→전이 없음`
   - **Product V4**: `stock_reservations` 에 종결 컬럼(`refund_result`·`refund_resolved_at`·`refund_failure_code`, 길이·null 규칙 명시) + 동일 규칙
   - **Notification**: `SUCCEEDED` 만 `PAYMENT_REFUNDED` 알림(payload `userId` 사용)
   - 세 소비 모두 멱등(`processed_events`) + 구 메시지 내성
-- [ ] **P13.** **부모 계획서 동기화** — `task-impl4-choreography-saga.md` §3 P8 에 **선행 ADR-0018 명시** · §7 을 ④-c-1a/1b·④-c-2 로 갱신 · **부모 §3 P12(E2E)에 환불 체인 추가**(Product/Order 트리거 → Payment fence/dispatcher → `payment.refunded` → 3곳 종결) · **부모 §3 P14(saga-contract 게이트)에 결과/crash 매트릭스 편입** — 실행은 ④-d 지만 **요구사항을 지금 등재**한다
+- [x] **P13.** **부모 계획서 동기화** — `task-impl4-choreography-saga.md` §3 P8 에 **선행 ADR-0018 명시** · §7 을 ④-c-1a/1b·④-c-2 로 갱신 · **부모 §3 P12(E2E)에 환불 체인 추가**(Product/Order 트리거 → Payment fence/dispatcher → `payment.refunded` → 3곳 종결) · **부모 §3 P14(saga-contract 게이트)에 결과/crash 매트릭스 편입** — 실행은 ④-d 지만 **요구사항을 지금 등재**한다
 
 ### 공통
 
-- [ ] **P14.** **테스트** — 전부 **MySQL Testcontainers + Spring 프록시** 기준(단위 mock 은 트랜잭션 경계를 증명하지 못한다 — ④-b 전례).
+- [x] **P14.** **테스트** — 전부 **MySQL Testcontainers + Spring 프록시** 기준(단위 mock 은 트랜잭션 경계를 증명하지 못한다 — ④-b 전례).
   - **fence 동시성**: 두 스레드 · 각자 실제 트랜잭션 · barrier/latch → 원장 1행, 패자는 no-op
   - **claim CAS**: dispatcher 2개 동시 → 정확히 1개만 `CLAIMED` 획득(1/0 판정)
   - **crash matrix**: (a) claim 커밋 직후 예외 (b) PG 성공 후 finalize/Outbox 저장 실패(`@MockitoSpyBean`) (c) 3회 타임아웃 → 각각 상태 재확인 + reconciliation 이 확정
@@ -115,7 +115,7 @@ ADR-0018 이 확정한 보상/환불 계약을 코드로 구현한다. **④-a �
   - **cross-topic 순서**(ADR-0018 D1): stock 요청 · order 요청 · 로컬 감지 **모든 선후·중복 조합**에서 원장 1행 + 동일 최종 결과(결정적 테스트). Payment 상태 미준비 순서가 있으면 DLQ 의존 대신 **영속 pending marker/재평가 규칙**을 정의
   - **backfill**: 동일 DML 2회 실행 → 2회차 0건
   - **listener 배선**: 신규 5개 listener 가 각 서비스 기본 `kafkaListenerContainerFactory` 를 실제로 사용
-- [ ] **P15.** **문서**(1b 귀속) — `docs/TASKS.md`(④-c-1 완료·R-2 해소) · `docs/progress/PHASE4.md` · Layer 1 `05`(신규 테이블/컬럼)·`03`/`04`(saga 흐름·토픽). ADR 신규 없음
+- [x] **P15.** **문서**(1b 귀속) — `docs/TASKS.md`(④-c-1 완료·R-2 해소) · `docs/progress/PHASE4.md` · Layer 1 `05`(신규 테이블/컬럼)·`03`/`04`(saga 흐름·토픽). ADR 신규 없음
 
 ## 4. 영향 파일
 

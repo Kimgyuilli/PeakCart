@@ -954,3 +954,38 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 4. 크로스서비스 E2E 는 ④-d(부모 P12).
 
 **다음**: **④-c-1b**(요청 토픽 2개·트리거 발행 2경로·backfill·회신 소비 3곳·Notification·문서 — R-2 해소) → ④-c-2(DLQ 원장·runbook).
+
+---
+
+## 구현 ④ Choreography Saga — ④-c-1b: 크로스서비스 환불 계약 — 2026-08-25
+
+> ④-c-1a 가 payment-service 안에서 닫은 실행 엔진에 **트리거와 회신**을 붙여 R-2 를 닫는다.
+> ④-a 가 남긴 "`order_compensations` 가 `OPEN` 으로 쌓이기만 하고 환불은 수동" 이 여기서 해소된다.
+
+**세 진입점이 하나의 fence 로 수렴한다.** 요청 토픽 2종(`stock.compensation.requested` · `order.compensation.requested`)과 Payment 로컬 감지는 전부 `payment_refunds.order_id` UNIQUE 에 삽입만 시도하고, 중복은 예외가 아니라 정상 no-op 이다. 그래서 **cross-topic 순서에 의존하는 로직이 코드에 없다** — ADR-0018 D1 이 "순서 무보장"을 명시했고, 수렴 책임을 상태머신과 fence 에만 둔 결과다. 요청 2종 × 로컬 감지의 선후·중복 조합 전수를 통합테스트로 고정했다.
+
+**멱등 근거의 층위를 분리했다.** backfill 재실행이 추가 발행 0 인 것은 **producer DB 안의 `NOT EXISTS`(aggregate_type + aggregate_id + event_type)** 가 보장하고, 환불 실행이 1건인 것은 Payment DB 의 fence 가 보장한다. DB-per-service 에서 Payment 의 UNIQUE 는 Product/Order 가 Outbox 행을 다시 만드는 것을 막지 못한다 — GW-2 라운드에서 지적받은 "내가 세운 보장의 적용 범위를 실제보다 넓게 서술" 사례를 이번엔 계약 주석과 SQL 양쪽에 못박았다.
+
+**backfill SQL 을 2단계로 나눈 이유**: eventId 가 `outbox_events.event_id` 와 payload 안 두 자리에 **같은 값**으로 들어가야 하는데 한 SELECT 에서 `UUID()` 를 두 번 부르면 값이 갈라진다. 파생 테이블은 옵티마이저가 머지해 같은 문제가 재발할 수 있어, 컬럼에 먼저 확정한 뒤(`payload='{}'`) 그 값을 읽어 envelope 을 조립한다. 두 단계 사이에서 실패해도 재실행이 안전하다 — 1단계는 `NOT EXISTS` 로 건너뛰고 2단계가 이어 채운다.
+
+**종착이 둘인 이유(D4)**: `RESOLVED` 는 "환불 완료"를 뜻한다. 환불이 실패했는데 원장을 해결됨으로 닫으면 **그 원장은 거짓말을 한다** → `REFUND_FAILED`(+`failure_code`) 를 신설해 "닫혔지만 해결되지 않음"을 구분한다. Product 도 같은 규칙이며, `compensated_at` 은 감지 marker 이지 종결 표시가 아니라서 종결 컬럼 3개를 따로 뒀다. `UNRESOLVED` 는 **어느 소비자도 전이하지 않는다**.
+
+**Notification 은 성공만 알린다(D6)** — 실패·미확정은 내부 미결이며 사용자에게 전가하지 않는다. 운영이 해소한 뒤 성공 알림으로 수렴한다.
+
+**감지와 요청은 같은 트랜잭션이다.** Product 는 marker CAS 와 요청 Outbox 를, Order 는 보상 원장 저장과 요청 Outbox 를 함께 커밋한다. `detectedAt` 은 원장에 기록된 시각을 그대로 실어 두 기록이 같은 사실임을 코드로 고정했다(marker 타임스탬프를 호출자가 넘기도록 `markCompensatedIfAbsent` 시그니처 변경). Outbox 실패 주입 시 감지 기록까지 롤백되는 것을 `@MockitoSpyBean` 으로 판정한다 — ④-b 에서 단위 mock 이 트랜잭션 경계를 증명하지 못한 전례를 따른 것이다.
+
+**검증**: 10모듈 **697 테스트 0 실패**(신규 통합테스트 45건 — Order 15 · Product 14 · Payment 14 · Notification 2 추가, 마이그레이션 3종 적용) · lint 10종 그린. 신규 listener 5개(요청 2 · 회신 3)는 **실제 Kafka 왕복 테스트로 배선을 고정**하고, 순서·중복 조합 전수는 직접 호출로 빠르게 돌린다.
+
+**Codex 리뷰 3 chunk 14건 → 13건 반영·1건 기각**(기각은 분할 아티팩트). 가장 큰 건은 **이 PR 의 존재 이유를 되돌리는 P0** 였다 — `payment.refunded` 가 `payment.completed` 보다 먼저 도착하면 소비자는 원장이 없어 회신을 no-op 하고 `processed_events` 로 봉인하는데, 뒤늦게 만든 `OPEN` 원장의 요청은 fence 에 흡수돼 **회신을 영영 못 받는다**. "세 진입점이 하나의 fence 로 수렴한다"를 계약으로 적어놓고 **fence 가 요청을 흡수한 뒤 회신이 없는 경우**를 보지 않은 것이다. 종결된 fence 에 요청이 오면 회신을 재발행하도록 고쳤고, 그 과정에서 **가드 순서 때문에 1차 수정이 실패**했다(환불 성공 후 `payments` 는 `REFUNDED` 라 기존 `APPROVED` 가드가 먼저 걸린다 — 테스트가 잡았다).
+
+두 번째는 **backfill 2단계 분리가 만든 새 노출**이다. 재실행 안전성만 따지고 *두 문장 사이에 다른 프로세스가 있다*는 것을 계산에 넣지 않아, 롤링 배포 중 구 poller 가 `payload='{}'` 를 발행하고 `PUBLISHED` 로 봉인할 수 있었다 — 요청 영구 유실이다. 1단계를 발행 대상이 아닌 `BACKFILL` 상태로 두고 2단계가 payload 완성과 `PENDING` 전환을 **한 UPDATE 에서** 수행하게 바꿨다.
+
+나머지도 대부분 **fail-open 과 false-green** 이었다: 요청 소비가 `reason`/`detectedAt` 없이 금전 동작을 개시(+`orderId` null→0 축약), Notification 이 `asLong()` 강제 변환으로 사용자 0 에게 0원 알림, 종결 전이가 사유 코드 없이 미해결을 영구 고정, 그리고 **테스트가 계약이 아니라 구현을 기술한 2건** — 필수 필드 부재를 "관용"으로 고정한 테스트와, 마이그레이션 SQL **복제본**을 검증 대상으로 삼은 backfill 테스트다. 후자는 ④-c-1a 라운드1 과 같은 구조다(검증 대상과 검증 도구가 같은 출처여야 한다) → 테스트가 V4/V5 파일을 직접 읽어 DML 을 실행하도록 바꿔 SSOT 를 하나로 만들었다. listener 배선도 직접 호출만으로는 group/factory 가 틀려도 통과해, 3서비스에 실제 Kafka 왕복 테스트를 더했다.
+
+**미충족(명시)**:
+1. **크로스서비스 E2E 는 ④-d(부모 P12)** — 본 작업은 서비스별 통합테스트까지다. 부모 계획 P12/P14 에 환불 체인과 결과·crash 매트릭스를 **요구사항으로 등재**했다(실행은 ④-d)
+2. **Toss 실호출 미검증** — ④-c-1a 와 동일 게이트(D-020)
+3. **rollout gate 유지** — 1a/1b 는 같은 릴리스 주기에 배포한다. 1b 지연 시 회신이 쌓이는 기간이 Kafka retention 을 넘으면 안 된다
+4. **DLQ 원장·runbook 은 ④-c-2** — DLQ 유입은 종결이 아니라 그 원장의 입력이다
+
+**다음**: **④-c-2**(부모 P9·P10·P13 나머지 — DLQ 원장·runbook) → ④-d(부모 P11·P12·P14·P15).

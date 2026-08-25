@@ -110,16 +110,16 @@ D3 실패경로 ①~⑤ 대조: ① 순서 보장 ✅ · ② all-or-nothing ✅ 
 
 ### 미결 종료 상태 제거
 
-- [ ] **P8.** **PAID_BUT_UNRESERVED 환불 요청 경로** 신설(ADR-0012 D3 ④ 이행) — Payment 소유의 환불 요청 상태/Outbox, `orderId` 또는 `paymentKey` 기반 멱등성, 성공·실패 종결 상태, 재시도 소진 시 운영 처리까지 정의한다. 현행 marker + Slack 은 종료 상태가 아니다.
+- [x] **P8.** **PAID_BUT_UNRESERVED 환불 요청 경로** 신설(ADR-0012 D3 ④ 이행) — **선행 ADR-0018**([#86](https://github.com/Kimgyuilli/PeakCart/pull/86), Accepted)이 보상/환불 트리거 계약을 확정했고, 구현은 자식 계획서 `task-impl4-c1-refund-path.md`(④-c-1a/1b)가 수행한다. **감지는 3지점**(Product marker · Order 원장 · Payment 로컬)이며 P8 초안이 지목한 Product 단독 범위보다 넓다 — Payment 소유의 환불 요청 상태/Outbox, `orderId` 또는 `paymentKey` 기반 멱등성, 성공·실패 종결 상태, 재시도 소진 시 운영 처리까지 정의한다. 현행 marker + Slack 은 종료 상태가 아니다.
 - [ ] **P9.** **DLQ 원장 + 전용 소비 경로** — 원장 식별자는 `originalTopic + eventId + failedConsumerGroup`(공유 DLQ 토폴로지, §2.3-C). DLQ listener 는 **재-DLQ 하지 않는 전용 container factory/error handler** 를 쓰고, 영속 실패 시 fallback 을 정의한다. 자동 재발행 금지. 알림은 기존 PAID_BUT_UNRESERVED 와 동일하게 멱등.
 - [ ] **P10.** **DLQ runbook** — 원장 상태머신(`OPEN`/`ACKED`/`REPLAYED`/`RESOLVED`) + 감사 필드, 7일(ADR-0012 D5 `processed_events` retention) 이내 동일 `eventId` 재발행 규칙, 창 초과 시 새 `eventId` + 중복 확인 절차, 담당자·SLA. 문서 경로를 §4 에 고정한다.
 
 ### 관측 / 검증 / 문서
 
 - [ ] **P11.** saga 메트릭 노출 — 예약 성공/실패, 확정, 복구, 보상, 환불 요청, 타임아웃 취소, lease sweeper 회수, DLQ 유입. 태그·명명은 ADR-0015 per-service 규약(`<svc>-service`), 기존 observability lint 그린.
-- [ ] **P12.** **cross-service saga E2E** — Payment·Order·Product 를 Kafka + 각자 DB 에 연결해 실제 플로우를 검증한다. `payment.failed` 발행 후 제한 시간 내 `Order=CANCELLED` · `StockReservation=RELEASED` · `Inventory` 원복 · 관련 Outbox `PUBLISHED` · `processed_events` 기록을 확인한다. **"이벤트 계약 수준 검증으로 대체 가능" 문구는 폐기** — DTO/consumer 단위 계약은 Kafka 전달·Outbox·DB 트랜잭션·재시도를 함께 증명하지 못하며 `07 §110-115`/ADR-0010 D4 의 Exit Criteria 를 닫지 못한다(GW-1 #9).
+- [ ] **P12.** **cross-service saga E2E** — Payment·Order·Product 를 Kafka + 각자 DB 에 연결해 실제 플로우를 검증한다. `payment.failed` 발행 후 제한 시간 내 `Order=CANCELLED` · `StockReservation=RELEASED` · `Inventory` 원복 · 관련 Outbox `PUBLISHED` · `processed_events` 기록을 확인한다. **환불 체인도 같은 방식으로 포함한다**(④-c-1b 등재): Product/Order 트리거 발행 → Payment fence(`payment_refunds` 1행) → dispatcher → `payment.refunded` → Order `RESOLVED`/`REFUND_FAILED` · Product 종결 컬럼 · Notification 성공분 1건. **"이벤트 계약 수준 검증으로 대체 가능" 문구는 폐기** — DTO/consumer 단위 계약은 Kafka 전달·Outbox·DB 트랜잭션·재시도를 함께 증명하지 못하며 `07 §110-115`/ADR-0010 D4 의 Exit Criteria 를 닫지 못한다(GW-1 #9).
 - [ ] **P13.** 마이그레이션·인덱스 확정 — DLQ 원장 테이블/엔티티/repository/Flyway(서비스별, unique key 포함) · `stock_reservations` 에 `(status, reserved_at)` 인덱스(현재 부재, 매분 무제한 조회 시 풀스캔) · sweeper 정렬·`batch-size`·실행당 최대 batch 수.
-- [ ] **P14.** **saga-contract 검증 게이트** — "코드 경로 × 주입 장애 × 기대 종결 상태" 매트릭스를 기계 판독 가능한 형태로 두고, 누락 경로나 미실행 테스트가 CI 를 실패시키게 한다. §5 의 "금지" 규칙을 prose 가 아니라 실행 가능한 검사로 만든다(GW-1 #12).
+- [ ] **P14.** **saga-contract 검증 게이트** — "코드 경로 × 주입 장애 × 기대 종결 상태" 매트릭스를 기계 판독 가능한 형태로 두고, 누락 경로나 미실행 테스트가 CI 를 실패시키게 한다. §5 의 "금지" 규칙을 prose 가 아니라 실행 가능한 검사로 만든다(GW-1 #12). **환불 매트릭스를 편입한다**(④-c-1b 등재, 실행은 ④-d): 결과 3종(`SUCCEEDED`/`FAILED`/`UNRESOLVED`) × 소비자 3곳의 종착 상태 표(ADR-0018 D4), 그리고 crash matrix 4칸(claim 후 사망 · PG 성공 후 커밋 전 사망 · 타임아웃 · `REQUESTED` 직후 사망, ADR-0018 D3).
 - [ ] **P15.** 문서 동기화 — TASKS ④ 완료 + L-013 처분 + **D-020 신규 등재**(§2.4), `PHASE4.md` 이력, Layer 1(`02`/`03`/`04`) saga 흐름·토픽·payload 정정, ADR-0012 ④ 산출물 대비 실제 범위 차이(§2.1 표) 기록.
 
 ---
@@ -197,7 +197,18 @@ D3 실패경로 ①~⑤ 대조: ① 순서 보장 ✅ · ② all-or-nothing ✅ 
 |---|---|---|
 | ④-a | P1·P2·P3·P4·P13(일부) | 상태 수렴 + lease. 스키마 변경·동시성이 같은 위험군이고 oversell 차단이 단일 서사 |
 | ④-b | P5·P6·P7 | 이벤트 계약(ADR-0012 D2 이행). 도메인 로직보다 계약·하위호환이 리뷰 축 |
-| ④-c | P8·P9·P10·P13(나머지) | 미결 종료 상태 제거(환불·DLQ 원장·runbook). 새 테이블·운영 절차가 묶임 |
+| ④-c | P8·P9·P10·P13(나머지) | 미결 종료 상태 제거(환불·DLQ 원장·runbook). 새 테이블·운영 절차가 묶임 — **아래로 재분할됨** |
 | ④-d | P11·P12·P14·P15 | 관측·E2E·게이트·문서 |
 
-P2 가 기각되면 ④-a 는 P1·P3·P4 로 축소된다. ④-c 가 가장 크므로 /work 착수 시 재분할 여부를 판단한다.
+P2 가 기각되면 ④-a 는 P1·P3·P4 로 축소된다.
+
+**④-c 재분할 (확정)** — 착수 전 코드 검증에서 감지 3지점·Toss 취소/조회 API 부재가 드러나 선행 ADR-0018 을 먼저 세웠고, 그 구현을 자식 계획서 `task-impl4-c1-refund-path.md` 로 분리했다.
+
+| PR | 범위 | 분할 근거 | 상태 |
+|---|---|---|---|
+| ④-c-1a | 자식 P1~P9 | **payment-service 단독으로 부팅·동작하는 단위** — 원장·fence·dispatcher·PG 클라이언트·reconciliation | ✅ [#87](https://github.com/Kimgyuilli/PeakCart/pull/87) |
+| ④-c-1b | 자식 P10~P15 | **크로스서비스 계약** — 요청 토픽 2개·트리거 발행 2경로·backfill·회신 소비 3곳. 리뷰 축이 "계약과 하위호환" | 본 PR |
+| ④-c-2 | 부모 P9·P10·P13(나머지) | DLQ 원장·runbook. 운영 절차가 별개 서사 | 🔲 대기 |
+
+- 분할 기준 = "**한 서비스 안에서 그린이 되는가**"(PR3d-a/b 와 동일)
+- **rollout gate**: 1a 와 1b 는 **같은 릴리스 주기**에 배포한다 — 1a 는 회신을 발행하되 소비자가 없어, 지연되면 회신이 쌓이는 기간이 Kafka retention 을 넘길 수 있다

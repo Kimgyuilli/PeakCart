@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
@@ -195,7 +196,9 @@ public class StockReservationService {
      * <p>Slack 은 부가 신호로 남긴다 — 종결 근거는 요청 이벤트와 Payment 원장이지 알림이 아니다.
      */
     private void compensatePaidButUnreserved(Long orderId, ReservationStatus status) {
-        LocalDateTime detectedAt = LocalDateTime.now();
+        // 저장소 정밀도(DATETIME(6))로 확정한다 — MySQL 은 초과 자릿수를 반올림하므로 나노초를
+        // 그대로 두면 marker 와 이벤트 payload 가 최대 1μs 어긋난다(Order 측과 같은 이유).
+        LocalDateTime detectedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
         if (reservationRepository.markCompensatedIfAbsent(orderId, detectedAt) == 1) {
             publisher.publishCompensationRequested(
                     orderId, CompensationReason.PAID_BUT_UNRESERVED, detectedAt);

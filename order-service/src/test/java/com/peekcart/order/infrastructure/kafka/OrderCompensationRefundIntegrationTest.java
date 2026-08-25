@@ -31,7 +31,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -118,14 +117,14 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
         JsonNode payload = objectMapper.readTree(event.getPayload()).get("payload");
         assertThat(payload.get("orderId").asLong()).isEqualTo(orderId);
         assertThat(payload.get("reason").asText()).isEqualTo("PAID_BUT_CANCELLED");
-        // detectedAt 은 원장의 감지 시각과 같은 사실이어야 한다.
-        // 비교 정밀도를 마이크로초로 맞추는 이유: payload 는 인메모리 LocalDateTime 을 그대로 직렬화하고
-        // (Linux 는 나노초 분해능) 원장은 DATETIME(6) 에서 마이크로초로 잘려 돌아온다. 저장소가 담지
-        // 못하는 자릿수까지 같기를 요구하면 OS 시계 분해능에 따라 결과가 갈리는 단언이 된다.
+        // detectedAt 은 원장의 감지 시각과 정확히 같아야 한다. 근사 비교로 눅이지 않는 이유:
+        // 원장은 DB 왕복을 거치고 payload 는 인메모리 값이라, 둘이 등식이 되려면 감지 시각이 애초에
+        // 저장소 정밀도(DATETIME(6))로 확정돼 있어야 한다. 단언을 마이크로초로 절삭해 맞추면
+        // MySQL 의 반올림(truncate 아님)으로 1μs 어긋나는 경우를 이 테스트가 못 잡는다.
         OrderCompensation ledger = compensationRepository
                 .findByOrderIdAndReason(orderId, CompensationReason.PAID_BUT_CANCELLED).orElseThrow();
-        assertThat(LocalDateTime.parse(payload.get("detectedAt").asText()).truncatedTo(ChronoUnit.MICROS))
-                .isEqualTo(ledger.getDetectedAt().truncatedTo(ChronoUnit.MICROS));
+        assertThat(LocalDateTime.parse(payload.get("detectedAt").asText()))
+                .isEqualTo(ledger.getDetectedAt());
     }
 
     @Test

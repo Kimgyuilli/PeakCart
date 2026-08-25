@@ -13,6 +13,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 /**
  * 주문 보상 원장 (GW-2 #2). "보상이 필요하다"를 <b>영속</b> 사실로 남긴다.
@@ -63,7 +64,11 @@ public class OrderCompensation {
         this.reason = reason;
         this.status = CompensationStatus.OPEN;
         this.detail = detail;
-        this.detectedAt = LocalDateTime.now();
+        // 저장소 정밀도(DATETIME(6))로 맞춰 기록한다. MySQL 은 초과 자릿수를 truncate 가 아니라
+        // 반올림하므로, 나노초를 그대로 두면 인메모리 값과 저장된 값이 최대 1μs 어긋난다.
+        // 같은 값이 order.compensation.requested 의 detectedAt 으로도 실리므로(ADR-0018 D1),
+        // 여기서 확정해야 "원장과 이벤트가 같은 사실"이 근사가 아니라 등식이 된다.
+        this.detectedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     /** 미해소(OPEN) 보상 건을 생성한다. 종결 전이는 {@code payment.refunded} 회신이 수행한다. */

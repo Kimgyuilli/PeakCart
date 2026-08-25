@@ -28,7 +28,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -111,11 +110,10 @@ class StockCompensationRefundIntegrationTest extends AbstractIntegrationTest {
         JsonNode payload = objectMapper.readTree(requests.get(0).getPayload()).get("payload");
         assertThat(payload.get("orderId").asLong()).isEqualTo(ORDER_ID);
         assertThat(payload.get("reason").asText()).isEqualTo("PAID_BUT_UNRESERVED");
-        // detectedAt 은 marker(compensated_at) 와 같은 사실이어야 한다.
-        // 마이크로초로 맞추는 이유는 order 측과 동일하다 — payload 는 인메모리 값(Linux 나노초),
-        // marker 는 DATETIME(6) 이라 저장 시 잘린다. 저장소 정밀도를 넘는 단언은 OS 시계에 좌우된다.
-        assertThat(LocalDateTime.parse(payload.get("detectedAt").asText()).truncatedTo(ChronoUnit.MICROS))
-                .isEqualTo(reservation.getCompensatedAt().truncatedTo(ChronoUnit.MICROS));
+        // detectedAt 은 marker(compensated_at) 와 정확히 같아야 한다 — 근거는 order 측과 동일하다.
+        // 감지 시각이 원천에서 저장소 정밀도로 확정되므로 DB 왕복 후에도 등식이 성립한다.
+        assertThat(LocalDateTime.parse(payload.get("detectedAt").asText()))
+                .isEqualTo(reservation.getCompensatedAt());
     }
 
     @Test

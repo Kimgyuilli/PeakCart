@@ -56,6 +56,11 @@ public class PaymentRefundService {
      */
     @Transactional
     public boolean requestRefund(Payment payment, String reason) {
+        // 종결 검사가 APPROVED 검사보다 먼저다 — 환불이 성공하면 payments 는 REFUNDED 로 옮겨가므로
+        // 상태 가드를 먼저 두면 "이미 환불된 결제"가 조기 반환돼 회신 재발행 경로에 닿지 못한다.
+        if (republishIfAlreadyResolved(payment.getOrderId())) {
+            return false;
+        }
         if (payment.getStatus() != PaymentStatus.APPROVED) {
             return false;
         }
@@ -69,6 +74,7 @@ public class PaymentRefundService {
         int inserted = refundRepository.insertRequestedIfAbsent(
                 payment.getOrderId(), payment.getPaymentKey(), payment.getUserId(), payment.getAmount());
         if (inserted == 0) {
+            // 진행 중인 환불에 도착한 중복 트리거 — 결과가 아직 없으므로 회신할 것도 없다.
             log.debug("환불 요청 중복 — 이미 원장 존재(no-op), orderId={}", payment.getOrderId());
             return false;
         }
@@ -78,6 +84,33 @@ public class PaymentRefundService {
                 .register(meterRegistry)
                 .increment();
         log.info("환불 요청 기록 — orderId={}, reason={}", payment.getOrderId(), reason);
+        return true;
+    }
+
+    /**
+     * 이미 <b>종결된</b> 환불에 뒤늦은 요청이 도착하면 회신을 <b>다시 발행</b>한다.
+     *
+     * <p>없으면 감지가 늦은 소비자의 원장이 영구 미결로 남는다 — cross-topic 순서가 보장되지 않으므로
+     * (ADR-0018 D1) {@code payment.refunded} 가 {@code payment.completed} 보다 먼저 도착하는 순서가
+     * 존재한다. 그때 Order 는 아직 원장이 없어 회신을 no-op 하고 {@code processed_events} 로 봉인하며,
+     * 뒤늦게 만든 {@code OPEN} 원장의 요청은 여기서 fence 에 막혀 회신을 못 받는다.
+     *
+     * <p>재발행이 안전한 근거는 <b>소비자 3곳이 모두 종결 후 재전달을 no-op</b> 으로 처리한다는 것이다
+     * (ADR-0018 D4). 요청은 감지 3지점에서만 오므로 발행이 무한히 늘지 않는다.
+     *
+     * @return true = 종결된 환불이라 회신을 재발행했다(요청은 여기서 끝난다)
+     */
+    private boolean republishIfAlreadyResolved(Long orderId) {
+        PaymentRefund existing = refundRepository.findByOrderId(orderId).orElse(null);
+        if (existing == null || !existing.isTerminal()) {
+            return false;
+        }
+        RefundResult result = existing.getStatus() == RefundStatus.SUCCEEDED
+                ? RefundResult.SUCCEEDED
+                : RefundResult.FAILED;
+        publishResult(existing, result);
+        log.info("종결된 환불에 뒤늦은 요청 도착 — 회신 재발행(늦게 생긴 원장 종결용), orderId={}, result={}",
+                orderId, result);
         return true;
     }
 

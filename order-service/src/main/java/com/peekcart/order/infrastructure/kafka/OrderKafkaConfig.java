@@ -21,7 +21,7 @@ import org.springframework.kafka.listener.DefaultErrorHandler;
 
 /**
  * Order 서비스의 Kafka 배선 (ADR-0011 §D2 · ADR-0012 D4).
- * <p><b>NewTopic(producer-owns-topic)</b>: Order 는 자기가 발행하는 토픽 {@code order.created}·{@code order.cancelled}
+ * <p><b>NewTopic(producer-owns-topic)</b>: Order 는 자기가 발행하는 토픽 {@code order.created}·{@code order.cancelled}·{@code order.compensation.requested}
  * (각 {@code .dlq} 포함)의 {@link NewTopic} 만 소유한다. {@code payment.*}·{@code product.*}·{@code stock.reservation.result}
  * 는 각 발행 서비스가 소유(ADR-0011 §토픽=발행 서비스 전속). 전환기 root 단독 생성 모델은 폐기됨.
  * <p>consumer 측: 소비 실패 시 {@code topic.dlq} 로 발행 + {@link SlackPort}(:common) 알림.
@@ -44,6 +44,14 @@ public class OrderKafkaConfig {
         return TopicBuilder.name("order.cancelled").partitions(3).replicas(1).build();
     }
 
+    /**
+     * 환불 보상 요청 (ADR-0018 D1). Order 가 PAID_BUT_CANCELLED 를 감지하고 Payment 가 소비한다.
+     */
+    @Bean
+    public NewTopic orderCompensationRequestedTopic() {
+        return TopicBuilder.name("order.compensation.requested").partitions(3).replicas(1).build();
+    }
+
     // --- 발행 토픽 DLQ ---
     @Bean
     public NewTopic orderCreatedDlqTopic() {
@@ -53,6 +61,11 @@ public class OrderKafkaConfig {
     @Bean
     public NewTopic orderCancelledDlqTopic() {
         return TopicBuilder.name("order.cancelled.dlq").partitions(1).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic orderCompensationRequestedDlqTopic() {
+        return TopicBuilder.name("order.compensation.requested.dlq").partitions(1).replicas(1).build();
     }
 
     // --- Error Handler + DLQ ---

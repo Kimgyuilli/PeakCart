@@ -34,9 +34,13 @@ public interface StockReservationRepository {
      * commit-실패 보상 1회성 marker 원자 CAS. {@code compensated_at} 이 비어있을 때만 채워 1건을 반환한다.
      * orderId 기준 멱등 — DLQ 재발행(새 eventId) 으로 confirm 이 재실행돼도 보상 알림이 중복 발송되지 않는다.
      *
+     * <p>{@code detectedAt} 을 호출자가 넘기는 이유: 같은 값이 {@code stock.compensation.requested}
+     * payload 의 {@code detectedAt} 으로도 실려, 원장의 감지 시각과 이벤트의 감지 시각이
+     * <b>같은 사실의 두 기록</b>임이 코드로 드러난다(ADR-0018 D1 원자성 불변식).
+     *
      * @return 마킹된 행 수 (0 또는 1; 1 = 최초 보상)
      */
-    int markCompensatedIfAbsent(Long orderId);
+    int markCompensatedIfAbsent(Long orderId, LocalDateTime detectedAt);
 
     /**
      * lease 가 만료된 {@code RESERVED} 예약을 조회한다 (계획 P4 sweeper).

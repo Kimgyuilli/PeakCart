@@ -3,6 +3,7 @@ package com.peekcart.product.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.peekcart.global.outbox.dto.CompensationReason;
 import com.peekcart.global.outbox.dto.ReservedItemPayload;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.product.domain.model.ReservationStatus;
@@ -167,15 +168,41 @@ public class StockReservationService {
     }
 
     /**
-     * commit-실패(PAID_BUT_UNRESERVED) 보상 (ADR-0012 ④). {@code orderId} 기준 1회성 marker 로
-     * 멱등을 보장해 DLQ 재발행(새 eventId) 으로 confirm 이 재실행돼도 알림이 중복 발송되지 않는다.
-     * 자동 환불 플로우는 미존재 — 운영 알림 + audit 마킹까지 수행하고 수동 환불로 수렴한다.
+     * 환불 결과 회신을 예약 원장에 종결로 기록한다 (ADR-0018 D4).
+     *
+     * <p>원장이 없거나 감지 marker 가 없는 회신은 정상이다 — 감지 지점이 3곳이라 Order·Payment 가
+     * 시작한 환불의 회신도 Product 에 도착한다. 예외로 던져 DLQ 로 보낼 이유가 없다.
+     *
+     * @param result {@code SUCCEEDED} 또는 {@code FAILED} — 확정된 결과만 전달된다
+     */
+    public void recordRefundResult(Long orderId, String result, String failureCode, LocalDateTime resolvedAt) {
+        reservationRepository.findByOrderId(orderId).ifPresentOrElse(reservation -> {
+            reservation.recordRefundResult(result, failureCode, resolvedAt);
+            log.info("환불 결과 회신 기록 — orderId={}, result={}", orderId, result);
+        }, () -> log.debug("환불 회신 수신했으나 예약 원장 없음 — 다른 감지 지점발 환불, orderId={}", orderId));
+    }
+
+    /**
+     * commit-실패(PAID_BUT_UNRESERVED) 보상 (ADR-0012 ④ → ADR-0018 D1). {@code orderId} 기준
+     * 1회성 marker 로 멱등을 보장해 DLQ 재발행(새 eventId) 으로 confirm 이 재실행돼도 요청이
+     * 중복 발행되지 않는다.
+     *
+     * <p><b>감지 marker 와 요청 Outbox 는 같은 트랜잭션</b>이다(ADR-0018 D1 원자성 불변식) —
+     * 부분 커밋은 "감지했는데 아무도 환불하지 않는" 영구 미결을 만든다. 본 서비스는 클래스
+     * 수준 {@code @Transactional} 이고 호출자(consumer) 트랜잭션에 참여하므로 둘은 함께
+     * 커밋되거나 함께 롤백된다.
+     *
+     * <p>Slack 은 부가 신호로 남긴다 — 종결 근거는 요청 이벤트와 Payment 원장이지 알림이 아니다.
      */
     private void compensatePaidButUnreserved(Long orderId, ReservationStatus status) {
-        if (reservationRepository.markCompensatedIfAbsent(orderId) == 1) {
-            log.error("PAID_BUT_UNRESERVED — 결제 완료됐으나 재고 미확정(원장={}), 수동 환불 필요. orderId={}", status, orderId);
+        LocalDateTime detectedAt = LocalDateTime.now();
+        if (reservationRepository.markCompensatedIfAbsent(orderId, detectedAt) == 1) {
+            publisher.publishCompensationRequested(
+                    orderId, CompensationReason.PAID_BUT_UNRESERVED, detectedAt);
+            log.error("PAID_BUT_UNRESERVED — 결제 완료됐으나 재고 미확정(원장={}), 환불 요청 발행. orderId={}",
+                    status, orderId);
             slackPort.send(String.format(
-                    "[보상 필요] PAID_BUT_UNRESERVED orderId=%d 원장상태=%s — 결제 완료됐으나 재고 미확정. 수동 환불 확인 요망.",
+                    "[보상 요청] PAID_BUT_UNRESERVED orderId=%d 원장상태=%s — 결제 완료됐으나 재고 미확정. 환불 요청 발행.",
                     orderId, status));
         }
         // 이미 보상됨 → 멱등 no-op

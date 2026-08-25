@@ -28,12 +28,18 @@
 - 결제 실패 시 주문 롤백 (Phase 1: `@TransactionalEventListener` / Phase 4: Choreography Saga)
 - 결제 내역 조회
 - 웹훅(Webhook) 수신 처리
+- **자동 환불 보상 (Phase 4)** — "결제는 승인됐는데 재고가 확정되지 않았거나 주문이 취소된" saga 최악 경로에서
+  사람의 개입 없이 환불을 실행하고 결과를 원장에 종결 상태로 남깁니다. 확정할 수 없는 구간(외부 PG 결과 불명)은
+  없애는 것이 아니라 **관측 가능한 미해결 상태**(`UNRESOLVED` + backlog/age 게이지)로 만들고, 24시간 내
+  미확정 시 감사 필드를 요구하는 수동 종결 경로로 넘어갑니다 (see ADR-0018)
 
 ### 6-5. 알림 (Notification)
 
 - **Phase 1**: `@TransactionalEventListener`로 이벤트 수신 → Slack Webhook으로 알림 발송
 - **Phase 2+**: Kafka Consumer로 이벤트 수신 → Slack Webhook으로 알림 발송
 - 알림 내역 DB 저장 및 조회
+- 환불 완료 알림 — **성공(`payment.refunded(SUCCEEDED)`)만** 발송합니다. 실패·미확정은 내부 미결 상태이며
+  사용자에게 전가하지 않고, 운영이 해소한 뒤 성공 알림으로 수렴합니다 (see ADR-0018 §D6)
 
 ### 6-6. 핵심 API 경로 목록
 
@@ -93,7 +99,7 @@
 - **Outbox 발행 실패 처리**: `retry_count` 증가 → 최대 재시도 횟수 초과 시 `FAILED` 상태로 전환, 별도 알림
 - **Saga 패턴 (Phase별 구분)** (Phase 4 경계는 see ADR-0010)
     - Phase 1: `@TransactionalEventListener`로 결제 실패 시 로컬 보상 트랜잭션 처리
-    - Phase 4: Choreography-based Saga — `order.created` → Product 재고 예약 → `stock.reservation.result` → 결제, `payment.failed`/`order.cancelled` → **Product 재고(예약) 복구** (재고 소유자가 Product). 재고 예약/차감 경계·토픽 매트릭스 확정은 ADR-0012 §D3/§D4 (see ADR-0012)
+    - Phase 4: Choreography-based Saga — `order.created` → Product 재고 예약 → `stock.reservation.result` → 결제, `payment.failed`/`order.cancelled` → **Product 재고(예약) 복구** (재고 소유자가 Product). 재고 예약/차감 경계·토픽 매트릭스 확정은 ADR-0012 §D3/§D4 (see ADR-0012). **보상 수렴**: 환불이 필요한 상태를 감지한 서비스가 요청 토픽(`stock.compensation.requested` · `order.compensation.requested`)을 발행하고, Payment 가 `payment_refunds.order_id` UNIQUE fence 로 합류시켜 실행한 뒤 `payment.refunded` 로 각 원장을 닫습니다 (see ADR-0018)
 - **재고 동시성 제어**
     - 1차: Redis 분산 락으로 동시 요청 직렬화 (획득 실패 시 즉시 409 응답)
     - 2차: DB 낙관적 락 (`version` 컬럼) — Redis 장애/만료 시 최후 방어선

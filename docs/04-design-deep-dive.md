@@ -4,10 +4,19 @@
 
 | 토픽명 | Producer | Consumer | 설명 |
 | --- | --- | --- | --- |
-| `order.created` | Order Service | Payment Service, Notification Service | 주문 생성 이벤트 |
-| `payment.completed` | Payment Service | Order Service, Notification Service | 결제 성공 이벤트 |
-| `payment.failed` | Payment Service | Order Service, Notification Service | 결제 실패 → Saga 보상 트랜잭션 + 알림 |
-| `order.cancelled` | Order Service | Product Service, Notification Service | 주문 취소 → 재고 복구 |
+| `order.created` | Order Service | Payment Service, Product Service, Notification Service | 주문 생성 → 재고 예약 |
+| `payment.requested` | Payment Service | Order Service | 결제 시작 (2-phase 결제 게이트) |
+| `payment.completed` | Payment Service | Order Service, Product Service, Notification Service | 결제 성공 → 예약 확정 |
+| `payment.failed` | Payment Service | Order Service, Product Service, Notification Service | 결제 실패 → Saga 보상 트랜잭션 + 알림 |
+| `order.cancelled` | Order Service | Payment Service, Product Service, Notification Service | 주문 취소 → 재고 복구 |
+| `stock.reservation.result` | Product Service | Order Service, Payment Service | 재고 예약 결과 (reserve→pay 게이트) |
+| `product.updated` | Product Service | Order Service | 상품 변경 (CQRS 단가 캐시) |
+| `stock.compensation.requested` | Product Service | Payment Service | `PAID_BUT_UNRESERVED` 환불 요청 (see ADR-0018 D1) |
+| `order.compensation.requested` | Order Service | Payment Service | `PAID_BUT_CANCELLED` 환불 요청 (see ADR-0018 D1) |
+| `payment.refunded` | Payment Service | Order Service, Product Service, Notification Service | 환불 결과 회신 → 각 보상 원장 종결 (see ADR-0018 D4) |
+
+> 토픽 매트릭스의 SSOT 는 **ADR-0012 D4**(기존 7토픽) + **ADR-0018 D1**(환불 3토픽)입니다.
+> 각 토픽은 **1 topic = 1 producer** 규약을 따르며, `NewTopic` 프로비저닝은 producer 서비스가 소유합니다.
 
 > 모든 이벤트는 **Outbox 패턴**을 통해 발행됩니다.
 Producer는 DB 트랜잭션 내에서 Outbox 테이블에 이벤트를 저장하고, 별도 Polling 스케줄러가 Kafka로 발행합니다.
@@ -70,10 +79,9 @@ Consumer 재시도 흐름:
   4. 수동 재처리: DLQ 메시지를 확인 후 원인 해결 → 원본 토픽으로 재발행
 
 DLQ 토픽:
-  - order.created.dlq
-  - payment.completed.dlq
-  - payment.failed.dlq
-  - order.cancelled.dlq
+  - 위 8-1 표의 모든 토픽에 대해 <topic>.dlq 를 둡니다 (producer 가 NewTopic 소유).
+  - 예: order.created.dlq, payment.completed.dlq, payment.failed.dlq, order.cancelled.dlq,
+        stock.compensation.requested.dlq, order.compensation.requested.dlq, payment.refunded.dlq
 ```
 
 ### 8-4. Consumer Group 네이밍 규칙
@@ -86,6 +94,8 @@ DLQ 토픽:
   - notification-svc-order-created-group (Notification Service가 order.created 소비)
   - order-svc-payment-completed-group   (Order Service가 payment.completed 소비)
   - product-svc-order-cancelled-group   (Product Service가 order.cancelled 소비)
+  - payment-svc-stock-compensation-requested-group  (환불 요청 소비, 축약 없이 규칙 그대로)
+  - order-svc-payment-refunded-group    (Order Service가 환불 회신 소비)
 
 같은 토픽을 여러 서비스가 소비할 때, 각 서비스는 독립 Consumer Group을 운영하여
 서비스별 독립적 오프셋 관리와 소비 속도 조절이 가능합니다.

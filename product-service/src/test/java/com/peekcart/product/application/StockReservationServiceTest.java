@@ -172,7 +172,7 @@ class StockReservationServiceTest {
         service.confirm(ORDER_ID);
 
         then(reservationRepository).should(never()).findByOrderId(anyLong());
-        then(reservationRepository).should(never()).markCompensatedIfAbsent(anyLong());
+        then(reservationRepository).should(never()).markCompensatedIfAbsent(anyLong(), any(LocalDateTime.class));
         then(slackPort).should(never()).send(anyString());
     }
 
@@ -186,7 +186,7 @@ class StockReservationServiceTest {
 
         service.confirm(ORDER_ID);
 
-        then(reservationRepository).should(never()).markCompensatedIfAbsent(anyLong());
+        then(reservationRepository).should(never()).markCompensatedIfAbsent(anyLong(), any(LocalDateTime.class));
         then(slackPort).should(never()).send(anyString());
     }
 
@@ -199,7 +199,7 @@ class StockReservationServiceTest {
         assertThatThrownBy(() -> service.confirm(ORDER_ID))
                 .isInstanceOf(IllegalStateException.class);
 
-        then(reservationRepository).should(never()).markCompensatedIfAbsent(anyLong());
+        then(reservationRepository).should(never()).markCompensatedIfAbsent(anyLong(), any(LocalDateTime.class));
         then(slackPort).should(never()).send(anyString());
     }
 
@@ -211,7 +211,7 @@ class StockReservationServiceTest {
         given(reservation.getStatus()).willReturn(status);
         given(reservationRepository.markConfirmedIfReserved(ORDER_ID)).willReturn(0);
         given(reservationRepository.findByOrderId(ORDER_ID)).willReturn(Optional.of(reservation));
-        given(reservationRepository.markCompensatedIfAbsent(ORDER_ID)).willReturn(1);
+        given(reservationRepository.markCompensatedIfAbsent(eq(ORDER_ID), any(LocalDateTime.class))).willReturn(1);
 
         service.confirm(ORDER_ID);
 
@@ -226,7 +226,7 @@ class StockReservationServiceTest {
         given(reservation.getStatus()).willReturn(status);
         given(reservationRepository.markConfirmedIfReserved(ORDER_ID)).willReturn(0);
         given(reservationRepository.findByOrderId(ORDER_ID)).willReturn(Optional.of(reservation));
-        given(reservationRepository.markCompensatedIfAbsent(ORDER_ID)).willReturn(0);
+        given(reservationRepository.markCompensatedIfAbsent(eq(ORDER_ID), any(LocalDateTime.class))).willReturn(0);
 
         service.confirm(ORDER_ID);
 

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.outbox.dto.CompensationReason;
 import com.peekcart.global.outbox.dto.ReservedItemPayload;
 import com.peekcart.global.port.SlackPort;
+import com.peekcart.product.infrastructure.metrics.ProductSagaMetrics;
 import com.peekcart.product.domain.model.ReservationStatus;
 import com.peekcart.product.domain.model.StockReservation;
 import com.peekcart.product.domain.repository.StockReservationRepository;
@@ -39,6 +40,7 @@ public class StockReservationService {
     private final ObjectMapper objectMapper;
     private final SlackPort slackPort;
     private final ReservationLeaseProperties leaseProperties;
+    private final ProductSagaMetrics sagaMetrics;
 
     /**
      * order.created 수신 시 재고를 예약(차감)한다. all-or-nothing.
@@ -53,6 +55,7 @@ public class StockReservationService {
             // malformed/빈 order.created — 빈 items 가 allMatch 로 예약 성공처럼 수렴하는 것을 막는다
             reservationRepository.save(StockReservation.failed(orderId, "[]", sourceEventId));
             publisher.publishStockReservationResult(orderId, false, List.of(), "INVALID_ITEMS", null);
+            sagaMetrics.reservationFailed();
             log.warn("빈 예약 품목 — reserved=false 수렴, orderId={}", orderId);
             return;
         }
@@ -61,6 +64,7 @@ public class StockReservationService {
             if (existing.get().getStatus() == ReservationStatus.CANCEL_REQUESTED) {
                 log.debug("취소 선도착 tombstone — 예약 skip, orderId={}", orderId);
                 publisher.publishStockReservationResult(orderId, false, items, "CANCELLED", null);
+                sagaMetrics.reservationFailed();
             }
             // RESERVED/FAILED/RELEASED 는 이미 처리됨 → 멱등 no-op
             return;
@@ -71,6 +75,7 @@ public class StockReservationService {
         if (!allAvailable) {
             reservationRepository.save(StockReservation.failed(orderId, toJson(items), sourceEventId));
             publisher.publishStockReservationResult(orderId, false, items, "OUT_OF_STOCK", null);
+            sagaMetrics.reservationFailed();
             log.debug("재고 부족으로 예약 실패 — orderId={}", orderId);
             return;
         }
@@ -84,6 +89,7 @@ public class StockReservationService {
         // lease 만료 시각을 결과와 함께 공유한다 — Order 는 이 시각으로 자기 주문을 먼저 취소하고,
         // Payment 는 만료 후 승인을 거부한다(계획 P4).
         publisher.publishStockReservationResult(orderId, true, items, null, reservation.getExpiresAt());
+        sagaMetrics.reservationSucceeded();
         log.debug("재고 예약 성공 — orderId={}, lease 만료={}", orderId, reservation.getExpiresAt());
     }
 
@@ -109,6 +115,7 @@ public class StockReservationService {
                 log.warn("만료 lease 회수 — orderId={}, 만료={}", reservation.getOrderId(), reservation.getExpiresAt());
             }
         }
+        sagaMetrics.sweeperReclaimed(reclaimed);
         if (reclaimed > 0) {
             slackPort.send(String.format(
                     "[예약 lease 만료] %d건 회수 — 정상 경로(주문 취소 → release)가 동작했다면 0이어야 합니다. "
@@ -153,6 +160,7 @@ public class StockReservationService {
      */
     public void confirm(Long orderId) {
         if (reservationRepository.markConfirmedIfReserved(orderId) == 1) {
+            sagaMetrics.reservationConfirmed();
             log.debug("재고 예약 확정(commit) — orderId={}", orderId);
             return;
         }
@@ -202,6 +210,7 @@ public class StockReservationService {
         if (reservationRepository.markCompensatedIfAbsent(orderId, detectedAt) == 1) {
             publisher.publishCompensationRequested(
                     orderId, CompensationReason.PAID_BUT_UNRESERVED, detectedAt);
+            sagaMetrics.compensationDetected();
             log.error("PAID_BUT_UNRESERVED — 결제 완료됐으나 재고 미확정(원장={}), 환불 요청 발행. orderId={}",
                     status, orderId);
             slackPort.send(String.format(
@@ -221,6 +230,7 @@ public class StockReservationService {
         for (ReservedItemPayload item : fromJson(reservation.getItems())) {
             inventoryService.restoreStock(item.productId(), item.quantity());
         }
+        sagaMetrics.reservationReleased();
         log.debug("예약 재고 복구 완료 — orderId={}", orderId);
         return true;
     }

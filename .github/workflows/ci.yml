@@ -89,6 +89,9 @@ jobs:
           bash scripts/servicemonitor-selector-lint.sh
           bash scripts/observability-ssot-lint.sh
           bash scripts/observability-promql-lint.sh
+          # 구현 ④-d-1 P5: 신규 메트릭 alert(compensation/dlq backlog)의 라벨 계약이
+          # 조작 입력에서 실제로 실패하는지 — alert 삭제·라벨 제거·서비스 집합 축소·메트릭 변조 4종.
+          bash scripts/observability-promql-lint.sh --self-test
           # PR3c sweep — 단일 'peekcart' 관측성 식별자(application/service) 잔존 0 강제.
           # escaped-quote(JSON/embedded-yaml) + 형제 라벨(service) 양쪽 매치(PLAN-BLINDSPOTS B11).
           # uid/tags 의 peekcart-* 브랜드 문자열은 라벨 값(="peekcart")이 아니므로 매치 대상 외.

@@ -44,6 +44,100 @@ if ! command -v promtool >/dev/null 2>&1; then
     exit 2
 fi
 
+# ---------- self-test (구현 ④-d-1 P5) ----------
+# lint 가 조작 입력에서 실제로 실패하는지 — 검사기 자체가 vacuous-green 으로 썩는 것을 막는다.
+# 조작 대상은 신규 메트릭 alert 다. 기존 4종은 이미 자체 분기를 갖고 있다.
+if [[ "${1:-}" == "--self-test" ]]; then
+    ST_TMP="$(mktemp -d)"
+    trap 'rm -rf "$ST_TMP"' EXIT
+    ST_SRC="k8s/monitoring/shared/grafana-alerts.yml"
+    ST_FAIL=0
+
+    run_case() {
+        local name="$1" file="$2"
+        if ALERTS_PATH_OVERRIDE="$file" bash "${BASH_SOURCE[0]}" >/dev/null 2>&1; then
+            echo "self-test 실패: '$name' 을 검출하지 못했다" >&2
+            ST_FAIL=1
+        fi
+    }
+
+    # (0) 원본은 통과해야 한다 — 통과 못 하면 아래 음성 케이스가 무의미하다
+    if ! ALERTS_PATH_OVERRIDE="$ST_SRC" bash "${BASH_SOURCE[0]}" >/dev/null 2>&1; then
+        echo "self-test 실패: 원본 alert 가 통과하지 않는다" >&2
+        exit 1
+    fi
+
+    # (1) alert 삭제 — 지우면 검증 분기가 실행되지 않아 라벨 검사가 통과해버린다
+    python3 - "$ST_SRC" "$ST_TMP/deleted.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+inner["groups"][0]["rules"] = [r for r in inner["groups"][0]["rules"]
+                               if r["uid"] != "peekcart-dlq-backlog"]
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "alert 삭제" "$ST_TMP/deleted.yml"
+
+    # (2) application 라벨 제거 — 서비스 구분 없이 합산하면 어디가 쌓이는지 모른다
+    python3 - "$ST_SRC" "$ST_TMP/nolabel.yml" <<'PYEOF'
+import sys, yaml, re
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-compensation-backlog":
+        for d in rule["data"]:
+            expr = (d.get("model") or {}).get("expr")
+            if expr:
+                d["model"]["expr"] = re.sub(r'\{application=~[^}]*\}', '', expr)
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "application 라벨 제거" "$ST_TMP/nolabel.yml"
+
+    # (3) 서비스 집합 축소 — 빠진 서비스의 미결은 영원히 안 잡힌다
+    python3 - "$ST_SRC" "$ST_TMP/shrunk.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-dlq-backlog":
+        for d in rule["data"]:
+            expr = (d.get("model") or {}).get("expr")
+            if expr:
+                d["model"]["expr"] = expr.replace("notification-service|", "")
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "서비스 집합 축소" "$ST_TMP/shrunk.yml"
+
+    # (4) 메트릭 이름 변조 — alert 가 다른 것을 재고 있어도 통과하면 안 된다
+    python3 - "$ST_SRC" "$ST_TMP/wrongmetric.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-dlq-backlog":
+        for d in rule["data"]:
+            expr = (d.get("model") or {}).get("expr")
+            if expr:
+                d["model"]["expr"] = expr.replace("dlq_backlog", "outbox_backlog")
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "메트릭 이름 변조" "$ST_TMP/wrongmetric.yml"
+
+    if [[ "$ST_FAIL" -ne 0 ]]; then
+        exit 1
+    fi
+    echo "observability-promql-lint self-test 4종 통과"
+    exit 0
+fi
+
 RULES_OUT=".cache/promql-syntax-rules.yml"
 mkdir -p .cache
 
@@ -53,13 +147,34 @@ RULES_OUT="$RULES_OUT" python3 - <<'PY' || PY_RC=$?
 import re, sys, glob, os
 import yaml
 
-ALERTS_PATH = "k8s/monitoring/shared/grafana-alerts.yml"
+# self-test 는 조작한 사본을 가리킨다. ground truth(application.yml · k8s Service)는
+# 실제 저장소 것을 그대로 쓴다 — 조작 대상은 alert 뿐이다.
+ALERTS_PATH = os.environ.get("ALERTS_PATH_OVERRIDE", "k8s/monitoring/shared/grafana-alerts.yml")
 RULES_OUT = os.environ["RULES_OUT"]
 
 # ---- 5서비스 정본 (ADR-0010/0015) — glob 결과를 정본으로 삼지 않는다 ----
 EXPECTED_SERVICES = {
     "notification-service", "order-service", "payment-service",
     "product-service", "user-service",
+}
+
+# ---- 메트릭 alert 계약 (구현 ④-d-1 P5) ----
+# saga/DLQ alert 는 http_server_requests 처럼 5서비스 전부에 있는 메트릭이 아니다.
+# 메트릭을 실제로 등록한 서비스 집합으로 평가해야 한다 —
+#   5서비스 regex 로 걸면 없는 series 를 기다리는 alert 가 되고,
+#   단일 equality 로 좁히면 소유 서비스가 늘어도 alert 가 안 따라온다.
+# 그래서 uid 별로 "메트릭 이름 + 소유 서비스 집합" 을 정본으로 고정하고 정확 일치를 강제한다.
+METRIC_ALERT_CONTRACTS = {
+    "peekcart-compensation-backlog": {
+        # order_compensations 원장은 order-service 단독 소유 (ADR-0012 D1)
+        "metric": "saga_compensation_backlog",
+        "apps": {"order-service"},
+    },
+    "peekcart-dlq-backlog": {
+        # dead_letter_records 는 Kafka 소비 4서비스가 소유. user-service 는 소비자가 없다.
+        "metric": "dlq_backlog",
+        "apps": {"notification-service", "order-service", "payment-service", "product-service"},
+    },
 }
 
 # ---- ground truth ----
@@ -231,17 +346,58 @@ for group in alerts_doc.get("groups", []) or []:
                 for v in svc_ms:
                     scrape_absent_services.add(v)
 
+        elif uid in METRIC_ALERT_CONTRACTS:
+            contract = METRIC_ALERT_CONTRACTS[uid]
+            expected_apps = contract["apps"]
+            for ref_id, expr in entries:
+                m = matchers(expr)
+                bys = by_labels(expr)
+                if contract["metric"] not in expr:
+                    violations.append(
+                        f"[D5-V6] 메트릭 이름 불일치: uid={uid} refId={ref_id}\n"
+                        f"  expected metric: {contract['metric']}\n"
+                        f"  PromQL: {expr}\n"
+                        f"  → 계약된 메트릭이 아닌 식은 alert 가 다른 것을 재는 것이다.\n")
+                app_ms = m.get("application", [])
+                if not app_ms:
+                    violations.append(
+                        f"[D5-V6] application matcher 부재: uid={uid} refId={ref_id}\n"
+                        f"  PromQL: {expr}\n"
+                        f"  → 서비스 구분 없이 합산하면 어느 서비스가 쌓이는지 알 수 없다.\n")
+                    continue
+                found_apps = set()
+                for op, val in app_ms:
+                    if op == "=":
+                        found_apps.add(val)
+                    elif op == "=~":
+                        found_apps |= {v for v in val.split("|") if v}
+                if found_apps != expected_apps:
+                    violations.append(
+                        f"[D5-V6] application 집합 불일치: uid={uid} refId={ref_id}\n"
+                        f"  expected(메트릭 소유 서비스): {sorted(expected_apps)}\n"
+                        f"  found: {sorted(found_apps)}\n"
+                        f"  → 소유 서비스가 아닌 값을 넣으면 없는 series 를 기다리고,\n"
+                        f"    빠뜨리면 그 서비스의 미결이 영원히 안 잡힌다.\n")
+                if "application" not in bys:
+                    violations.append(
+                        f"[D5-V6] by (application) grouping 부재: uid={uid} refId={ref_id}\n"
+                        f"  PromQL: {expr}\n"
+                        f"  → 서비스별 평가 필요.\n")
+
 # 필수 alert uid 존재 검증 — rule 삭제 시 분기 미실행으로 통과하는 false-green 차단 (Codex GP-2 #2)
 REQUIRED_UIDS = (
     {"peekcart-high-error-rate", "peekcart-slow-response", "peekcart-target-down"}
     | {f"peekcart-scrape-absent-{s}" for s in EXPECTED_SERVICES}
+    # 구현 ④-d-1 P5 — alert 를 지우면 위 분기가 실행되지 않아 라벨 검사가 통과해버린다.
+    | set(METRIC_ALERT_CONTRACTS)
 )
 missing_uids = REQUIRED_UIDS - seen_uids
 if missing_uids:
     violations.append(
         f"[D5-V6] 필수 alert rule 부재:\n"
         f"  missing uid: {sorted(missing_uids)}\n"
-        f"  → ADR-0015 S6: high-error-rate/slow-response/target-down 각 1 + scrape-absent 5서비스 필수.\n")
+        f"  → ADR-0015 S6: high-error-rate/slow-response/target-down 각 1 + scrape-absent 5서비스 필수.\n"
+        f"    구현 ④-d-1 P5: compensation-backlog / dlq-backlog 각 1 추가.\n")
 
 # scrape-absent 집합 == Service metadata.name 집합 1:1
 if scrape_absent_services != svc_set:

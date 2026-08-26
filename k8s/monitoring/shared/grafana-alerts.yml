@@ -255,3 +255,64 @@ data:
             annotations:
               summary: "PeekCart up 시계열 부재 — user-service (ServiceMonitor 미매칭 / 서비스 삭제)"
               description: "user-service 의 up 메트릭 series 부재. ServiceMonitor selector 미스매치, 서비스 삭제, Prometheus 설정 문제 등 구조적 부재. 스크랩 실패(up == 0) 는 peekcart-target-down 에서 감지." 
+          # --- 구현 ④-d-1 P4: 미결이 쌓이는 표면만 alert 로 둔다 ---
+          # 메트릭을 늘린다고 alert 를 그만큼 만들지 않는다. 울리지 않는 alert 는 소음이고
+          # promql-lint 의 required 집합을 그만큼 넓힌다. 예약 성공/확정/복구 같은 흐름 지표는
+          # 대시보드·조회용이고, "사람이 손대지 않으면 안 없어지는 것" 만 alert 대상이다.
+          - uid: peekcart-compensation-backlog
+            title: "Saga Compensation Backlog (미해소 보상 원장)"
+            condition: B
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: prometheus
+                model:
+                  # order-service 전용 메트릭이다 — 보상 원장(order_compensations)을 order 만 소유한다.
+                  # 5서비스 regex 로 걸면 없는 series 를 기다리는 alert 가 된다(ADR-0012 D1).
+                  expr: "sum by (application)(saga_compensation_backlog{application=~\"order-service\"})"
+                  instant: true
+                  range: false
+              - refId: B
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  type: math
+                  expression: "$A > 0"
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PeekCart 미해소 보상 원장 존재 — {{ $labels.application }}"
+              description: "order_compensations 에 OPEN 또는 REFUND_FAILED 건이 남아 있습니다. OPEN 은 환불 요청이 아직 종결되지 않은 것이고, REFUND_FAILED 는 '닫혔지만 해결되지 않은' 상태라 사람이 처리해야 합니다(ADR-0018 D4). for=15m 은 정상 환불 왕복 시간을 넘긴 잔존만 잡기 위한 값입니다."
+          - uid: peekcart-dlq-backlog
+            title: "DLQ Backlog (미결 DLQ 원장)"
+            condition: B
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: prometheus
+                model:
+                  # DLQ 원장은 소비 서비스 4곳이 소유한다 — user-service 는 Kafka 소비자가 없어 제외.
+                  expr: "sum by (application)(dlq_backlog{application=~\"notification-service|order-service|payment-service|product-service\"})"
+                  instant: true
+                  range: false
+              - refId: B
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  type: math
+                  expression: "$A > 0"
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PeekCart 미결 DLQ 원장 존재 — {{ $labels.application }}"
+              description: "dead_letter_records 에 OPEN/ACKED 건이 남아 있습니다. DLQ 유입은 종결이 아니라 원장의 입력이며, 재처리 여부는 사람이 판단합니다. 조치: docs/runbooks/dlq-recovery.md"

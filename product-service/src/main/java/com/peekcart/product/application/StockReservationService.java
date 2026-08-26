@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.outbox.dto.CompensationReason;
 import com.peekcart.global.outbox.dto.ReservedItemPayload;
 import com.peekcart.global.port.SlackPort;
-import com.peekcart.product.infrastructure.metrics.ProductSagaMetrics;
+import com.peekcart.product.application.port.SagaMetricsPort;
 import com.peekcart.product.domain.model.ReservationStatus;
 import com.peekcart.product.domain.model.StockReservation;
 import com.peekcart.product.domain.repository.StockReservationRepository;
@@ -40,7 +40,7 @@ public class StockReservationService {
     private final ObjectMapper objectMapper;
     private final SlackPort slackPort;
     private final ReservationLeaseProperties leaseProperties;
-    private final ProductSagaMetrics sagaMetrics;
+    private final SagaMetricsPort sagaMetrics;
 
     /**
      * order.created 수신 시 재고를 예약(차감)한다. all-or-nothing.

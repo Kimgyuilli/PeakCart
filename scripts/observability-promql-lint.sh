@@ -131,10 +131,42 @@ yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
 PYEOF
     run_case "메트릭 이름 변조" "$ST_TMP/wrongmetric.yml"
 
+    # (5) prometheus entry 삭제 — uid 만 남기면 라벨 검사 루프가 돌지 않아 통과하던 우회
+    python3 - "$ST_SRC" "$ST_TMP/noentry.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-dlq-backlog":
+        rule["data"] = [d for d in rule["data"] if d.get("datasourceUid") != "prometheus"]
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "prometheus entry 삭제" "$ST_TMP/noentry.yml"
+
+    # (6) 부정 matcher 로 서비스 제외 — 집합은 그대로인데 실제로는 안 보는 우회
+    python3 - "$ST_SRC" "$ST_TMP/negmatcher.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-dlq-backlog":
+        for d in rule["data"]:
+            expr = (d.get("model") or {}).get("expr")
+            if expr:
+                d["model"]["expr"] = expr.replace(
+                    'product-service"}', 'product-service", application!="notification-service"}')
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "부정 matcher 로 서비스 제외" "$ST_TMP/negmatcher.yml"
+
     if [[ "$ST_FAIL" -ne 0 ]]; then
         exit 1
     fi
-    echo "observability-promql-lint self-test 4종 통과"
+    echo "observability-promql-lint self-test 6종 통과"
     exit 0
 fi
 
@@ -164,6 +196,13 @@ EXPECTED_SERVICES = {
 #   5서비스 regex 로 걸면 없는 series 를 기다리는 alert 가 되고,
 #   단일 equality 로 좁히면 소유 서비스가 늘어도 alert 가 안 따라온다.
 # 그래서 uid 별로 "메트릭 이름 + 소유 서비스 집합" 을 정본으로 고정하고 정확 일치를 강제한다.
+# 메트릭 이름 추출 시 걸러낼 PromQL 예약어/함수 (구현 ④-d-1 diff 리뷰 #2)
+PROMQL_KEYWORDS = {
+    "sum", "by", "without", "rate", "irate", "increase", "count", "avg", "min", "max",
+    "absent", "vector", "on", "ignoring", "group_left", "group_right", "histogram_quantile",
+    "or", "and", "unless", "offset", "bool", "topk", "bottomk", "quantile", "stddev",
+}
+
 METRIC_ALERT_CONTRACTS = {
     "peekcart-compensation-backlog": {
         # order_compensations 원장은 order-service 단독 소유 (ADR-0012 D1)
@@ -349,15 +388,32 @@ for group in alerts_doc.get("groups", []) or []:
         elif uid in METRIC_ALERT_CONTRACTS:
             contract = METRIC_ALERT_CONTRACTS[uid]
             expected_apps = contract["apps"]
+            # prometheus entry 를 전부 지우면 아래 루프가 돌지 않아 라벨 검사가 통과해버린다
+            # (uid 만 남기면 required 검사도 통과) → entry 수를 먼저 못박는다.
+            if len(entries) != 1:
+                violations.append(
+                    f"[D5-V6] prometheus entry 수 불일치: uid={uid}\n"
+                    f"  expected: 1, found: {len(entries)}\n"
+                    f"  → entry 를 지우면 라벨 검사 자체가 실행되지 않는다(우회 경로).\n")
             for ref_id, expr in entries:
                 m = matchers(expr)
                 bys = by_labels(expr)
-                if contract["metric"] not in expr:
+                # substring 대신 "식에 등장하는 메트릭 이름 집합" 을 뽑아 정확히 1종인지 본다.
+                # `잘못된식 + 0 * 계약메트릭{정상라벨}` 처럼 계약 메트릭을 곁들여 검사를 통과시키고
+                # 실제로는 다른 것을 재는 우회를 막는다.
+                # by(...)/without(...) 안의 라벨 목록과 {..} 안의 matcher 는 메트릭이 아니다 —
+                # 먼저 지우고 남은 식별자만 메트릭 후보로 본다.
+                stripped = re.sub(r"\b(?:by|without)\s*\([^)]*\)", " ", expr)
+                stripped = re.sub(r"\{[^}]*\}", " ", stripped)
+                names = set(re.findall(r"(?<![\w:])([a-zA-Z_][a-zA-Z0-9_]*)", stripped))
+                names -= PROMQL_KEYWORDS
+                if names != {contract["metric"]}:
                     violations.append(
                         f"[D5-V6] 메트릭 이름 불일치: uid={uid} refId={ref_id}\n"
-                        f"  expected metric: {contract['metric']}\n"
+                        f"  expected(정확히 1종): {contract['metric']}\n"
+                        f"  found: {sorted(names)}\n"
                         f"  PromQL: {expr}\n"
-                        f"  → 계약된 메트릭이 아닌 식은 alert 가 다른 것을 재는 것이다.\n")
+                        f"  → 계약 메트릭 외의 항이 섞이면 alert 가 다른 것을 재고 있을 수 있다.\n")
                 app_ms = m.get("application", [])
                 if not app_ms:
                     violations.append(
@@ -367,7 +423,12 @@ for group in alerts_doc.get("groups", []) or []:
                     continue
                 found_apps = set()
                 for op, val in app_ms:
-                    if op == "=":
+                    if op in ("!=", "!~"):
+                        violations.append(
+                            f"[D5-V6] application 부정 matcher 금지: uid={uid} refId={ref_id}\n"
+                            f"  found: application{op}\"{val}\"\n"
+                            f"  → 부정 matcher 로 특정 서비스를 빼면 그 서비스의 미결이 영원히 안 잡힌다.\n")
+                    elif op == "=":
                         found_apps.add(val)
                     elif op == "=~":
                         found_apps |= {v for v in val.split("|") if v}

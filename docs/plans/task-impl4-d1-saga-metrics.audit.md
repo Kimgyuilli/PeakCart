@@ -30,3 +30,15 @@
 - → **④-d-1**(P11 관측성, 즉시 착수) / **④-d-2**(P12 E2E · P14 게이트 · P15 종결) 로 분할.
 - ④-d-2 가 흡수한 선결 과제: `RefundDispatcher` 비활성화 프로퍼티 · E2E 전용 compose(격리) · 예약 실패 체인 시나리오 · `observability-promql-lint` required-UID 확장(신규 alert 분) · 증적 프로토콜 3분기.
 - **④ 종결은 ④-d-2 소관이다** — d-1 은 ④ 를 닫지 않는다.
+
+## 2026-08-26 19:38 — diff 리뷰 라운드 1 (PR #91)
+- 항목: **5건 (P0:0, P1:4, P2:1)** · 반영 5 / 기각 0
+- **통과 확인**: Gauge 는 Micrometer 1.15.10 기본 weak reference 지만 Spring singleton repository 를 ApplicationContext 가 강하게 보유해 GC→NaN 위험 없음. DB 조회도 scrape 주기(15s)이고 `(status, occurred_at)`·`(status, detected_at)` 인덱스가 있어 부하 결함 아님. static `orderIdSeq` 도 병렬 실행 설정이 없고 매 테스트 DB 정리라 격리 문제 미재현
+- **반영 내역**:
+  1. **(P1) Counter 가 커밋 전에 증가** — 계측 지점이 전부 `@Transactional` 안이라 이후 flush/commit 실패 시 DB 는 롤백되고 카운터만 남는다. 내 계획 §4 의 "실제 전이가 일어났을 때만" 계약을 스스로 깬 것 → `CommitAwareMetrics`(관측성 모듈) 신설, 트랜잭션 활성 시 `afterCommit` 으로 이연
+  2. **(P1) lint 우회 3경로** — ① prometheus entry 를 전부 지우면 검사 루프가 안 돌고 required 검사는 통과 ② 메트릭을 substring 으로 봐서 `잘못된식 + 0 * 계약메트릭` 우회 가능 ③ 부정 matcher(`application!=`)로 서비스 제외 가능 → entry 수 정확히 1 강제 · 메트릭 이름 집합 정확 일치(by/matcher 제거 후 추출) · 부정 matcher 금지. **self-test 4종 → 6종**
+  3. **(P1) 누락 양성 테스트** — sweeper "3건 회수 시 +3" 과 product `saga.compensation.detected` 양성·중복 음성이 없었다. §6 의 "§4 전 행이 테스트로 고정됨" 이 false-green 이었다 → 둘 다 추가
+  4. **(P1) 타임아웃 테스트가 실제 잡을 안 돌린다** — 메트릭 객체를 직접 호출해서, 스케줄러에서 계측을 지워도 통과했다. `OrderTimeoutSchedulerTest` 도 mock 만 넣고 verify 가 없었다 → 3개 잡 각각에 `verify` 추가(성공 건수만·경합/충돌 건 제외·사유 교차 금지) + **미확정 예약 잡 테스트 신설**(3사유 중 유일하게 없었다)
+  5. **(P2) 레이어 역전** — `StockReservationService`(application)가 `infrastructure.metrics` 를 직접 import. CLAUDE.md 의존 방향 위반 → `application/port/SagaMetricsPort` 신설, infrastructure 가 구현(`SlackPort` 선례). order 는 계측 지점이 전부 infrastructure 라 해당 없음
+- **부수 이동**: `CommitAwareMetrics` 는 `:common` 에 micrometer 의존이 없어 `:peekcart-common-observability`(ADR-0009 소유)로 배치, `spring-tx` 추가
+- raw: `.cache/codex-reviews/diff-d1-r1.json`

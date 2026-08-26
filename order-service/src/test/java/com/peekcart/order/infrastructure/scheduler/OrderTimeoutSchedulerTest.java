@@ -48,6 +48,8 @@ class OrderTimeoutSchedulerTest {
 
         then(orderCommandService).should().cancelExpiredOrder(order1.getId());
         then(orderCommandService).should().cancelExpiredOrder(order2.getId());
+        // 계측 배선 검증 — 이 verify 가 없으면 스케줄러에서 계측 호출을 지워도 통과한다.
+        then(sagaMetrics).should().timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, 2);
     }
 
     @Test
@@ -59,6 +61,7 @@ class OrderTimeoutSchedulerTest {
         orderTimeoutScheduler.cancelExpiredOrders();
 
         then(orderCommandService).should(never()).cancelExpiredOrder(any());
+        then(sagaMetrics).should().timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, 0);
     }
 
     @Test
@@ -75,6 +78,8 @@ class OrderTimeoutSchedulerTest {
 
         then(orderCommandService).should(times(1)).cancelExpiredOrder(order1.getId());
         then(orderCommandService).should(times(1)).cancelExpiredOrder(order2.getId());
+        // 실패 건은 세지 않는다 — 취소되지 않은 것을 세면 메트릭이 실제 건수를 부풀린다.
+        then(sagaMetrics).should().timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, 1);
     }
 
     @Test
@@ -91,6 +96,8 @@ class OrderTimeoutSchedulerTest {
 
         then(orderCommandService).should(times(1)).cancelExpiredOrder(order1.getId());
         then(orderCommandService).should(times(1)).cancelExpiredOrder(order2.getId());
+        // 상태 경합으로 스킵된 건은 취소가 아니다.
+        then(sagaMetrics).should().timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, 1);
     }
 
     @Test
@@ -109,6 +116,25 @@ class OrderTimeoutSchedulerTest {
         // 충돌 건은 1회만 호출(재시도 없음)하고, 잡 전체는 계속 진행한다.
         then(orderCommandService).should(times(1)).cancelExpiredOrder(order1.getId());
         then(orderCommandService).should(times(1)).cancelExpiredOrder(order2.getId());
+        then(sagaMetrics).should().timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, 1);
+    }
+
+    @Test
+    @DisplayName("예약 미확정 잡: 취소 건수를 unconfirmed_reservation 사유로만 센다")
+    void cancelUnconfirmedReservations_countsOwnReason() {
+        Order order1 = OrderFixture.orderWithId();
+        given(orderRepository.findUnconfirmedReservationBefore(any(LocalDateTime.class)))
+                .willReturn(List.of(order1));
+
+        orderTimeoutScheduler.cancelUnconfirmedReservations();
+
+        then(orderCommandService).should().cancelExpiredOrder(order1.getId());
+        then(sagaMetrics).should()
+                .timeoutCancelled(OrderSagaMetrics.REASON_UNCONFIRMED_RESERVATION, 1);
+        then(sagaMetrics).should(never())
+                .timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, 1);
+        then(sagaMetrics).should(never())
+                .timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_LEASE, 1);
     }
 
     @Test
@@ -124,6 +150,10 @@ class OrderTimeoutSchedulerTest {
 
         then(orderCommandService).should().cancelExpiredOrder(order1.getId());
         then(orderCommandService).should().cancelExpiredOrder(order2.getId());
+        // 사유가 섞이면 어느 잡이 도는지 구분되지 않는다 — lease 잡은 lease 사유로만 센다.
+        then(sagaMetrics).should().timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_LEASE, 2);
+        then(sagaMetrics).should(never())
+                .timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, 2);
     }
 
     @Test
@@ -135,5 +165,6 @@ class OrderTimeoutSchedulerTest {
         orderTimeoutScheduler.cancelExpiredReservationLeases();
 
         then(orderCommandService).should(never()).cancelExpiredOrder(any());
+        then(sagaMetrics).should().timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_LEASE, 0);
     }
 }

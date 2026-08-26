@@ -1,5 +1,6 @@
 package com.peekcart.order.infrastructure.metrics;
 
+import com.peekcart.global.metrics.CommitAwareMetrics;
 import com.peekcart.order.domain.model.CompensationStatus;
 import com.peekcart.order.domain.repository.OrderCompensationRepository;
 import io.micrometer.core.instrument.Counter;
@@ -13,6 +14,9 @@ import org.springframework.stereotype.Component;
  * <p><b>타임아웃 취소 3종을 {@code reason} 으로 가른다.</b> 한 값으로 합치면 어느 잡이 도는지
  * 구분되지 않는다 — 결제 만료·예약 미확정·lease 만료는 원인도 대응도 다르다. 합쳐놓으면
  * "취소가 늘었다" 까지만 알고 왜인지는 다시 로그를 읽어야 한다.
+ *
+ * <p><b>증가는 커밋 이후다</b>({@link CommitAwareMetrics}) — 보상 적재는 소비 트랜잭션 안에서
+ * 일어나므로, 본문에서 바로 올리면 이후 커밋이 실패해도 카운터만 남는다.
  *
  * <p><b>보상은 Counter 와 Gauge 를 함께 둔다.</b> 누적 Counter 로는 "지금 몇 건이 미해소인가" 를
  * 알 수 없어 alert 를 만들 데이터가 없다. 잔량은 원장을 직접 세는 Gauge 다
@@ -68,15 +72,15 @@ public class OrderSagaMetrics {
             return;
         }
         switch (reason) {
-            case REASON_EXPIRED_PAYMENT -> timeoutExpiredPayment.increment(count);
-            case REASON_UNCONFIRMED_RESERVATION -> timeoutUnconfirmedReservation.increment(count);
-            case REASON_EXPIRED_LEASE -> timeoutExpiredLease.increment(count);
+            case REASON_EXPIRED_PAYMENT -> CommitAwareMetrics.increment(timeoutExpiredPayment, count);
+            case REASON_UNCONFIRMED_RESERVATION -> CommitAwareMetrics.increment(timeoutUnconfirmedReservation, count);
+            case REASON_EXPIRED_LEASE -> CommitAwareMetrics.increment(timeoutExpiredLease, count);
             default -> throw new IllegalArgumentException("알 수 없는 취소 사유: " + reason);
         }
     }
 
     /** 보상 원장 <b>신규</b> 적재. 이미 열려 있던 건의 no-op 은 제외. */
     public void compensationDetected() {
-        compensationDetected.increment();
+        CommitAwareMetrics.increment(compensationDetected);
     }
 }

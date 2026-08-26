@@ -989,3 +989,40 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 4. **DLQ 원장·runbook 은 ④-c-2** — DLQ 유입은 종결이 아니라 그 원장의 입력이다
 
 **다음**: **④-c-2**(부모 P9·P10·P13 나머지 — DLQ 원장·runbook) → ④-d(부모 P11·P12·P14·P15).
+
+---
+
+## 구현 ④ Choreography Saga — ④-c-2a: DLQ 원장 적재 — 2026-08-26 — [#90](https://github.com/Kimgyuilli/PeakCart/pull/90)
+
+> 부모 P9·P10·P13(나머지). **계획 리뷰 3라운드에서 ④-c-2 가 2a/2b 로 갈렸다** — replay 는 ADR 선행(④-c-2b).
+
+**계획 리뷰가 세 라운드에서 30건을 냈고 전량 반영했다(12 → 8 → 10, 감소하지 않음).** 각 라운드의 수정이 새 계약 표면을 만들고 그게 다음 라운드 결함이 되는 패턴이었다. 3R 에서 10건 중 6건이 replay 경로에 몰렸고 그중 다수가 ADR 사안이라(notification outbox 신설 = ADR-0012 D1 변경 · replay 전용 outbox 표현 · 좌표 reader · 브로커 retention 실계약) 거기서 잘랐다. **2R 때는 "replay 에 몰렸다"는 근거가 없었다(8건 중 2건)** — 데이터가 바뀌어서 분할한 것이지 건수 추세로 판단한 게 아니다.
+
+**"재발행 중복 0" 이 두 라운드 연속 반증됐다.** 2R 은 2단 상태머신(`REPLAY_REQUESTED` → 발행 → `REPLAY_PUBLISHED`)을 깼고 — 발행 직후 사망 시 발행 여부를 판별할 수 없다 — 그 대안으로 내놓은 기존 outbox 재사용도 3R 에서 같은 crash window 를 가진 것으로 실측 확인됐다(`OutboxPollingService:83-86` 이 broker ack 후 **별도로** `markPublished()`+`save()`). 같은 주장이 두 번 반증된 표면은 계획서 수정이 아니라 설계 결정이라 ADR 로 올렸다.
+
+**계획의 핵심 전제 세 개가 리뷰로 뒤집혔고, 전부 코드/바이너리로 직접 확인했다**:
+1. "`DeadLetterPublishingRecoverer` 가 consumer group 헤더를 안 붙인다" → **거짓**. `spring-kafka-3.3.14` bytecode 에 `HeadersToAdd.GROUP` 이 있고 `whichHeaders = EnumSet.allOf(...)` 가 기본값이다. 커스텀 헤더 주입 작업을 통째로 삭제했다
+2. 식별자 `(topic, eventId, group)` → **eventId 없는 메시지가 DLQ 의 대표 입력**이다(`KafkaMessageParser:29` 이 eventId 누락·JSON 파싱 실패를 예외로 던진다). 좌표 기반으로 교체
+3. `originalKey` 를 `DLT_*` 헤더에서 읽기 → **`DLT_ORIGINAL_KEY` 는 존재하지 않는다**(13개 중 없음). 원본 key 는 DLQ 레코드 자신의 key 다
+
+**식별자가 6컬럼인 이유는 둘 다 "조용한 유실" 이다.** ① DLQ 토픽은 공유라 `payment.completed` 를 3서비스가 각자 group 으로 소비한다 — group 없이는 누가 미결인지 답하지 못한다. ② `(topic, partition, offset)` 은 **토픽 재생성 시 유일하지 않다** — offset 0 재사용으로 과거 행과 충돌하고 `INSERT IGNORE` 가 새 실패를 정상 중복처럼 폐기한다 → `cluster_id` + `topic_generation`. 그리고 **6컬럼 전부 NOT NULL** 이다. 판독 불가에 NULL 을 쓰면 MySQL UNIQUE 가 NULL 끼리 충돌시키지 않아 같은 poison record 가 여러 행이 된다 → `DLQ_ORIGIN` 종류를 두고 DLQ 자신의 좌표를 쓴다.
+
+**quarantine 소유자 규칙은 내가 3R 대기 중 자체 반증했다.** "group 부재분은 원본 토픽 발행 서비스가 소유" 로 정했는데, **발행 서비스는 자기 토픽을 소비하지 않아 자기 `.dlq` 도 구독하지 않는다** — 지정된 소유자가 그 레코드를 볼 수 없었다. quarantine 전용 listener 를 별도로 신설했고, 두 소유권 집합이 교차하지 않음(서비스는 자기 발행 토픽을 소비하지 않으므로)을 계약 테스트로 고정했다.
+
+**listener 실패는 "유실 ↔ poison record" 딜레마다.** durable 대체 저장소 없이 둘 다 만족할 수 없어 **무유실을 택했다** — `ackAfterHandle=false`(기본값 true 면 recoverer 후 offset 이 커밋돼 원장에 못 쓴 레코드가 영구 유실) + 유한 backoff + 소진 시 DLQ 계열 컨테이너 정지. 업무 listener 는 영향받지 않는다.
+
+**알림 보장을 낮췄다.** 초안은 "신규 INSERT 당 정확히 1회" 였으나 DB commit 과 Slack 은 한 트랜잭션이 아니라 commit 후 사망하면 0회다 → **best-effort** 로 적고, 라우팅 알림도 유지했다(지금 제거하면 listener 미배선·DB 장애 시 알림과 원장이 동시에 사라진다). 내구적 신호는 원장 행 자체이며 `actuator/deadletter` 로 조회한다.
+
+**구현 중 자체 발견 2건**:
+1. `topic-generations` 조회가 `DLQ_ORIGIN` 경로에서 깨졌다 — 그 행은 좌표로 `.dlq` 이름을 싣는데 키는 원본 토픽이었다. 통합테스트가 잡았다 → `.dlq` 는 원본 세대를 따르게 했다
+2. **runbook 이 내 도메인 가드를 우회하도록 지시하고 있었다.** 종결을 `UPDATE ... SET status` 로 안내해 `discard()` 의 "사유 필수" 가드가 코드에만 있고 운영에는 없는 장식이 될 뻔했다. **3R #7 이 replay 리허설에 대해 지적한 false-green 구조를 2a 종결 경로에서 내가 그대로 재현한 것** → `DeadLetterEndpoint` 에 `@WriteOperation` 진입점을 만들고 runbook 을 curl 로 교체, 리허설 테스트가 그 진입점만 호출하도록 했다
+
+**검증**: 8모듈 **751 테스트 0 실패**(신규 54) · lint **11종**(신규 `dead-letter-schema-parity-lint`, self-test 4종) 그린. 부모 P13 은 "구현 완료·실행계획 증적 잔여" 로 판정하고 EXPLAIN 증적을 받았다(기존 sweep 테스트는 limit·경계만 봤다).
+
+**미충족(명시)**:
+1. **replay 전부** — ④-c-2b(ADR 선행). runbook 에 "현재 재발행 불가" 와 우회 절차를 명시
+2. **"정확히 1곳" 은 cross-service 증명이 아니다** — (ownership 매핑 계약) × (서비스별 실제 Kafka 왕복)까지이며 4서비스 동시 기동으로 확인하지 않았다. ④-d 부모 P12
+3. 메트릭·E2E·CI 게이트·Layer 1 동기화 — ④-d
+4. 라우팅 알림 제거 · 브로커 `retention.ms`/`cleanup.policy` 미설정(2b 전제)
+
+**다음**: ④-c-2b(ADR 선행) 또는 ④-d.

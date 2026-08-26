@@ -54,3 +54,13 @@
   5. **(P2) `CommitAwareMetrics` 자체 테스트 부재** — 1R 수정의 핵심인 "롤백이면 증가 0" 이 고정되지 않아 **즉시 증가 방식으로 되돌려도 전부 통과**했다 → 계약 테스트 7건 신설(무트랜잭션 즉시 증가 · 커밋 전 0/후 증가 · 롤백 0 · 예외 롤백 0 · REQUIRES_NEW 독립 · 증가량 0 무시 · 계측 예외 미전파)
 - **실패 1건(수정)**: 추가한 카운터 단언이 절대값이었는데 `MeterRegistry` 가 컨텍스트 공유라 이전 테스트 값이 누적됐다(1.0 기대, 2.0 관측) → 델타 단언으로 교체
 - raw: `.cache/codex-reviews/diff-d1-r2.json`
+
+## 2026-08-26 22:35 — diff 리뷰 라운드 3 (PR #91, 상한)
+- 항목: **3건 (P0:0, P1:1, P2:2)** · 반영 3 / 기각 0 · 라운드별 추세 **5 → 5 → 3**
+- **통과 확인**: compensation alert 의 `status=~"open|refund_failed"` 가 `OrderSagaMetrics` 의 실제 Gauge 태그와 일치 · `catch(Exception)` 이 `OutOfMemoryError` 같은 `Error` 를 삼키지 않아 범위 적절 · `SagaMetricsPort` 의존 방향 · sweeper 의 `reclaimed` 클로저 의미
+- **2라운드 수정이 남긴 것**:
+  1. **(P1) 계약 강도 비대칭** — 2R 에서 `0 * metric` 우회를 막을 때 **신규 2종만** 식을 고정해, 같은 우회가 기존 4종(`high-error-rate`·`slow-response`·`target-down`·`scrape-absent`)에 그대로 남았다. 약한 쪽이 뚫리면 강한 쪽을 지킨 의미가 없다 → **모든 필수 alert 의 prometheus 식을 정본으로 고정**(`ALERT_EXPR_CONTRACTS`, scrape-absent 5종은 ground truth 에서 생성). self-test 8종 → 10종(기존 alert `0 *` · entry 삭제)
+  2. **(P2) 유실 로그 정보 부족** — meter 이름만 남겨 어떤 태그의 몇 건이 유실됐는지 모른다. 이 메트릭들은 태그별 시계열이고 `amount` 가 사건 건수(sweeper 회수·타임아웃 취소)다 → `counter.getId()` 전체 + `amount` 기록
+  3. **(P2) DLQ 메트릭 계약이 order 에만 고정** — 구현은 4서비스 복제인데 테스트가 order 뿐이라, 다른 3곳에서 Gauge 등록이나 조회 함수가 사라져도 아무 테스트도 실패하지 않았다 → 계약 테스트를 3서비스에 복제
+- **루프 종료**: 계획 상한 3회 도달. **잔여 한계 명시** — 식 정확 일치는 문자열 비교이지 PromQL 의미 분석이 아니다. `0 *` 같은 알려진 패턴은 막지만, 새 무력화 패턴은 정본을 고치는 순간 함께 들어올 수 있다. 완전한 방어는 AST 기반 검사이며 본 PR 범위 밖이다.
+- raw: `.cache/codex-reviews/diff-d1-r3.json`

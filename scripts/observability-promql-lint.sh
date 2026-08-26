@@ -197,10 +197,41 @@ yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
 PYEOF
     run_case "status 필터 삭제" "$ST_TMP/nostatus.yml"
 
+    # (9) 기존 alert 에도 같은 우회가 통하는지 — 신규 2종만 지키면 약한 쪽이 뚫린다
+    python3 - "$ST_SRC" "$ST_TMP/legacy-zeromul.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-high-error-rate":
+        for d in rule["data"]:
+            expr = (d.get("model") or {}).get("expr")
+            if expr:
+                d["model"]["expr"] = "0 * " + expr
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "기존 alert 0 * 우회" "$ST_TMP/legacy-zeromul.yml"
+
+    # (10) 기존 alert 의 prometheus entry 삭제
+    python3 - "$ST_SRC" "$ST_TMP/legacy-noentry.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-high-error-rate":
+        rule["data"] = [d for d in rule["data"] if d.get("datasourceUid") != "prometheus"]
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "기존 alert entry 삭제" "$ST_TMP/legacy-noentry.yml"
+
     if [[ "$ST_FAIL" -ne 0 ]]; then
         exit 1
     fi
-    echo "observability-promql-lint self-test 8종 통과"
+    echo "observability-promql-lint self-test 10종 통과"
     exit 0
 fi
 
@@ -259,6 +290,36 @@ METRIC_ALERT_CONTRACTS = {
                 '{application=~"notification-service|order-service|payment-service|product-service"})',
     },
 }
+
+# ---- alert expr 정본 (구현 ④-d-1 diff 리뷰 3R #1) ----
+# 신규 2종만 식을 고정하면 기존 4종은 `0 * <식>` 으로 무력화해도 라벨 검사를 그대로 통과한다
+# (application matcher 도 by(application) 도 그대로다) — 계약 강도가 비대칭이면 약한 쪽이 뚫린다.
+# 그래서 **모든 필수 alert 의 prometheus 식을 정확 문자열로 고정**한다.
+# 대가: alert 를 고칠 때 이 정본도 함께 고쳐야 한다. 그게 의도다 — 식 변경은 계약 변경이다.
+def _scrape_absent_expr(service):
+    return ('absent(up{namespace="peekcart", service="%s"}) or on() vector(0)' % service)
+
+APP_REGEX = "notification-service|order-service|payment-service|product-service|user-service"
+
+ALERT_EXPR_CONTRACTS = {
+    "peekcart-high-error-rate": [
+        'sum by (application)(rate(http_server_requests_seconds_count'
+        '{application=~"%s", status=~"5.."}[5m]))' % APP_REGEX,
+        'sum by (application)(rate(http_server_requests_seconds_count'
+        '{application=~"%s"}[5m]))' % APP_REGEX,
+    ],
+    "peekcart-slow-response": [
+        'histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket'
+        '{application=~"%s", uri!~"/actuator.*"}[5m])) by (le, application))' % APP_REGEX,
+    ],
+    "peekcart-target-down": [
+        'count by (service)(up{namespace="peekcart"} == 0) or on() vector(0)',
+    ],
+}
+for _svc in sorted(EXPECTED_SERVICES):
+    ALERT_EXPR_CONTRACTS["peekcart-scrape-absent-%s" % _svc] = [_scrape_absent_expr(_svc)]
+for _uid, _c in METRIC_ALERT_CONTRACTS.items():
+    ALERT_EXPR_CONTRACTS[_uid] = [_c["expr"]]
 
 # ---- ground truth ----
 app_set = set()
@@ -358,6 +419,20 @@ for group in alerts_doc.get("groups", []) or []:
         entries = prom_entries(rule)
         for ref_id, expr in entries:
             prom_exprs.append((uid, ref_id, expr))
+
+        # 모든 필수 alert 의 식 정확 일치 (3R #1) — `0 * <식>` 류 무력화를 구조적으로 차단한다.
+        if uid in ALERT_EXPR_CONTRACTS:
+            expected_exprs = [" ".join(e.split()) for e in ALERT_EXPR_CONTRACTS[uid]]
+            found_exprs = [" ".join(e.split()) for _, e in entries]
+            if found_exprs != expected_exprs:
+                violations.append(
+                    f"[D5-V6] alert 식이 계약과 다르다: uid={uid}\n"
+                    f"  expected({len(expected_exprs)}개):\n"
+                    + "".join(f"    {e}\n" for e in expected_exprs)
+                    + f"  found({len(found_exprs)}개):\n"
+                    + "".join(f"    {e}\n" for e in found_exprs)
+                    + "  → 라벨 집합만 맞추고 `0 * ...` 같은 항을 섞으면 검사는 통과하고\n"
+                      "    alert 는 영원히 발화하지 않는다. 식 변경은 계약 변경이므로 정본도 함께 고친다.\n")
 
         # rule 단위 검증 — application coverage (high-error-rate / slow-response)
         if uid in ("peekcart-high-error-rate", "peekcart-slow-response"):

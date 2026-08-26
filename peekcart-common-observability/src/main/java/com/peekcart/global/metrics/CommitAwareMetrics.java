@@ -50,8 +50,10 @@ public final class CommitAwareMetrics {
                     counter.increment(amount);
                 } catch (Exception e) {
                     // 커밋은 이미 끝났다. 여기서 던지면 호출자가 커밋 실패로 오인한다.
-                    log.warn("메트릭 증가 실패 — 커밋은 유지되고 메트릭만 유실된다. meter={}",
-                            counter.getId().getName(), e);
+                    // 태그와 수량까지 남긴다 — 이 메트릭들은 태그별 시계열이고 amount 가 사건
+                    // 건수(sweeper 회수·타임아웃 취소)라, 이름만으로는 무엇이 몇 건 유실됐는지 모른다.
+                    log.warn("메트릭 증가 실패 — 커밋은 유지되고 메트릭만 유실된다. meter={}, amount={}",
+                            counter.getId(), amount, e);
                 }
             }
         });

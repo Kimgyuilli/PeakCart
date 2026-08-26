@@ -992,7 +992,7 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 
 ---
 
-## 구현 ④ Choreography Saga — ④-c-2a: DLQ 원장 적재 — 2026-08-26 — [#TBD]
+## 구현 ④ Choreography Saga — ④-c-2a: DLQ 원장 적재 — 2026-08-26 — [#90](https://github.com/Kimgyuilli/PeakCart/pull/90)
 
 > 부모 P9·P10·P13(나머지). **계획 리뷰 3라운드에서 ④-c-2 가 2a/2b 로 갈렸다** — replay 는 ADR 선행(④-c-2b).
 

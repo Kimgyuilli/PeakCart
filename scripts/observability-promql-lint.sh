@@ -163,10 +163,44 @@ yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
 PYEOF
     run_case "부정 matcher 로 서비스 제외" "$ST_TMP/negmatcher.yml"
 
+    # (7) `0 * metric` 우회 — 이름·라벨 집합은 그대로인데 alert 가 영원히 발화하지 않는다
+    python3 - "$ST_SRC" "$ST_TMP/zeromul.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-dlq-backlog":
+        for d in rule["data"]:
+            expr = (d.get("model") or {}).get("expr")
+            if expr:
+                d["model"]["expr"] = "0 * " + expr
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "0 * metric 우회" "$ST_TMP/zeromul.yml"
+
+    # (8) status 필터 삭제 — 상태 축소/확대가 조용히 통과하면 계약이 아니다
+    python3 - "$ST_SRC" "$ST_TMP/nostatus.yml" <<'PYEOF'
+import sys, yaml
+src, dst = sys.argv[1], sys.argv[2]
+doc = yaml.safe_load(open(src))
+inner = yaml.safe_load(doc["data"]["alerts.yaml"])
+for rule in inner["groups"][0]["rules"]:
+    if rule["uid"] == "peekcart-compensation-backlog":
+        for d in rule["data"]:
+            expr = (d.get("model") or {}).get("expr")
+            if expr:
+                d["model"]["expr"] = expr.replace(', status=~"open|refund_failed"', "")
+doc["data"]["alerts.yaml"] = yaml.dump(inner, allow_unicode=True, sort_keys=False)
+yaml.dump(doc, open(dst, "w"), allow_unicode=True, sort_keys=False)
+PYEOF
+    run_case "status 필터 삭제" "$ST_TMP/nostatus.yml"
+
     if [[ "$ST_FAIL" -ne 0 ]]; then
         exit 1
     fi
-    echo "observability-promql-lint self-test 6종 통과"
+    echo "observability-promql-lint self-test 8종 통과"
     exit 0
 fi
 
@@ -203,16 +237,26 @@ PROMQL_KEYWORDS = {
     "or", "and", "unless", "offset", "bool", "topk", "bottomk", "quantile", "stddev",
 }
 
+# expr 를 정확 문자열로 고정한다 (구현 ④-d-1 diff 리뷰 2R #1).
+# 이름 집합·라벨 집합만 보면 `0 * sum by(application)(metric{정상라벨})` 이 전부 통과하는데
+# Grafana 의 `$A > 0` 은 영원히 참이 되지 않는다 — 검사는 통과하고 alert 는 죽는다.
+# 동일 메트릭을 두 selector 에 쓰고 한쪽에만 정상 matcher 를 붙이는 우회도 같은 부류다.
+# PromQL AST 파서를 들이는 대신, 우리가 소유한 alert 2종의 **식 형태 자체**를 못박는다.
 METRIC_ALERT_CONTRACTS = {
     "peekcart-compensation-backlog": {
-        # order_compensations 원장은 order-service 단독 소유 (ADR-0012 D1)
+        # order_compensations 원장은 order-service 단독 소유 (ADR-0012 D1).
+        # status 를 명시 고정 — 상태가 추가돼도 조용히 alert 대상에 들어오지 않는다.
         "metric": "saga_compensation_backlog",
         "apps": {"order-service"},
+        "expr": 'sum by (application)(saga_compensation_backlog'
+                '{application=~"order-service", status=~"open|refund_failed"})',
     },
     "peekcart-dlq-backlog": {
         # dead_letter_records 는 Kafka 소비 4서비스가 소유. user-service 는 소비자가 없다.
         "metric": "dlq_backlog",
         "apps": {"notification-service", "order-service", "payment-service", "product-service"},
+        "expr": 'sum by (application)(dlq_backlog'
+                '{application=~"notification-service|order-service|payment-service|product-service"})',
     },
 }
 
@@ -398,6 +442,15 @@ for group in alerts_doc.get("groups", []) or []:
             for ref_id, expr in entries:
                 m = matchers(expr)
                 bys = by_labels(expr)
+                # 식 형태 정확 일치 — 우회를 구조적으로 차단한다. 아래 라벨/메트릭 검사는
+                # 위반 시 "무엇이 다른가" 를 짚어주기 위해 남긴다(진단 품질).
+                if " ".join(expr.split()) != " ".join(contract["expr"].split()):
+                    violations.append(
+                        f"[D5-V6] alert 식이 계약과 다르다: uid={uid} refId={ref_id}\n"
+                        f"  expected: {contract['expr']}\n"
+                        f"  found:    {expr}\n"
+                        f"  → 이름·라벨 집합만 맞추고 `0 * ...` 같은 항을 섞으면 검사는 통과하고\n"
+                        f"    alert 는 영원히 발화하지 않는다. 식 자체를 고정한다.\n")
                 # substring 대신 "식에 등장하는 메트릭 이름 집합" 을 뽑아 정확히 1종인지 본다.
                 # `잘못된식 + 0 * 계약메트릭{정상라벨}` 처럼 계약 메트릭을 곁들여 검사를 통과시키고
                 # 실제로는 다른 것을 재는 우회를 막는다.

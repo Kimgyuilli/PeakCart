@@ -1,6 +1,8 @@
 package com.peekcart.global.metrics;
 
 import io.micrometer.core.instrument.Counter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -16,8 +18,15 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  *
  * <p>롤백 시에는 {@link TransactionSynchronization#afterCommit()} 가 호출되지 않으므로 증가가
  * 일어나지 않는다 — 그게 이 클래스의 전부다.
+ *
+ * <p><b>계측 실패를 호출자에게 전파하지 않는다.</b> {@code afterCommit} 시점에는 DB 트랜잭션이
+ * 이미 커밋돼 되돌릴 수 없는데, 여기서 예외가 나가면 호출자는 커밋 실패로 받는다. Kafka listener
+ * 안이라면 이미 커밋된 이벤트를 재처리하게 된다 — <b>관측성 실패가 비즈니스 처리 결과를 바꾸는 것</b>은
+ * 어떤 메트릭 값보다도 나쁘다. 그래서 잡아서 로그만 남기고 메트릭만 유실시킨다.
  */
 public final class CommitAwareMetrics {
+
+    private static final Logger log = LoggerFactory.getLogger(CommitAwareMetrics.class);
 
     private CommitAwareMetrics() {
     }
@@ -37,7 +46,13 @@ public final class CommitAwareMetrics {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                counter.increment(amount);
+                try {
+                    counter.increment(amount);
+                } catch (Exception e) {
+                    // 커밋은 이미 끝났다. 여기서 던지면 호출자가 커밋 실패로 오인한다.
+                    log.warn("메트릭 증가 실패 — 커밋은 유지되고 메트릭만 유실된다. meter={}",
+                            counter.getId().getName(), e);
+                }
             }
         });
     }

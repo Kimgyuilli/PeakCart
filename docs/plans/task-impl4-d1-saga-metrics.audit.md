@@ -42,3 +42,15 @@
   5. **(P2) 레이어 역전** — `StockReservationService`(application)가 `infrastructure.metrics` 를 직접 import. CLAUDE.md 의존 방향 위반 → `application/port/SagaMetricsPort` 신설, infrastructure 가 구현(`SlackPort` 선례). order 는 계측 지점이 전부 infrastructure 라 해당 없음
 - **부수 이동**: `CommitAwareMetrics` 는 `:common` 에 micrometer 의존이 없어 `:peekcart-common-observability`(ADR-0009 소유)로 배치, `spring-tx` 추가
 - raw: `.cache/codex-reviews/diff-d1-r1.json`
+
+## 2026-08-26 21:48 — diff 리뷰 라운드 2 (PR #91)
+- 항목: **5건 (P0:0, P1:2, P2:3)** · 반영 5 / 기각 0
+- **통과 확인**: `SagaMetricsPort` 의존 방향과 order 가 포트를 두지 않은 근거(계측 지점이 전부 infrastructure)는 타당. sweeper 의 `reclaimed` 를 클로저로 잡는 것도 단일 트랜잭션 커밋 후 증가라 의미가 맞음. 신규 통합테스트가 `@Transactional` 롤백 방식이 아니라 실제 커밋 후 값을 관측하는 것도 확인됨
+- **1라운드 수정이 만든 새 결함**:
+  1. **(P1) `afterCommit` 예외가 호출자에게 전파** — 그 시점엔 DB 가 이미 커밋돼 되돌릴 수 없는데 호출자는 커밋 실패로 받는다. `OrderEventConsumer` 같은 Kafka listener 안이면 **이미 커밋된 이벤트를 재처리**한다. 관측성 실패가 비즈니스 결과를 바꾸는 것 → try/catch 로 격리, 로그만 남기고 메트릭만 유실
+  2. **(P1) `0 * metric` 우회** — 1R 에서 도입한 "메트릭 이름 집합 정확 일치" 를 그대로 통과하면서 Grafana 의 `$A > 0` 은 영원히 거짓이 된다. 이름·라벨 집합 검사로는 구조적으로 막을 수 없다 → **식 형태 자체를 정확 문자열로 고정**(AST 파서 대신, 우리가 소유한 alert 2종에 한해). self-test 6종 → 8종(`0 *` · status 필터 삭제)
+  3. **(P2) 계획 P5 의 "상태 필터 검사" 미구현** — compensation alert 에 `status` 필터가 아예 없었다 → alert 에 `status=~"open|refund_failed"` 추가하고 lint 가 고정. 상태가 추가돼도 조용히 alert 대상에 들어오지 않는다
+  4. **(P2) order `saga.compensation.detected` 가 테스트로 고정되지 않음** — 계획 §4 는 product·order 둘 다 요구하는데 order 는 원장 행만 봤다. consumer 에서 계측을 지워도 통과 → `OrderPaidButCancelledIntegrationTest` 에 신규 +1 · 재소비 +0 단언 추가
+  5. **(P2) `CommitAwareMetrics` 자체 테스트 부재** — 1R 수정의 핵심인 "롤백이면 증가 0" 이 고정되지 않아 **즉시 증가 방식으로 되돌려도 전부 통과**했다 → 계약 테스트 7건 신설(무트랜잭션 즉시 증가 · 커밋 전 0/후 증가 · 롤백 0 · 예외 롤백 0 · REQUIRES_NEW 독립 · 증가량 0 무시 · 계측 예외 미전파)
+- **실패 1건(수정)**: 추가한 카운터 단언이 절대값이었는데 `MeterRegistry` 가 컨텍스트 공유라 이전 테스트 값이 누적됐다(1.0 기대, 2.0 관측) → 델타 단언으로 교체
+- raw: `.cache/codex-reviews/diff-d1-r2.json`

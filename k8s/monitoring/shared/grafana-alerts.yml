@@ -271,7 +271,8 @@ data:
                 model:
                   # order-service 전용 메트릭이다 — 보상 원장(order_compensations)을 order 만 소유한다.
                   # 5서비스 regex 로 걸면 없는 series 를 기다리는 alert 가 된다(ADR-0012 D1).
-                  expr: "sum by (application)(saga_compensation_backlog{application=~\"order-service\"})"
+                  # status 를 명시 고정한다 — 나중에 상태가 추가돼도 조용히 alert 대상에 들어오지 않는다.
+                  expr: "sum by (application)(saga_compensation_backlog{application=~\"order-service\", status=~\"open|refund_failed\"})"
                   instant: true
                   range: false
               - refId: B

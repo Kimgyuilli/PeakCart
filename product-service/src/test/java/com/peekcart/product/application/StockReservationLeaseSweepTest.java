@@ -1,8 +1,10 @@
 package com.peekcart.product.application;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.product.domain.model.StockReservation;
+import com.peekcart.product.infrastructure.metrics.ProductSagaMetrics;
 import com.peekcart.product.domain.repository.StockReservationRepository;
 import com.peekcart.product.infrastructure.outbox.ProductOutboxEventPublisher;
 import com.peekcart.support.ServiceTest;
@@ -56,7 +58,8 @@ class StockReservationLeaseSweepTest {
         props.setSweeperGrace(GRACE);
         props.setSweeperBatchSize(200);
         service = new StockReservationService(reservationRepository, inventoryService,
-                inventoryLockFacade, publisher, new ObjectMapper(), slackPort, props);
+                inventoryLockFacade, publisher, new ObjectMapper(), slackPort, props,
+                new ProductSagaMetrics(new SimpleMeterRegistry()));
     }
 
     @Test

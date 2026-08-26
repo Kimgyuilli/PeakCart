@@ -11,6 +11,7 @@ import com.peekcart.order.domain.repository.OrderCompensationRepository;
 import com.peekcart.support.AbstractIntegrationTest;
 import com.peekcart.support.IntegrationTestConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -68,6 +69,7 @@ class OrderPaidButCancelledIntegrationTest extends AbstractIntegrationTest {
     @Autowired OrderEventConsumer consumer;
     @Autowired OrderCompensationRepository compensationRepository;
     @Autowired ObjectMapper objectMapper;
+    @Autowired MeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
@@ -78,6 +80,8 @@ class OrderPaidButCancelledIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("취소된 주문에 payment.completed 도착 → 예외 없이 보상 원장 OPEN 1행")
     void cancelledOrder_paymentCompleted_recordsOpenCompensation() {
         Long orderId = seedCancelledOrder();
+        // MeterRegistry 는 컨텍스트 공유라 테스트 간 누적된다 → 델타로 본다.
+        double before = compensationDetectedCount();
 
         assertThatCode(() -> consumer.handlePaymentCompleted(paymentCompleted(orderId, UUID.randomUUID().toString())))
                 .doesNotThrowAnyException();
@@ -87,6 +91,8 @@ class OrderPaidButCancelledIntegrationTest extends AbstractIntegrationTest {
         assertThat(found).isPresent();
         assertThat(found.get().getStatus()).isEqualTo(CompensationStatus.OPEN);
         assertThat(currentStatus(orderId)).isEqualTo(OrderStatus.CANCELLED);
+        // 계측 배선 검증 (구현 ④-d-1) — 이 단언이 없으면 consumer 에서 계측 호출을 지워도 통과한다.
+        assertThat(compensationDetectedCount()).isEqualTo(before + 1);
     }
 
     @Test
@@ -94,10 +100,21 @@ class OrderPaidButCancelledIntegrationTest extends AbstractIntegrationTest {
     void reconsumedWithNewEventId_ledgerStaysSingleRow() {
         Long orderId = seedCancelledOrder();
 
+        double before = compensationDetectedCount();
         consumer.handlePaymentCompleted(paymentCompleted(orderId, UUID.randomUUID().toString()));
+        double afterFirst = compensationDetectedCount();
+
         consumer.handlePaymentCompleted(paymentCompleted(orderId, UUID.randomUUID().toString()));
 
         assertThat(countCompensations(orderId)).isEqualTo(1L);
+        // 원장이 1행이면 감지도 1건이다 — 재소비에서 올라가면 메트릭이 실제 사건 수를 부풀린다.
+        assertThat(afterFirst).isEqualTo(before + 1);
+        assertThat(compensationDetectedCount()).isEqualTo(before + 1);
+    }
+
+    private double compensationDetectedCount() {
+        var c = meterRegistry.find("saga.compensation.detected").counter();
+        return c == null ? 0.0 : c.count();
     }
 
     private long countCompensations(Long orderId) {

@@ -1,9 +1,11 @@
 package com.peekcart.product.application;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.peekcart.global.outbox.dto.ReservedItemPayload;
 import com.peekcart.global.port.SlackPort;
 import com.peekcart.product.domain.model.ReservationStatus;
+import com.peekcart.product.infrastructure.metrics.ProductSagaMetrics;
 import com.peekcart.product.domain.model.StockReservation;
 import com.peekcart.product.domain.repository.StockReservationRepository;
 import com.peekcart.product.infrastructure.outbox.ProductOutboxEventPublisher;
@@ -60,7 +62,8 @@ class StockReservationServiceTest {
         leaseProperties.setTtl(LEASE_TTL);
         leaseProperties.setSweeperGrace(Duration.ofMinutes(5));
         service = new StockReservationService(reservationRepository, inventoryService,
-                inventoryLockFacade, publisher, new ObjectMapper(), slackPort, leaseProperties);
+                inventoryLockFacade, publisher, new ObjectMapper(), slackPort, leaseProperties,
+                new ProductSagaMetrics(new SimpleMeterRegistry()));
     }
 
     @Test

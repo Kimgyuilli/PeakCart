@@ -1,6 +1,7 @@
 package com.peekcart.order.infrastructure.scheduler;
 
 import com.peekcart.order.application.OrderCommandService;
+import com.peekcart.order.infrastructure.metrics.OrderSagaMetrics;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.repository.OrderRepository;
@@ -33,6 +34,7 @@ public class OrderTimeoutScheduler {
 
     private final OrderRepository orderRepository;
     private final OrderCommandService orderCommandService;
+    private final OrderSagaMetrics sagaMetrics;
 
     @Scheduled(fixedDelay = 60_000)
     @SchedulerLock(name = "orderTimeoutCancelJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
@@ -40,9 +42,13 @@ public class OrderTimeoutScheduler {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
         List<Order> expiredOrders = orderRepository.findExpiredPaymentRequested(cutoff);
 
+        int cancelled = 0;
         for (Order order : expiredOrders) {
-            cancelSafely(order.getId(), order.getOrderNumber());
+            if (cancelSafely(order.getId(), order.getOrderNumber())) {
+                cancelled++;
+            }
         }
+        sagaMetrics.timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_PAYMENT, cancelled);
     }
 
     /**
@@ -54,9 +60,13 @@ public class OrderTimeoutScheduler {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(5);
         List<Order> stuck = orderRepository.findUnconfirmedReservationBefore(cutoff);
 
+        int cancelled = 0;
         for (Order order : stuck) {
-            cancelSafely(order.getId(), order.getOrderNumber());
+            if (cancelSafely(order.getId(), order.getOrderNumber())) {
+                cancelled++;
+            }
         }
+        sagaMetrics.timeoutCancelled(OrderSagaMetrics.REASON_UNCONFIRMED_RESERVATION, cancelled);
     }
 
     /**
@@ -69,15 +79,24 @@ public class OrderTimeoutScheduler {
     public void cancelExpiredReservationLeases() {
         List<Order> expired = orderRepository.findExpiredReservationLease(LocalDateTime.now());
 
+        int cancelled = 0;
         for (Order order : expired) {
-            cancelSafely(order.getId(), order.getOrderNumber());
+            if (cancelSafely(order.getId(), order.getOrderNumber())) {
+                cancelled++;
+            }
         }
+        sagaMetrics.timeoutCancelled(OrderSagaMetrics.REASON_EXPIRED_LEASE, cancelled);
     }
 
-    private void cancelSafely(Long orderId, String orderNumber) {
+    /**
+     * @return 실제로 취소했으면 true. 상태 경합·낙관 락 충돌로 스킵된 건은 false 다 —
+     *         메트릭이 "취소되지 않은 건" 까지 세면 실제 사건 수를 부풀린다.
+     */
+    private boolean cancelSafely(Long orderId, String orderNumber) {
         try {
             orderCommandService.cancelExpiredOrder(orderId);
             log.info("타임아웃 주문 취소: orderId={}, orderNumber={}", orderId, orderNumber);
+            return true;
         } catch (OrderException e) {
             log.warn("타임아웃 주문 취소 스킵 (상태 경합): orderId={}, reason={}", orderId, e.getMessage());
         } catch (OptimisticLockingFailureException e) {
@@ -87,5 +106,6 @@ public class OrderTimeoutScheduler {
         } catch (Exception e) {
             log.error("타임아웃 주문 취소 실패: orderId={}", orderId, e);
         }
+        return false;
     }
 }

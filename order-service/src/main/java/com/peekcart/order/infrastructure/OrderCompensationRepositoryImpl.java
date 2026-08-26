@@ -1,6 +1,7 @@
 package com.peekcart.order.infrastructure;
 
 import com.peekcart.order.domain.model.CompensationReason;
+import com.peekcart.order.domain.model.CompensationStatus;
 import com.peekcart.order.domain.model.OrderCompensation;
 import com.peekcart.order.domain.repository.OrderCompensationRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,5 +26,10 @@ public class OrderCompensationRepositoryImpl implements OrderCompensationReposit
     @Override
     public Optional<OrderCompensation> findByOrderIdAndReason(Long orderId, CompensationReason reason) {
         return jpaRepository.findByOrderIdAndReason(orderId, reason);
+    }
+
+    @Override
+    public long countByStatus(CompensationStatus status) {
+        return jpaRepository.countByStatus(status);
     }
 }

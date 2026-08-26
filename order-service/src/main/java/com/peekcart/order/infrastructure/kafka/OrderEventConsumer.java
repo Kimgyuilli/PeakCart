@@ -12,6 +12,7 @@ import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.model.OrderCompensation;
 import com.peekcart.order.domain.model.OrderStatus;
 import com.peekcart.order.domain.repository.OrderCompensationRepository;
+import com.peekcart.order.infrastructure.metrics.OrderSagaMetrics;
 import com.peekcart.order.domain.repository.OrderRepository;
 import com.peekcart.order.infrastructure.outbox.OrderOutboxEventPublisher;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class OrderEventConsumer {
     private final IdempotencyChecker idempotencyChecker;
     private final KafkaMessageParser kafkaMessageParser;
     private final SlackPort slackPort;
+    private final OrderSagaMetrics sagaMetrics;
 
     /**
      * 결제 시작(payment.requested)을 소비해 주문을 {@code PAYMENT_REQUESTED}로 전이한다
@@ -236,6 +238,7 @@ public class OrderEventConsumer {
             outboxEventPublisher.publishCompensationRequested(orderId,
                     com.peekcart.global.outbox.dto.CompensationReason.PAID_BUT_CANCELLED,
                     compensation.getDetectedAt());
+            sagaMetrics.compensationDetected();
         }
         log.error("PAID_BUT_CANCELLED — 취소된 주문에 결제 완료 도착, 환불 요청 발행(원장 기록). orderId={}", orderId);
         slackPort.send("[보상 요청] PAID_BUT_CANCELLED orderId=" + orderId

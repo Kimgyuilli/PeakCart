@@ -2,6 +2,7 @@ package com.peekcart.order.infrastructure.scheduler;
 
 import com.peekcart.global.exception.ErrorCode;
 import com.peekcart.order.application.OrderCommandService;
+import com.peekcart.order.infrastructure.metrics.OrderSagaMetrics;
 import com.peekcart.order.domain.exception.OrderException;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.repository.OrderRepository;
@@ -31,6 +32,8 @@ class OrderTimeoutSchedulerTest {
     @InjectMocks OrderTimeoutScheduler orderTimeoutScheduler;
     @Mock OrderRepository orderRepository;
     @Mock OrderCommandService orderCommandService;
+    // 취소 건수를 사유별로 세는 메트릭(구현 ④-d-1 P2). 여기서는 스케줄러 로직만 보므로 mock 이면 충분하다.
+    @Mock OrderSagaMetrics sagaMetrics;
 
     @Test
     @DisplayName("만료 주문이 있으면 건별로 cancelExpiredOrder를 호출한다")

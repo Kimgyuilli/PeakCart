@@ -38,7 +38,8 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,prometheus
+        # deadletter: DLQ 원장 backlog 조회 (구현 ④-c-2a P10). 메트릭 계약(④-d) 전까지 유일한 조회 표면.
+        include: health,prometheus,deadletter
   metrics:
     tags:
       application: payment-service
@@ -103,6 +104,35 @@ app:
 # Slack: payment 는 DLQ·결제 알림에 SlackPort 를 생성자 주입하나 발송은 비핵심.
 # webhook 미설정 + no-op fallback 으로 부팅 보장 (PR3b GP-2 loop3 — presence-based
 # @ConditionalOnProperty(slack.webhook.url) 가 placeholder 기본값에 항상 매치되던 문제 제거).
+  # DLQ 원장 운영 계약 (구현 ④-c-2a P5) — 동작 정책이므로 base 소유(ADR-0007).
+  dead-letter:
+    cluster-id: peekcart-local
+    # 토픽별 프로비저닝 세대. 토픽을 삭제·재생성하면 배포 전에 값을 올린다.
+    # 미등록 토픽을 참조하면 부팅이 아니라 적재 시점에 예외 — 기본값 암묵 허용 금지(§2.5).
+    # 키는 원본 토픽 이름이다. origin 헤더 판독 실패 행(DLQ_ORIGIN)은 좌표로 '<topic>.dlq' 를 싣지만,
+    # .dlq 는 원본과 함께 선언·재생성되므로 원본의 세대를 따른다(정확 일치 우선 → 없으면 .dlq 제거 후 재조회).
+    topic-generations:
+      order.created: 1
+      order.cancelled: 1
+      stock.reservation.result: 1
+      stock.compensation.requested: 1
+      order.compensation.requested: 1
+      payment.completed: 1
+      payment.failed: 1
+      payment.requested: 1
+      payment.refunded: 1
+    alert:
+      stale-after: 24h     # 이 시간을 넘긴 미결은 경보 대상
+      backlog-threshold: 50
+      cooldown: 6h         # 같은 경보 재발송 억제 — 없으면 스케줄 주기마다 도배된다
+      scan-limit: 100
+    payload:
+      max-length: 8000     # 초과분은 잘리고 payload_truncated 로 표시
+    purge:
+      retention: 90d       # DISCARDED 후 보존기간. OPEN/ACKED 는 삭제 대상이 아니다
+      batch-size: 500
+      max-batches-per-run: 20
+
 slack:
   noop-fallback:
     enabled: true

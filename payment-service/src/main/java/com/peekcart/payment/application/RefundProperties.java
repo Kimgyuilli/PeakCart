@@ -50,6 +50,18 @@ public class RefundProperties {
     @Min(1)
     private int maxBatchesPerRun;
 
+    /**
+     * dispatcher 활성 여부. 기본 {@code true} — <b>운영에서 꺼지면 환불이 조용히 멈춘다.</b>
+     *
+     * <p>E2E 처럼 PG 호출 표면을 통제해야 하는 환경에서만 명시적으로 끈다. 값 부재 시 켜짐이어야
+     * 하므로 {@code @ConditionalOnProperty(matchIfMissing = true)} 와 짝을 이룬다 (계획 P1).
+     */
+    private boolean dispatchEnabled = true;
+
+    /** reconciliation 활성 여부. 기본 {@code true}. dispatcher 와 같은 이유로 별도 키다 —
+     *  reconciliation 도 {@code RefundExecutor} 로 PG 조회를 부르므로 하나만 꺼서는 표면이 닫히지 않는다. */
+    private boolean reconcileEnabled = true;
+
     /** dispatcher 실행 간격(ms). {@code @Scheduled} placeholder 와 같은 키를 소유한다. */
     @Min(1000)
     private long dispatchIntervalMs;

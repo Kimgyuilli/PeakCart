@@ -28,3 +28,5 @@ toss:
   payments:
     secret-key: ${TOSS_SECRET_KEY}
     webhook-secret: ${TOSS_WEBHOOK_SECRET}
+    # base-url 도 기본값 없이 강제 — base 의 sentinel 이 운영에 새면 환불이 전부 실패한다.
+    base-url: ${TOSS_BASE_URL}

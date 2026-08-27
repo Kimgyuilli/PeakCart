@@ -12,6 +12,6 @@ RUN apt-get update \
       default-mysql-client curl jq netcat-openbsd ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "kafka-python-ng==2.2.3"
+RUN pip install --no-cache-dir "kafka-python-ng==2.2.3" "PyMySQL==1.1.1"
 
 WORKDIR /work

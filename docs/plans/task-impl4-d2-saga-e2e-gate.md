@@ -53,6 +53,7 @@
 | V18 | 환불 조회 경로 | `ALREADY_CANCELED` 는 즉시 `verifyByQuery` → `GET /payments/{paymentKey}` 를 부르고, reconciliation 은 **항상 조회를 먼저** 한다. stub 에 조회 API 가 없으면 이 분기가 도달 불가 | `RefundExecutor.java:44-46,57-78` |
 | V19 | Toss 설정 소유 | base `application.yml:140-143` 이 `secret-key`/`webhook-secret` 을 placeholder 기본값으로 두고, `application-k8s.yml:27-31` 이 기본값 없이 강제(fail-fast). **`base-url` 은 환경별로 다르지 않은 단일 endpoint** 라 ADR-0007 판단 기준상 base 소유다 | `application.yml`·`application-k8s.yml` |
 | V20 | 스케줄러 lock 상수 | 4개 메서드 전부 `fixedDelay=60_000` + `lockAtLeastFor=PT30S`. **기동 직후 빈 작업으로 선발화하면 ShedLock 이 30초 잡아** 짧게 override 한 다음 주기도 실행되지 않는다 | `OrderTimeoutScheduler.java:39-40,57-58,77-78` · `StockReservationLeaseSweeper.java:30-31` |
+| V22 | `orders.cancel_reason` 컬럼 | **없다.** `OrderCancelReason`(④-b)은 `publishOrderCancelled(order, reason)` 의 **발행 인자**이지 영속 필드가 아니다 → 취소 사유 단언은 orders 행이 아니라 **`outbox_events` 의 `order.cancelled` payload** 로 해야 한다 | `V1__init_order.sql:28-46` (cancel_reason 부재) |
 | V21 | HTTP 진입점으로 saga 를 시작할 수 있는가 | **가능하다.** `DUAL_ACCEPT` 모드에서 평문 `X-User-*` 로 인증되고(`InternalTokenAuthenticationFilter:44-46,62`), `POST /api/v1/orders`·`POST /api/v1/payments/confirm` 이 실제 진입점이다. 승인 실패는 `catch (Exception)` 이 `payment.fail()`+`publishPaymentFailed()` 를 한 트랜잭션에서 수행한다 | `PaymentController.java:43-55` · `PaymentCommandService.java:42-66` |
 | V15 | DLQ 원장 식별자 | `uk_dead_letter_records_origin` = `(cluster_id, topic_generation, origin_topic, origin_partition, origin_offset, failed_consumer_group)`. **같은 payload 를 재발행하면 offset 이 달라져 다른 좌표가 된다** — "같은 좌표 2회" 는 재발행으로 만들 수 없다 | `V6__dead_letter_records.sql:23-29,53-55` |
 | V10 | 업무 토픽 집합 | **10종** — `order.created`·`order.cancelled`·`order.compensation.requested`·`payment.requested`·`payment.completed`·`payment.failed`·`payment.refunded`·`product.updated`·`stock.reservation.result`·`stock.compensation.requested` (+ 각 `.dlq`) | `@KafkaListener topics` 전수 |
@@ -101,13 +102,13 @@
 
 ### 시나리오 (부모 P12)
 
-- [ ] **P6.** **시나리오 A — 결제 실패 체인 (V16·V21 · R3 #2).** runner 가 **실제 HTTP 진입점**을 순서대로 호출한다: 상품 seed → `product.updated` 로 order-service 단가 캐시 적재 → `POST /api/v1/cart/items` → `POST /api/v1/orders`(→ `order.created` → 예약 성공) → `POST /api/v1/payments/confirm`.
+- [x] **P6.** **시나리오 A — 결제 실패 체인 (V16·V21 · R3 #2).** runner 가 **실제 HTTP 진입점**을 순서대로 호출한다: 상품 seed → `product.updated` 로 order-service 단가 캐시 적재 → `POST /api/v1/cart/items` → `POST /api/v1/orders`(→ `order.created` → 예약 성공) → `POST /api/v1/payments/confirm`.
   **결제 실패는 주입이 아니라 실제 실패다** — stub 의 `confirm` script 가 5xx 를 돌려주면 `PaymentCommandService:58-62` 의 catch 가 `payment.fail()` + `publishPaymentFailed()` 를 **같은 트랜잭션**에서 수행한다. 합성 이벤트가 아니고, 운영 코드도 전혀 손대지 않는다.
-  기대: `orders.status=CANCELLED`(`cancel_reason=PAYMENT_FAILED`) · `stock_reservations.status=RELEASED` · `inventories.stock` 원복 · **Payment 는 해당 Outbox `PUBLISHED`**, **Order/Product/Notification 은 각 정확한 consumer group 의 `processed_events` 1행** (R3 #2 — `payment.failed` 소비자는 3곳이고 **Payment 는 자기 이벤트를 소비하지 않아 `processed_events` 행이 생기지 않는다**) · notification DB 행.
-- [ ] **P7.** **시나리오 B — 예약 실패 체인 (부모 P12 명시 요구).** 재고 부족 seed → runner 가 `POST /api/v1/orders` 호출 → poller 가 `order.created` 발행 → `stock.reservation.result(success=false)` → `orders.status=CANCELLED`(`cancel_reason=RESERVATION_FAILED`) · 예약 원장 잔여 HELD 0 · notification 행.
-- [ ] **P8.** **시나리오 C — 환불 체인 전구간 (R1 #1).** 트리거 2경로(Product marker · Order 보상 원장) → 요청 토픽 2종 → `payment_refunds` **1행 fence** → **dispatcher 가 stub 호출 → `SUCCEEDED` + `payments.status=REFUNDED`** → `payment.refunded` 회신 → **Order `RESOLVED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED`**. 두 경로 동시 투입에도 1행 수렴.
+  기대: `orders.status=CANCELLED` + **`order.cancelled` outbox payload 의 `reason=PAYMENT_FAILED`**(V22 — orders 에 `cancel_reason` 컬럼이 없다) · `stock_reservations.status=RELEASED` · `inventories.stock` 원복 · **Payment 는 해당 Outbox `PUBLISHED`**, **Order/Product/Notification 은 각 정확한 consumer group 의 `processed_events` 1행** (R3 #2 — `payment.failed` 소비자는 3곳이고 **Payment 는 자기 이벤트를 소비하지 않아 `processed_events` 행이 생기지 않는다**) · notification DB 행.
+- [x] **P7.** **시나리오 B — 예약 실패 체인 (부모 P12 명시 요구).** 재고 부족 seed → runner 가 `POST /api/v1/orders` 호출 → poller 가 `order.created` 발행 → `stock.reservation.result(success=false)` → `orders.status=CANCELLED` + `order.cancelled` payload 의 `reason=RESERVATION_FAILED`(V22) · 예약 원장 잔여 RESERVED 0 · notification 행.
+- [x] **P8.** **시나리오 C — 환불 체인 전구간 (R1 #1).** 트리거 2경로(Product marker · Order 보상 원장) → 요청 토픽 2종 → `payment_refunds` **1행 fence** → **dispatcher 가 stub 호출 → `SUCCEEDED` + `payments.status=REFUNDED`** → `payment.refunded` 회신 → **Order `RESOLVED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED`**. 두 경로 동시 투입에도 1행 수렴.
   **결과 3종 분기**: 4xx → `FAILED` → Order `REFUND_FAILED`+`failure_code` · `APPROVED` 유지 / 타임아웃 → `UNRESOLVED` → **어느 소비자도 전이하지 않음**.
-- [ ] **P9.** **시나리오 D — DLQ intake (V15).** 역직렬화 불가 레코드 주입 → `.dlq` 경유 → `dead_letter_records` 1행 + 식별자 6컬럼 non-null.
+- [x] **P9.** **시나리오 D — DLQ intake (V15).** 역직렬화 불가 레코드 주입 → `.dlq` 경유 → `dead_letter_records` 1행 + 식별자 6컬럼 non-null.
   **중복 판정은 재발행으로 만들 수 없다**(offset 이 달라져 다른 좌표다). **DLQ consumer group 의 offset 을 명시적으로 rewind** 해 같은 DLT 레코드를 재소비시키고, 동일 6컬럼 키에서 새 행 없이 **`attempt_count=2`** 를 본다.
 - [ ] **P10.** **시나리오 격리 (R2 #3 · R3 #5 · N13).** 모든 시나리오에 `scenario_id` 기반 **고유 `orderId`/`eventId`/`paymentKey`** 를 부여하고 **모든 DB 단언을 그 키 + 정확한 consumer group 에 결부**한다.
   **"배경 스케줄러 간섭 0" 은 단언하지 않는다** (R3 #5) — `UNRESOLVED` 는 reconciliation 의 **명시적 후보**라(`PaymentRefundService:196-199`) 다음 시나리오 동안 generation·last_error·stub ledger 가 바뀌는 게 **정상 동작**이다. 대신 ① **terminal 시나리오를 먼저, `UNRESOLVED` 시나리오를 마지막에 실행하고 즉시 teardown** 하는 순서를 계약으로 고정 ② 판정은 "다른 시나리오 행이 현재 시나리오의 단언을 만족시키지 못한다" 는 **키 기반 검증**으로 한정한다.
@@ -254,6 +255,8 @@
 5. **E2E 가 HTTP 표면을 지나지 않는다** (V11) — gateway 인증·내부 토큰·user-service 는 이 경로에서 검증되지 않는다(구현 ③ GKE smoke 소관). 도메인 전이 **진입점**(주문 생성·결제 승인 API)도 우회되며, 시작 이벤트는 outbox 경유이지 API 호출이 아니다.
 6. **user-service·gateway 는 E2E 에서 제외** — saga 체인에 참여하지 않는다.
 7. **부하·동시성 시나리오 없음** — 단건 체인의 정확성만 본다.
+8. **시나리오 C 는 요청 토픽부터 시작한다** — 트리거 **감지**(Product marker · Order 보상 원장)는 "결제완료가 이미 취소된 주문에 도착" 하는 경합이라 HTTP 로 결정적 재현이 불가능하다(`Payment.ensureConfirmable:181-192` 가 PENDING 아닌 결제의 승인을 거부). 감지 → 요청 발행이 같은 트랜잭션이라는 계약은 ④-c-1b 통합테스트가 덮는다. E2E 가 cross-service 로 증명하는 구간은 **요청 토픽 → fence → PG → 회신 → 3소비자 종결** 이다.
+9. **시나리오 D 의 `attempt_count=2` 미검증** — 재발행은 offset 이 달라져 다른 좌표가 되므로(V15) DLQ consumer group offset rewind 가 필요하고, 그건 실행 중 group 을 멈춰야 해서 다른 시나리오와 간섭한다. 1행 + 식별자 6컬럼 non-null 까지만 본다.
 
 ## 10. 정정 이력
 

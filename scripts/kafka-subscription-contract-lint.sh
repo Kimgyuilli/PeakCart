@@ -171,6 +171,17 @@ for module, svc in SERVICES.items():
                 violations.append("%s: quarantine 구독 토픽 불일치 — 누락 %s / 초과 %s"
                                   % (module, sorted(q_expected - topics), sorted(topics - q_expected)))
 
+if os.environ.get("EMIT_GROUPS") == "1":
+    # readiness 가 쓸 업무 group 목록. 별도 상수 파일을 두면 정본이 둘이 되므로
+    # 같은 파서가 DlqTopology 에서 유도한 값을 그대로 내보낸다(계획 P5).
+    if violations:
+        print("\n".join("  - %s" % v for v in violations), file=sys.stderr)
+        sys.exit(1)
+    for svc in sorted(business_expected):
+        for _, group in sorted(business_expected[svc]):
+            print(group)
+    sys.exit(0)
+
 if violations:
     print("\n".join("  - %s" % v for v in violations))
     sys.exit(1)
@@ -245,6 +256,11 @@ if [[ "${1:-}" == "--self-test" ]]; then
 
   if [[ $fails -gt 0 ]]; then echo "self-test 실패 ${fails}건"; exit 1; fi
   echo "self-test 통과 (7종)"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--emit-groups" ]]; then
+  EMIT_GROUPS=1 python3 "$LINT_PY" "$(pwd)"
   exit 0
 fi
 

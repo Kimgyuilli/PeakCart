@@ -21,6 +21,10 @@ x-app-env: &app-env
   SPRING_DATA_REDIS_HOST: redis
   SPRING_DATA_REDIS_PORT: "6379"
   SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  # 전환기 평문 헤더 모드(ADR-0014 D2-c 이전부터 있던 운영 지원 모드).
+  # runner 가 gateway 없이 실제 컨트롤러를 호출하기 위해서다 — E2E 를 위해 운영 코드에
+  # 새 진입점이나 스위치를 만들지 않는다(N16). 대가는 SIGNED_ONLY 미검증(계획 §9-5).
+  APP_INTERNAL_TOKEN_MODE: DUAL_ACCEPT
   JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
 
 x-app-common: &app-common

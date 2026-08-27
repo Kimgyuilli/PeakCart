@@ -27,7 +27,7 @@
 - **N13.** 시나리오들이 **run 고유 식별자 없이** 같은 stack 위에서 존재·건수 단언을 하여, 앞 시나리오의 잔여 행이 뒤 시나리오를 만족시킬 수 있다.
 - **N14.** 매트릭스 `expected` 와 manifest 값의 대조가 **문법이 고정되지 않아** 구현자마다 다른 표현이 통과한다.
 - **N15.** 시작 이벤트가 서비스의 실제 publisher 를 지나지 않는다(SQL INSERT seed).
-- **N16.** E2E seed runner 가 운영 이미지에서 **프로퍼티 하나로** 활성화될 수 있다.
+- **N16.** E2E 를 위해 **운영 코드에 새 진입점/스위치가 추가**된다(seed runner·발행 스위치 등).
 - **N17.** egress 차단 검증에 **양성 대조군이 없어** canary 가 죽어도 통과한다.
 
 ---
@@ -53,6 +53,7 @@
 | V18 | 환불 조회 경로 | `ALREADY_CANCELED` 는 즉시 `verifyByQuery` → `GET /payments/{paymentKey}` 를 부르고, reconciliation 은 **항상 조회를 먼저** 한다. stub 에 조회 API 가 없으면 이 분기가 도달 불가 | `RefundExecutor.java:44-46,57-78` |
 | V19 | Toss 설정 소유 | base `application.yml:140-143` 이 `secret-key`/`webhook-secret` 을 placeholder 기본값으로 두고, `application-k8s.yml:27-31` 이 기본값 없이 강제(fail-fast). **`base-url` 은 환경별로 다르지 않은 단일 endpoint** 라 ADR-0007 판단 기준상 base 소유다 | `application.yml`·`application-k8s.yml` |
 | V20 | 스케줄러 lock 상수 | 4개 메서드 전부 `fixedDelay=60_000` + `lockAtLeastFor=PT30S`. **기동 직후 빈 작업으로 선발화하면 ShedLock 이 30초 잡아** 짧게 override 한 다음 주기도 실행되지 않는다 | `OrderTimeoutScheduler.java:39-40,57-58,77-78` · `StockReservationLeaseSweeper.java:30-31` |
+| V21 | HTTP 진입점으로 saga 를 시작할 수 있는가 | **가능하다.** `DUAL_ACCEPT` 모드에서 평문 `X-User-*` 로 인증되고(`InternalTokenAuthenticationFilter:44-46,62`), `POST /api/v1/orders`·`POST /api/v1/payments/confirm` 이 실제 진입점이다. 승인 실패는 `catch (Exception)` 이 `payment.fail()`+`publishPaymentFailed()` 를 한 트랜잭션에서 수행한다 | `PaymentController.java:43-55` · `PaymentCommandService.java:42-66` |
 | V15 | DLQ 원장 식별자 | `uk_dead_letter_records_origin` = `(cluster_id, topic_generation, origin_topic, origin_partition, origin_offset, failed_consumer_group)`. **같은 payload 를 재발행하면 offset 이 달라져 다른 좌표가 된다** — "같은 좌표 2회" 는 재발행으로 만들 수 없다 | `V6__dead_letter_records.sql:23-29,53-55` |
 | V10 | 업무 토픽 집합 | **10종** — `order.created`·`order.cancelled`·`order.compensation.requested`·`payment.requested`·`payment.completed`·`payment.failed`·`payment.refunded`·`product.updated`·`stock.reservation.result`·`stock.compensation.requested` (+ 각 `.dlq`) | `@KafkaListener topics` 전수 |
 | V11 | HTTP 로 saga 를 구동할 수 있는가 | **간단히는 불가** — `internal-token.mode: SIGNED_ONLY` 가 기본이라 서비스 REST 는 gateway 서명 `X-Internal-Auth` 없이 401. gateway 를 세우면 내부 토큰 **개인키**가 필요 | `order-service/application.yml:59-63`, `InternalTokenProperties.java:53` |
@@ -64,7 +65,11 @@
 - **확대 4건**: V2(스케줄러 2개) · V5(compose 앱 서비스 신설) · V6(CI 이미지 저장 단계도 함께 개방) · **R1 P0 수용 — PG stub 도입으로 환불 체인 전구간을 이번 범위에 넣는다**.
 - **축소 1건**: V13 — 이전 판 D6(신규 alert 라벨 계약)는 ④-d-1 이 이미 처리했다. 이 PR 은 그 위에 매트릭스 게이트만 얹는다.
 - **결정 변경 (R1 #1 P0)**: 이전 판은 환불 체인을 `REQUESTED` 까지만 보고 "부모 P12 를 완전히 닫지 못한다" 고 자인하면서 ④ 를 종결하려 했다. **자기모순이다** — ADR-0018 §D4 는 회신으로 Order·Product·Notification 원장을 닫도록 결정했고, 부모 P12 는 그 종결까지를 요구한다. `toss.payments.base-url` 을 설정화하고 **로컬 PG stub** 을 두어 dispatcher→PG→`payment.refunded`→3소비자 종결까지 E2E 로 닫는다. `base-url` 설정화의 D-020 이연은 철회한다.
-- **구동 방식 결정 (V11·V16 · R1 #2 · R2 #1 정정)**: E2E 는 HTTP 표면을 쓰지 않는다(gateway 개인키·`SIGNED_ONLY` 회피). 시작 이벤트는 **E2E 전용 seed runner 가 서비스의 실제 publisher(`publishPaymentFailed`/`publishOrderCreated`)를 호출**해 만든다 — outbox 행을 SQL 로 INSERT 하면 `buildRecord()` 가 저장된 문자열을 그대로 싣기 때문에(V16) **DTO 조립·직렬화 구간이 통째로 우회된다.** runner 는 `@ConditionalOnProperty` 로 E2E 에서만 등록된다. 남는 우회(도메인 전이 진입점·HTTP 인증)는 §9-5 에 적는다.
+- **구동 방식 결정 (V11·V16·V21 · R1 #2 · R2 #1 · R3 #1 · [구현 중 재정정])**: **실제 HTTP 진입점을 쓴다.**
+  R3 #1 이 지적한 seed runner 는 애초에 성립하지 않았다 — "운영 bootJar 에 넣지 않는 E2E 전용 source set" 은 **그 코드가 컨테이너 안에서 실행될 수 없다**는 뜻이다(컨테이너는 bootJar 를 돈다). main 에 넣으면 R3 #1 의 보안 지적이 그대로 살아난다. 즉 두 선택지가 모두 막혀 있었다.
+  대신 **`app.internal-token.mode=DUAL_ACCEPT`**(기존 운영 지원 전환기 모드, `InternalTokenAuthenticationFilter:62`)로 4서비스를 띄우고 runner 가 평문 `X-User-*` 헤더로 **진짜 컨트롤러**를 호출한다: `POST /api/v1/cart/items` → `POST /api/v1/orders` → `POST /api/v1/payments/confirm`.
+  이게 seed runner 보다 **엄격하게 낫다** — 새 운영 코드 0, 새 모듈 0, 새 보안 스위치 0이면서 컨트롤러·도메인 전이·publisher 직렬화·outbox·poller 를 **전부** 지난다. `payment.failed` 는 합성 이벤트가 아니라 `PaymentCommandService:58-62` 가 실제로 발행한 것이다.
+  대가: E2E 가 `SIGNED_ONLY` 를 검증하지 않는다(→ §9-5, 구현 ③ GKE smoke 소관). gateway·user-service 는 여전히 제외한다.
 
 ---
 
@@ -96,10 +101,10 @@
 
 ### 시나리오 (부모 P12)
 
-- [ ] **P6.** **시나리오 A — 결제 실패 체인 (V16 · R2 #1 · R3 #1·#2).** E2E seed runner 가 payment-service 의 **실제 발행 경로**를 호출해 outbox 행을 만들고 poller 가 발행하게 한다.
-  **runner 는 운영 bootJar 에 들어가지 않는 E2E 전용 source set 으로 분리한다** — `@ConditionalOnProperty` 하나로 운영 이미지에 실린 발행 스위치는 인증·업무 진입점을 우회하는 경로다(N16). 또한 `PaymentOutboxEventPublisher.publishPaymentFailed()` 는 상태를 바꾸지 않고 직렬화·저장만 하므로, runner 는 **`PaymentCommandService` 처럼 `payment.fail()` 과 발행을 한 트랜잭션**으로 묶는다.
+- [ ] **P6.** **시나리오 A — 결제 실패 체인 (V16·V21 · R3 #2).** runner 가 **실제 HTTP 진입점**을 순서대로 호출한다: 상품 seed → `product.updated` 로 order-service 단가 캐시 적재 → `POST /api/v1/cart/items` → `POST /api/v1/orders`(→ `order.created` → 예약 성공) → `POST /api/v1/payments/confirm`.
+  **결제 실패는 주입이 아니라 실제 실패다** — stub 의 `confirm` script 가 5xx 를 돌려주면 `PaymentCommandService:58-62` 의 catch 가 `payment.fail()` + `publishPaymentFailed()` 를 **같은 트랜잭션**에서 수행한다. 합성 이벤트가 아니고, 운영 코드도 전혀 손대지 않는다.
   기대: `orders.status=CANCELLED`(`cancel_reason=PAYMENT_FAILED`) · `stock_reservations.status=RELEASED` · `inventories.stock` 원복 · **Payment 는 해당 Outbox `PUBLISHED`**, **Order/Product/Notification 은 각 정확한 consumer group 의 `processed_events` 1행** (R3 #2 — `payment.failed` 소비자는 3곳이고 **Payment 는 자기 이벤트를 소비하지 않아 `processed_events` 행이 생기지 않는다**) · notification DB 행.
-- [ ] **P7.** **시나리오 B — 예약 실패 체인 (부모 P12 명시 요구).** 재고 부족 seed → runner 가 order-service 의 실제 발행 경로 호출 → poller 가 `order.created` 발행 → `stock.reservation.result(success=false)` → `orders.status=CANCELLED`(`cancel_reason=RESERVATION_FAILED`) · 예약 원장 잔여 HELD 0 · notification 행.
+- [ ] **P7.** **시나리오 B — 예약 실패 체인 (부모 P12 명시 요구).** 재고 부족 seed → runner 가 `POST /api/v1/orders` 호출 → poller 가 `order.created` 발행 → `stock.reservation.result(success=false)` → `orders.status=CANCELLED`(`cancel_reason=RESERVATION_FAILED`) · 예약 원장 잔여 HELD 0 · notification 행.
 - [ ] **P8.** **시나리오 C — 환불 체인 전구간 (R1 #1).** 트리거 2경로(Product marker · Order 보상 원장) → 요청 토픽 2종 → `payment_refunds` **1행 fence** → **dispatcher 가 stub 호출 → `SUCCEEDED` + `payments.status=REFUNDED`** → `payment.refunded` 회신 → **Order `RESOLVED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED`**. 두 경로 동시 투입에도 1행 수렴.
   **결과 3종 분기**: 4xx → `FAILED` → Order `REFUND_FAILED`+`failure_code` · `APPROVED` 유지 / 타임아웃 → `UNRESOLVED` → **어느 소비자도 전이하지 않음**.
 - [ ] **P9.** **시나리오 D — DLQ intake (V15).** 역직렬화 불가 레코드 주입 → `.dlq` 경유 → `dead_letter_records` 1행 + 식별자 6컬럼 non-null.
@@ -179,8 +184,8 @@
 | P5 | DLQ intake/quarantine group 상수 변경 | **JVM 계약과 runtime readiness 가 둘 다** 실패 |
 | P5 | listener readiness 정본을 `DlqTopology` 밖에 복제 | 이중 정본 검사 non-zero |
 | P6 | poller 를 끔 | outbox `PENDING` 잔류 · `processed_events`·전이 없음 → 실패 |
-| P6 | seed runner 를 SQL INSERT 로 되돌림 | publisher 직렬화 계약 테스트 실패(V16) |
-| P6 | runner 를 운영 source set 으로 옮김 | bootJar 내용물 검사 non-zero(N16) |
+| P6 | 결제 승인을 stub 성공 script 로 바꿈 | `payment.failed` 가 안 나와 시나리오 **실패**(음성 대조군) |
+| P6 | 운영 모듈에 E2E 전용 빈/엔드포인트 추가 | `git diff` 상 `*/src/main` 에 E2E 스위치 0 — N16 은 diff 리뷰가 판정한다 |
 | P6 | Payment 에 `processed_events` 1행을 기대 | **기대 자체가 틀렸다** — 그 단언을 넣으면 실패해야 한다(R3 #2) |
 | P6 | product-service 정지 | 제한 시간 초과 실패 — vacuous-pass 아님 |
 | P7 | 재고를 충분히 seed | `success=false` 미발생으로 시나리오 **실패** |

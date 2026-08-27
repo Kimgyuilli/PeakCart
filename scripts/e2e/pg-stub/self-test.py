@@ -17,7 +17,12 @@ import stub
 FAILURES = []
 
 
+CHECKS = 0
+
+
 def check(name, cond, detail=""):
+    global CHECKS
+    CHECKS += 1
     if cond:
         print("  ok   %s" % name)
     else:
@@ -25,10 +30,10 @@ def check(name, cond, detail=""):
         FAILURES.append(name)
 
 
-def call(base, method, path, headers=None):
+def call(base, method, path, headers=None, body=None):
     req = urllib.request.Request(base + path, method=method, headers=headers or {})
     if method == "POST":
-        req.data = b"{}"
+        req.data = json.dumps(body or {}).encode("utf-8")
         req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
@@ -44,9 +49,25 @@ def main():
 
     print("PG stub self-test @ %s" % base)
 
-    status, body = call(base, "POST", "/v1/payments/confirm")
-    check("confirm 은 미구현 500 — 조용한 통과 차단", status == 500 and body["code"] == "STUB_UNIMPLEMENTED",
-          "got %s %s" % (status, body))
+    status, body = call(base, "POST", "/v1/payments/confirm", body={"paymentKey": "e2e-ok-9", "orderId": 9})
+    check("confirm ok script → 200 + approvedAt/method",
+          status == 200 and body["method"] and body["approvedAt"], "got %s %s" % (status, body))
+
+    status, body = call(base, "POST", "/v1/payments/confirm", body={"paymentKey": "e2e-cfail-9", "orderId": 9})
+    check("confirm cfail script → 500 (시나리오 A 의 실패 지점)",
+          status == 500 and body["code"] == "STUB_CONFIRM_FAILED", "got %s %s" % (status, body))
+
+    status, body = call(base, "POST", "/v1/payments/confirm", body={"paymentKey": "typo-key", "orderId": 9})
+    check("미등록 키 confirm → 500 STUB_UNSCRIPTED_KEY — 조용한 성공 차단",
+          status == 500 and body["code"] == "STUB_UNSCRIPTED_KEY", "got %s %s" % (status, body))
+
+    status, body = call(base, "POST", "/v1/payments/typo-key/cancel")
+    check("미등록 키 cancel → 500 STUB_UNSCRIPTED_KEY",
+          status == 500 and body["code"] == "STUB_UNSCRIPTED_KEY", "got %s %s" % (status, body))
+
+    status, body = call(base, "GET", "/v1/payments/typo-key")
+    check("미등록 키 조회 → 500 STUB_UNSCRIPTED_KEY",
+          status == 500 and body["code"] == "STUB_UNSCRIPTED_KEY", "got %s %s" % (status, body))
 
     status, _ = call(base, "POST", "/v1/payments/e2e-ok-1/cancel", {"Idempotency-Key": "refund-1"})
     check("ok script → 200", status == 200, "got %s" % status)
@@ -99,7 +120,7 @@ def main():
     if FAILURES:
         print("\n%d 건 실패: %s" % (len(FAILURES), ", ".join(FAILURES)))
         return 1
-    print("\nself-test 통과 (%d 검사)" % (len(FAILURES) + 15))
+    print("\nself-test 통과 (%d 검사)" % CHECKS)
     return 0
 
 

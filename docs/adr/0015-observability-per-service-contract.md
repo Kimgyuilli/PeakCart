@@ -1,6 +1,9 @@
 # ADR-0015: 관측성 per-service 계약 — 5서비스 분리 완료 상태로 SSOT 위치·검증 정정
 
-- **Status**: Accepted
+- **Status**: Partially Superseded by ADR-0019
+  - **무효화된 범위**: Consequences 의 "PromQL 정적 lint 는 syntax + 라벨 invariant 만 검증" 서술.
+    ADR-0019 가 lint 범위를 **모든 필수 alert 의 식 동일성**까지 격상했다.
+    나머지(per-service SSOT 위치, ground truth 정의, alert 4종의 라벨 규약)는 그대로 유효하다.
 - **Date**: 2026-06-21
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: Phase 4 (구현 ① PR3c)

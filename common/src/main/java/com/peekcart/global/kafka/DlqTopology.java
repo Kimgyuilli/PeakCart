@@ -31,6 +31,38 @@ public final class DlqTopology {
     /** {@code DeadLetterPublishingRecoverer} 의 목적지 규칙 — {@code record.topic() + ".dlq"}. */
     public static final String DLQ_SUFFIX = ".dlq";
 
+    // ------------------------------------------------------------------
+    // DLQ listener 자신의 group (계획 P5).
+    //
+    // 위 CONSUMPTION 의 group 은 **실패한 업무 consumer** 의 group 이지 DLQ listener 의 group 이
+    // 아니다. 둘을 섞으면 readiness 가 order-svc-dlq-group 계열을 통째로 놓친다.
+    // annotation 이 literal 을 쓰면 여기와 갈라져도 아무 것도 실패하지 않으므로 상수로 참조시킨다.
+    // (annotation 속성은 컴파일 상수여야 해서 메서드가 아니라 상수로 둔다.)
+    // ------------------------------------------------------------------
+    public static final String ORDER_DLQ_GROUP = "order-svc-dlq-group";
+    public static final String PRODUCT_DLQ_GROUP = "product-svc-dlq-group";
+    public static final String PAYMENT_DLQ_GROUP = "payment-svc-dlq-group";
+    public static final String NOTIFICATION_DLQ_GROUP = "notification-svc-dlq-group";
+
+    public static final String ORDER_DLQ_QUARANTINE_GROUP = "order-svc-dlq-quarantine-group";
+    public static final String PRODUCT_DLQ_QUARANTINE_GROUP = "product-svc-dlq-quarantine-group";
+    public static final String PAYMENT_DLQ_QUARANTINE_GROUP = "payment-svc-dlq-quarantine-group";
+
+    private static final Map<PeekcartService, String> INTAKE_GROUP = new EnumMap<>(PeekcartService.class);
+    private static final Map<PeekcartService, String> QUARANTINE_GROUP = new EnumMap<>(PeekcartService.class);
+
+    static {
+        INTAKE_GROUP.put(PeekcartService.ORDER, ORDER_DLQ_GROUP);
+        INTAKE_GROUP.put(PeekcartService.PRODUCT, PRODUCT_DLQ_GROUP);
+        INTAKE_GROUP.put(PeekcartService.PAYMENT, PAYMENT_DLQ_GROUP);
+        INTAKE_GROUP.put(PeekcartService.NOTIFICATION, NOTIFICATION_DLQ_GROUP);
+
+        QUARANTINE_GROUP.put(PeekcartService.ORDER, ORDER_DLQ_QUARANTINE_GROUP);
+        QUARANTINE_GROUP.put(PeekcartService.PRODUCT, PRODUCT_DLQ_QUARANTINE_GROUP);
+        QUARANTINE_GROUP.put(PeekcartService.PAYMENT, PAYMENT_DLQ_QUARANTINE_GROUP);
+        // notification 은 발행 토픽이 0개라 quarantine 대상이 없다(QUARANTINE 과 동일한 이유).
+    }
+
     private static final Map<PeekcartService, Set<DlqSubscription>> CONSUMPTION =
             new EnumMap<>(PeekcartService.class);
     private static final Map<PeekcartService, Set<String>> QUARANTINE =
@@ -91,6 +123,28 @@ public final class DlqTopology {
     /** 원본 토픽 이름에 {@code .dlq} 를 붙인다. */
     public static String dlq(String originTopic) {
         return originTopic + DLQ_SUFFIX;
+    }
+
+    /**
+     * 이 서비스가 <b>업무 토픽</b>을 소비하는 (originTopic, group) 집합 (계획 P5 readiness).
+     *
+     * <p>{@link #consumptionSubscriptions} 에서 <b>유도</b>한다 — 같은 21쌍을 별도 상수로 복제하면
+     * 정본이 둘이 되고, 양쪽을 함께 잘못 고치면 각자의 자기대조가 모두 통과한다.
+     */
+    public static Set<TopicGroup> businessSubscriptions(PeekcartService service) {
+        return Set.copyOf(CONSUMPTION.get(service).stream()
+                .map(s -> new TopicGroup(s.originTopic(), s.consumerGroup()))
+                .toList());
+    }
+
+    /** 이 서비스의 DLQ 소비 listener 가 쓰는 group. */
+    public static String dlqIntakeGroup(PeekcartService service) {
+        return INTAKE_GROUP.get(service);
+    }
+
+    /** 이 서비스의 quarantine listener 가 쓰는 group. quarantine 대상이 없으면 {@code null}. */
+    public static String quarantineGroup(PeekcartService service) {
+        return QUARANTINE_GROUP.get(service);
     }
 
     /** 이 서비스가 소비 실패분을 소유하는 (dlqTopic, group) 집합. */

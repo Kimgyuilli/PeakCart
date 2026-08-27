@@ -89,7 +89,7 @@
 - [x] **P4.** **cold start 판정 (R2 #5 · R3 #4).** `flyway_schema_history` 검사만으로는 warm reuse 를 못 가린다(직전 성공 volume 이 그대로 만족). 그리고 **warm datadir 에서는 `docker-entrypoint-initdb.d` 가 아예 재실행되지 않으므로**(`scripts/mysql-init/01-*.sql:2-4` 가 "첫 부팅 시 실행" 을 명시) "기존 marker 면 init 이 실패" 분기는 **도달하지 않는다.**
   → ① 기동 전 해당 project 의 volume 이 존재하면 실패 ② **E2E 메타데이터 스키마/테이블을 init 단계에서 만들고 현재 `run_id` 를 적는다**(정적 `.sql` 로는 run_id 주입이 불가하므로 **`.sh` init 자산**을 쓴다) ③ **readiness 가 `stored_run_id == current_run_id` 를 검사** — warm volume 은 옛 marker 불일치로 실패한다. 순서는 `스키마 생성 → marker 생성 → 앱/Flyway 시작` 으로 고정하고, marker 테이블은 **Flyway 관리 대상이 아님**을 명시한다(앱 테이블 DDL 은 Flyway 전용이라는 규칙과 구분).
   그 위에 별도 조건으로 4개 DB 의 `flyway_schema_history` **`success=1` 전량 + 최신 버전 적용**(migration 완전성)을 readiness 에 넣는다.
-- [ ] **P5.** **readiness 정본 (V9·V10·V14·V17 · R2 #4 · R3 #3).** 두 개념을 분리하되 **정본을 복제하지 않는다**:
+- [x] **P5.** **readiness 정본 (V9·V10·V14·V17 · R2 #4 · R3 #3).** 두 개념을 분리하되 **정본을 복제하지 않는다**:
   ① **업무 listener readiness** — `DlqTopology.consumptionSubscriptions()` 에서 **유도**한다(`.dlq` suffix 제거로 원본 토픽, group 은 그대로). 21쌍이 이미 그 안에 있으므로 **새 정본을 만들면 이중 정본이 되어 양쪽을 함께 잘못 고치면 각자의 자기대조가 모두 통과한다.**
   ② **DLQ intake 4 · quarantine 3 group** — 기존 모델에 정말 없는 값이라 이것만 상수로 신설하고, **`@KafkaListener` annotation 이 그 상수를 직접 참조**하게 한다(literal 중복 제거).
   준비 판정: 업무 토픽 10종 + P9 가 쓰는 `.dlq` 토픽 + 시나리오별 required listener group. group 은 존재가 아니라 **`active member ≥ 1` 그리고 `assigned partition ≥ 1`**.

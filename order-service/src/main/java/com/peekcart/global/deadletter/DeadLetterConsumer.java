@@ -42,7 +42,7 @@ public class DeadLetterConsumer {
                     "stock.reservation.result.dlq",
                     "product.updated.dlq"
             },
-            groupId = "order-svc-dlq-group",
+            groupId = DlqTopology.ORDER_DLQ_GROUP,
             containerFactory = "deadLetterKafkaListenerContainerFactory")
     public void consume(ConsumerRecord<String, String> record) {
         DlqOrigin origin = DlqHeaders.parse(record);

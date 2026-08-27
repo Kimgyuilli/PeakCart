@@ -40,7 +40,7 @@ public class DeadLetterConsumer {
                     "payment.failed.dlq",
                     "payment.refunded.dlq"
             },
-            groupId = "product-svc-dlq-group",
+            groupId = DlqTopology.PRODUCT_DLQ_GROUP,
             containerFactory = "deadLetterKafkaListenerContainerFactory")
     public void consume(ConsumerRecord<String, String> record) {
         DlqOrigin origin = DlqHeaders.parse(record);

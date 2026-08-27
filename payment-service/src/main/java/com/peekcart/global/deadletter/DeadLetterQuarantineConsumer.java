@@ -41,7 +41,7 @@ public class DeadLetterQuarantineConsumer {
                     "payment.requested.dlq",
                     "payment.refunded.dlq"
             },
-            groupId = "payment-svc-dlq-quarantine-group",
+            groupId = DlqTopology.PAYMENT_DLQ_QUARANTINE_GROUP,
             containerFactory = "deadLetterKafkaListenerContainerFactory")
     public void consume(ConsumerRecord<String, String> record) {
         DlqOrigin origin = DlqHeaders.parse(record);

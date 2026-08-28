@@ -13,7 +13,15 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.web.client.RestClient;
 
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -96,6 +104,10 @@ class TossBaseUrlContractTest {
 
         /** ConfigData 초기화를 붙여 **실제 application.yml + 프로파일 병합**을 태운다. */
         private final ApplicationContextRunner runner = new ApplicationContextRunner()
+                // 실행 환경에 TOSS_BASE_URL 이 떠 있으면 sentinel/fail-fast 검사가 그 값으로
+                // 조용히 통과한다 — 계약이 아니라 개발자·CI 환경을 검사하게 된다.
+                // systemEnvironment 를 그 키만 뺀 사본으로 교체해 격리한다.
+                .withInitializer(TossBaseUrlContractTest::stripAmbientBaseUrl)
                 .withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(PlaceholderSupport.class, ClientOnly.class);
 
@@ -147,6 +159,19 @@ class TossBaseUrlContractTest {
                                 .isEqualTo("http://pg-stub:8080/v1");
                     });
         }
+    }
+
+    private static void stripAmbientBaseUrl(ConfigurableApplicationContext context) {
+        MutablePropertySources sources = context.getEnvironment().getPropertySources();
+        String name = StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME;
+        PropertySource<?> original = sources.get(name);
+        if (original == null) {
+            return;
+        }
+        Map<String, Object> copy = new HashMap<>((Map<String, Object>) original.getSource());
+        copy.remove("TOSS_BASE_URL");
+        copy.remove("toss.payments.base-url");
+        sources.replace(name, new MapPropertySource(name, copy));
     }
 
     @Configuration(proxyBeanMethods = false)

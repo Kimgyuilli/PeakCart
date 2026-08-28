@@ -407,11 +407,13 @@ def scenario_a():
         raise AssertionError("payment.failed outbox 가 PUBLISHED 가 아니다: %r" % pay_outbox)
     evidence["payment_failed_outbox"] = pay_outbox["status"]
 
-    evidence["notification_rows"] = wait_for(
-        "notification 알림 행 user=%s" % user_id,
+    # **type 으로 키잉한다.** user_id 만 보면 같은 시나리오의 order.created 소비가 남긴
+    # ORDER_CREATED 행으로 즉시 만족돼, payment.failed 소비가 no-op 이어도 통과한다.
+    evidence["notification_payment_failed"] = wait_for(
+        "PAYMENT_FAILED 알림 user=%s" % user_id,
         lambda: nonzero(query("notification",
-                              "SELECT COUNT(*) AS c FROM notifications WHERE user_id = %s",
-                              (user_id,)))
+                              "SELECT COUNT(*) AS c FROM notifications "
+                              "WHERE user_id = %s AND type = 'PAYMENT_FAILED'", (user_id,)))
     )[0]["c"]
 
     evidence["order_id"] = order_id
@@ -445,12 +447,13 @@ def scenario_b():
     evidence["cancel_reason"] = reason
     evidence["order_cancelled_outbox"] = row["status"]
 
-    # 예약 실패도 사용자에게 알려야 한다. 소비가 no-op 이어도 통과하면 안 된다.
-    evidence["notification_rows"] = wait_for(
-        "notification 알림 행 user=%s" % user_id,
+    # 예약 실패도 사용자에게 알려야 한다. type 으로 키잉하지 않으면 같은 시나리오의
+    # ORDER_CREATED 행이 조건을 만족시켜 order.cancelled 소비가 no-op 이어도 통과한다.
+    evidence["notification_order_cancelled"] = wait_for(
+        "ORDER_CANCELLED 알림 user=%s" % user_id,
         lambda: nonzero(query("notification",
-                              "SELECT COUNT(*) AS c FROM notifications WHERE user_id = %s",
-                              (user_id,)))
+                              "SELECT COUNT(*) AS c FROM notifications "
+                              "WHERE user_id = %s AND type = 'ORDER_CANCELLED'", (user_id,)))
     )[0]["c"]
 
     held = query("product",

@@ -7,7 +7,6 @@ import com.peekcart.payment.infrastructure.toss.RefundExecutor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -29,7 +28,6 @@ import java.util.Optional;
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "app.refund.dispatch-enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class RefundDispatcher {
 

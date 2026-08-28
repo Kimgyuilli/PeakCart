@@ -80,11 +80,14 @@
 
 ### 안전장치
 
-- [x] **P1.** **PG 호출 표면 통제 (V1·V2·V3·V19 · R3 #8).** `RefundProperties` 에 `app.refund.dispatch-enabled` · `app.refund.reconcile-enabled` 추가(**기본 `true`**, 동작 정책이므로 base 소유) + 두 스케줄러에 `@ConditionalOnProperty(matchIfMissing = true)`.
-  **`toss.payments.base-url` 은 연결 정보로 취급한다** — `TossPaymentClient` 생성자의 리터럴을 제거하고 `application-k8s.yml` 이 운영 URL 을, local 이 개발 endpoint 를, E2E 가 stub URL 을 **각각 명시 주입**한다.
-  **[구현 중 정정]** 초안은 "base 기본값 없이 fail-fast" 였으나, payment-service 는 test 리소스가 없어 base `application.yml` 만으로 테스트 컨텍스트가 뜬다 — 기본값을 없애면 **모든 Spring 테스트가 설정 누락으로 죽는다.** 기존 `secret-key` 가 이미 쓰는 패턴(base = test placeholder, `application-k8s.yml` = 기본값 없이 강제)에 맞춘다: base 는 **도달 불가 sentinel**(`http://localhost:9/...`, discard 포트)을 두어 설정 누락이 **실 PG 로 새지 않게** 하고, 운영 fail-fast 는 `application-k8s.yml` 의 `${TOSS_BASE_URL}`(기본값 없음)이 담당한다. 위험의 방향("누락 → 실 PG")은 sentinel 이 더 확실히 막는다.
+- [x] **P1.** **PG 호출 표면 통제 (V1·V2·V3·V19 · R3 #8 · diff 2R #4).**
+  **[구현 중 폐기] `app.refund.dispatch-enabled` / `reconcile-enabled` 스위치는 만들지 않는다.**
+  초안이 그것을 요구한 이유는 "E2E 에서 PG 호출 표면을 끈다" 였는데, P2(stub)+P3(`internal: true`)로 설계가 바뀌면서 **E2E 는 두 잡을 켠 채 stub 으로 돌린다**(환불 체인 전구간이 시나리오 C 의 대상이므로 꺼서는 안 된다). 즉 스위치를 **아무도 쓰지 않게 됐다.**
+  그런데 그것은 환경변수 하나로 운영 스케줄러 빈을 조용히 없애는 스위치이고, ADR-0018 은 dispatcher/reconciliation 을 미결 환불 수렴의 필수 구성요소로 규정한다 — 오설정 시 health 는 정상인 채 `REQUESTED`/`CLAIMED`/`UNRESOLVED` 가 영구 적체된다. 쓰이지도 않는 운영 위험을 남길 이유가 없다(N16 · CLAUDE.md §2).
+  **남는 것은 `toss.payments.base-url` 설정화뿐이다** — `TossPaymentClient` 생성자의 리터럴을 제거하고 `application-k8s.yml` 이 운영 URL 을, local 이 개발 endpoint 를, E2E 가 stub URL 을 **각각 명시 주입**한다.
   *R2 #7 을 기각했다가 R3 #8 로 철회했다*: "환경 불변 단일 값" 이라는 내 전제를 **내 계획서가 반증했다**(운영과 stub 으로 값이 갈린다). ADR-0007 Decision 표는 연결 정보를 프로파일 허용으로 분류한다.
-  프로퍼티 미지정 컨텍스트에서 두 스케줄러 빈이 **존재**하고, `base-url` 누락 시 **부팅 실패**함을 단언하는 바인딩 테스트를 둔다.
+  base 기본값은 **도달 불가 sentinel**(`localhost:9`, discard 포트)이다. 단, **base 의 기본 활성 프로파일이 `local`** 이라 아무 것도 지정하지 않은 부팅은 sentinel 이 아니라 local 의 운영 URL 을 쓴다(구현 중 테스트가 반증) — sentinel 은 "local 도 k8s 도 아닌 프로파일" 의 안전망이고, 운영 fail-fast 는 `application-k8s.yml` 의 `${TOSS_BASE_URL}`(기본값 없음)이 담당한다.
+
 - [x] **P2.** **로컬 PG stub (R1 #1 · R2 #8 · R3 #12).** `POST /payments/{key}/cancel` 과 `GET /payments/{paymentKey}` **둘 다** 구현한다 — `ALREADY_CANCELED` 분기와 reconciliation 이 **항상 조회를 먼저** 부르기 때문에(V18) 조회가 없으면 그 경로가 도달 불가다.
   응답은 전역 모드가 아니라 **paymentKey 별 불변 script**. 지원: 취소 성공 · 4xx 거절 · transient 반복 · `ALREADY_CANCELED_PAYMENT` × 조회 3분기(전액 취소 성공 · `cancels[].cancelAmount` 금액 불일치 · 조회 실패) · 타임아웃.
   **script 별 예상 ledger 를 순서까지 열거한다**: 성공 `POST×1` / transient 소진 `POST×3`(`RefundExecutor:35-54` 의 `maxAttempts`) / `ALREADY` `POST×1 → GET×1` / reconciliation 성공 `GET×1, POST×0`. 각 단언의 **관측 시간창과 reconciliation 실행 여부**도 고정한다. 승인(`confirm`)은 **미구현 500**.
@@ -169,10 +172,12 @@
 
 | 항목 | 실패 주입 | 기대 |
 |---|---|---|
-| P1 | 프로퍼티 미지정 컨텍스트 기동 | 두 스케줄러 빈 **존재** |
-| P1 | `dispatch-enabled=false` / `reconcile-enabled=false` | 각 빈 **부재**. 하나만 꺼도 다른 하나는 남는다 |
-| P1 | base `base-url` 기본값 확인 | **도달 불가 sentinel** — 실 PG 호스트가 아님을 단언(누락이 실 PG 로 새지 않는다) |
-| P1 | `k8s` 프로파일에서 `TOSS_BASE_URL` 미주입 | **부팅 실패**(운영 fail-fast) |
+| P1 | 운영 소스에 스케줄러 비활성 스위치 존재 | **없어야 한다** — grep `dispatch-enabled`/`reconcile-enabled` 히트 0 |
+| P1 | base `base-url` 선언 확인 | 도달 불가 sentinel(`localhost:9`) — 실 PG 호스트가 아님 |
+| P1 | 기본 부팅(프로파일 미지정) | **local 의 운영 URL** 이 이긴다(사실 고정 — 초안 진술 반증) |
+| P1 | base-url 을 안 주는 프로파일로 기동 | sentinel 이 해석된다 |
+| P1 | `k8s` 프로파일에서 `TOSS_BASE_URL` 미주입 / 주입 | **부팅 실패** / 그 값이 해석됨(양성 대조군) |
+| P1 | 앰비언트 `TOSS_BASE_URL` 을 띄운 채 테스트 실행 | 결과가 **바뀌지 않는다**(환경 격리) |
 | P2 | stub 에 `confirm` 요청 | **500** — 미구현 표면이 조용히 통과하지 않는다 |
 | P2 | `ALREADY_CANCELED` script | `GET /payments/{key}` 가 실제 호출됨을 ledger 로 단언. 조회 3분기가 서로 다른 종착 |
 | P2 | script 별 ledger 대조 | 성공 `POST×1` / transient 소진 `POST×3` / `ALREADY` `POST×1→GET×1` / reconcile `GET×1,POST×0` — **순서까지** |
@@ -183,7 +188,8 @@
 | P4 | init 을 정적 `.sql` 로 되돌림 | run_id 주입 불가로 marker 부재 → readiness 실패 |
 | P4 | migration 하나를 실패시킴 | `success=0` 으로 readiness 실패 |
 | P5 | `DlqTopology` 를 실제 `@KafkaListener` 와 어긋나게 함 | 대조 실패 non-zero |
-| P5 | DLQ intake/quarantine group 상수 변경 | **JVM 계약과 runtime readiness 가 둘 다** 실패 |
+| P5 | DLQ intake/quarantine group 상수 **참조**를 교환 | lint non-zero (self-test 2종) |
+| P5 | 상수의 **리터럴 값**만 교환 | 참조 이름은 그대로라 lint 는 통과 → **`PeekcartService` 정본 대조 JVM 계약 테스트**가 실패 |
 | P5 | listener readiness 정본을 `DlqTopology` 밖에 복제 | 이중 정본 검사 non-zero |
 | P6 | poller 를 끔 | outbox `PENDING` 잔류 · `processed_events`·전이 없음 → 실패 |
 | P6 | 결제 승인을 stub 성공 script 로 바꿈 | `payment.failed` 가 안 나와 시나리오 **실패**(음성 대조군) |
@@ -259,8 +265,9 @@
 8. **시나리오 C 는 요청 토픽부터 시작한다** — 트리거 **감지**(Product marker · Order 보상 원장)는 "결제완료가 이미 취소된 주문에 도착" 하는 경합이라 HTTP 로 결정적 재현이 불가능하다(`Payment.ensureConfirmable:181-192` 가 PENDING 아닌 결제의 승인을 거부). 감지 → 요청 발행이 같은 트랜잭션이라는 계약은 ④-c-1b 통합테스트가 덮는다. E2E 가 cross-service 로 증명하는 구간은 **요청 토픽 → fence → PG → 회신 → 3소비자 종결** 이다.
 9. **4종 연속 실행이 불안정하다 (실측)** — 시나리오는 각각 실제 스택에서 통과했고(A 다회 · B 단독/A직후 · C · D), 4종을 한 번에 돌리면 뒤쪽 시나리오가 consumer 지연으로 타임아웃하는 경우가 있다. 관측: 단일 브로커에 group 28개가 붙은 상태에서 `order.created`·`product.updated` 소비가 수십 초~수 분 지연. 완화로 **자동생성 토픽 1파티션 고정 · 앱 순차 기동 · 시나리오 상한 180s** 를 넣었으나 제거하지 못했다. 근본 대응은 **P10(시나리오 격리)·P19(실행 예산)** 이며 후속 PR 소관이다.
 10. **환불 회신 소비 3곳의 종결 미실증** — 시나리오 C 는 `payment.refunded` 발행까지만 본다. Order `RESOLVED`/`REFUND_FAILED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED` 와 결과 3종 분기(4xx·타임아웃)는 선행 원장 seed 가 필요해 ④-d-2b 소관이다. 계약 자체는 ④-c-1b 통합테스트가 덮는다.
-11. **stub ledger 계약을 성공 script 에만 적용** — `POST×1`+Idempotency-Key 는 단언하나 transient 소진 `POST×3` · `ALREADY` `POST→GET` · reconciliation `GET×1,POST×0` 는 미실행(계획 P2 의 순서 계약 일부). ④-d-2b.
-12. **시나리오 D 의 `attempt_count=2` 미검증** — 재발행은 offset 이 달라져 다른 좌표가 되므로(V15) DLQ consumer group offset rewind 가 필요하고, 그건 실행 중 group 을 멈춰야 해서 다른 시나리오와 간섭한다. 1행 + 식별자 6컬럼 non-null 까지만 본다.
+11. **운영 kill switch 없음(의도)** — 환불 스케줄러를 끄는 프로퍼티는 만들지 않았다. 필요하다면 ADR + readiness/경보 계약을 먼저 세운 뒤 별도로 도입한다.
+12. **stub ledger 계약을 성공 script 에만 적용** — `POST×1`+Idempotency-Key 는 단언하나 transient 소진 `POST×3` · `ALREADY` `POST→GET` · reconciliation `GET×1,POST×0` 는 미실행(계획 P2 의 순서 계약 일부). ④-d-2b.
+13. **시나리오 D 의 `attempt_count=2` 미검증** — 재발행은 offset 이 달라져 다른 좌표가 되므로(V15) DLQ consumer group offset rewind 가 필요하고, 그건 실행 중 group 을 멈춰야 해서 다른 시나리오와 간섭한다. 1행 + 식별자 6컬럼 non-null 까지만 본다.
 
 ## 10. 정정 이력
 

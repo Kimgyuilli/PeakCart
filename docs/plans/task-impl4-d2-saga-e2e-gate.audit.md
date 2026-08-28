@@ -65,3 +65,43 @@
 **검증**: 8모듈 **800 테스트 0 실패**(792 → 신규 8) · lint **13종**(신규 `e2e-network-contract-lint` self-test 9 · `kafka-subscription-contract-lint` self-test 7 · pg-stub self-test 19)
 
 **분할**: 사용자 승인으로 ④-d-2a(P1~P9) / ④-d-2b(P10~P20 + ④ 종결)로 나눔
+
+## 2026-08-28 — diff 리뷰 라운드 1
+- 항목: 10건 (P0:0, P1:3, P2:7)
+- 처리: 반영 10건 / 기각 0건
+- 주요: `.pyc` 커밋 · 시나리오 B 가 outbox 존재만 확인 · 시나리오 D 가 행수/attempt_count 미단언 ·
+  flyway 검사가 '성공 1건 이상' 이라 최신 누락 미검출 · base-url 테스트가 YAML 문자열만 검사 ·
+  DLQ lint 가 `DlqTopology.` 접두사만 확인 · reconcile 주기 override 가 `lockAtLeastFor=PT30S` 와 모순
+- **뒤집힌 전제**: base 의 `spring.profiles.active` 가 `local` 이라 **기본 부팅은 sentinel 이 아니라
+  local 의 운영 URL 을 쓴다**. 새로 붙인 ConfigData 테스트가 내 진술을 반증했다.
+- raw: `.cache/codex-reviews/diff-d2a-r1.json`
+
+## 2026-08-28 — diff 리뷰 라운드 2
+- 항목: 5건 (P0:0, P1:4, P2:1)
+- 처리: 반영 5건 / 기각 0건
+- **1R 수정이 만든/남긴 새 결함 3건**:
+  1. 1R 에서 추가한 시나리오 B 알림 대기가 **여전히 vacuous** — 같은 시나리오의 `order.created`
+     소비가 만든 `ORDER_CREATED` 행으로 즉시 만족됐다(A 의 user=100 은 배제했지만 B 자신의 선행 행).
+     A 도 동일 → **`type` 으로 키잉**(`PAYMENT_FAILED` / `ORDER_CANCELLED`)
+  2. 1R 에서 붙인 `@Nested Resolution` 테스트가 **앰비언트 `TOSS_BASE_URL` 을 읽어** 환경에 따라
+     통과/실패가 갈렸다(리뷰어가 `TOSS_BASE_URL=http://ambient.example:7777` 로 재현). systemEnvironment
+     에서 그 키를 제거하는 initializer 로 격리 → 같은 환경변수를 띄우고 재실행해 통과 확인
+  3. 1R 의 "정확 상수명 동등 비교" 도 **리터럴 값만 교환하면 통과**한다(참조 이름은 그대로).
+     그리고 `PeekcartService.dlqListenerGroup()`/`quarantineListenerGroup()` 이 **이미 정본으로 존재**했다
+     — 내 새 상수는 중복 정본이었고, 이는 R3 #3 에서 지적받은 실수의 재현이다.
+     → `DlqListenerGroupContractTest` 로 상수 ↔ 정본 정합을 전 enum 에 대해 고정
+- **P1 스위치 폐기(2R #4)**: `dispatch-enabled`/`reconcile-enabled` 는 설계가 stub+internal network 로
+  바뀌면서 **아무도 쓰지 않게 됐는데**, 환경변수 하나로 운영 스케줄러 빈을 조용히 없애는 위험만 남았다
+  (ADR-0018 은 두 잡을 미결 환불 수렴의 필수 구성요소로 규정). 프로퍼티·`@ConditionalOnProperty`·토글
+  테스트를 전부 제거하고 P1 을 `base-url` 설정화로 축소했다.
+- raw: `.cache/codex-reviews/diff-d2a-r2.json`
+
+### 리뷰 수정 후 재실행 증적 (2026-08-28)
+- `./gradlew test` **BUILD SUCCESSFUL** (11m 3s) · **804 테스트 0 실패**
+- lint: `e2e-network-contract`(self-test 9) · `kafka-subscription-contract`(self-test **9**) ·
+  pg-stub self-test 19 · 기존 10종 그린
+- `TOSS_BASE_URL=http://ambient.example:7777 ./gradlew :payment-service:test --tests '*TossBaseUrlContractTest*' --rerun-tasks` → **BUILD SUCCESSFUL** (환경 격리 확인)
+- E2E 재실행: **A 통과**(`notification_payment_failed=1` — type 키잉이 실제로 값을 잡았다) ·
+  **B 통과**(`order_cancelled_outbox=PUBLISHED`, `notification_order_cancelled=1`, `stock_intact=1`) ·
+  **C 통과** · **D 통과**(`rows=1`, `attempt_count=1`)
+- **4종 연속 실행은 여전히 불안정** — 이번에도 C 직후 D 가 타임아웃했고 단독 재실행은 통과했다(§9-9)

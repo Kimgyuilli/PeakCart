@@ -14,10 +14,10 @@ import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.web.client.RestClient;
 
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -168,10 +168,13 @@ class TossBaseUrlContractTest {
         if (original == null) {
             return;
         }
-        Map<String, Object> copy = new HashMap<>((Map<String, Object>) original.getSource());
+        Map<String, Object> copy = new HashMap<>(((Map<?, ?>) original.getSource()).entrySet().stream()
+                .collect(HashMap::new, (m, e) -> m.put(String.valueOf(e.getKey()), e.getValue()), HashMap::putAll));
         copy.remove("TOSS_BASE_URL");
         copy.remove("toss.payments.base-url");
-        sources.replace(name, new MapPropertySource(name, copy));
+        // SystemEnvironmentPropertySource 로 되돌린다 — 평범한 MapPropertySource 로 교체하면
+        // 환경변수 이름 완화 매핑(TOSS_X ↔ toss.x)이 사라져 다른 프로퍼티 해석까지 바뀐다.
+        sources.replace(name, new SystemEnvironmentPropertySource(name, copy));
     }
 
     @Configuration(proxyBeanMethods = false)

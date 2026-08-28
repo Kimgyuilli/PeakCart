@@ -223,6 +223,10 @@
 
 ## 6. 완료 조건
 
+> **PR 분할 (2026-08-28, 사용자 승인)**: **④-d-2a = P1~P9**(안전장치·stub·격리 compose·cold start·readiness 정본·시나리오 4종) / **④-d-2b = P10~P20**(시나리오 격리 강화·계약 매트릭스·matrix lint·JVM 증적 키·manifest 1:1 대조·파서 self-test·음성 대조군 CI 상시·스케줄러 배선 계약·CI 배선·실행 예산·문서 동기화·**④ 종결**).
+> 아래 조건은 **④-d-2 전체**의 것이며, ④-d-2a 의 완료 판정은 §3 P1~P9 체크박스 + §5 표 중 해당 행 + audit 증적이다.
+
+
 1. §1 의 N1~N17 이 **전부 거짓**.
 2. `./gradlew build` 그린 · lint **12종**(신규 `saga-contract-matrix-lint`) + 각 self-test 그린.
 3. CI 에서 `e2e` 잡이 시나리오 4종 + **P16 음성 대조군 6종**을 통과하고 manifest·compose logs·duration artifact 가 남으며 **P19 시간 예산 안에** 끝난다.

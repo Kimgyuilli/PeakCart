@@ -43,6 +43,18 @@ class DlqListenerGroupContractTest {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(PeekcartService.class)
+    @DisplayName("[SAGA-P5-DLQGROUP] 모든 서비스가 소유 매핑을 갖는다 — 새 서비스 추가 시 조용한 NPE 대신 여기서 실패한다")
+    void everyServiceHasOwnershipEntries(PeekcartService service) {
+        assertThat(DlqTopology.consumptionSubscriptions(service))
+                .as("%s 의 소비 소유권 매핑", service).isNotNull();
+        assertThat(DlqTopology.quarantineTopics(service))
+                .as("%s 의 quarantine 소유권 매핑 (대상이 없으면 빈 집합, null 금지)", service).isNotNull();
+        assertThat(DlqTopology.dlqIntakeGroup(service))
+                .as("%s 의 DLQ intake group", service).isNotNull();
+    }
+
     @Test
     @DisplayName("[SAGA-P5-DLQGROUP] 두 group 집합은 서로소다 — 같은 값이면 한 레코드를 두 listener 가 집는다")
     void groupSetsAreDisjoint() {

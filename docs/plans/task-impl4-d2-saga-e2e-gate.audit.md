@@ -105,3 +105,19 @@
   **B 통과**(`order_cancelled_outbox=PUBLISHED`, `notification_order_cancelled=1`, `stock_intact=1`) ·
   **C 통과** · **D 통과**(`rows=1`, `attempt_count=1`)
 - **4종 연속 실행은 여전히 불안정** — 이번에도 C 직후 D 가 타임아웃했고 단독 재실행은 통과했다(§9-9)
+
+## 2026-08-29 — diff 리뷰 라운드 3: **미실행 (Codex 사용량 한도)**
+- `codex exec` 가 `You've hit your usage limit` 로 종료해 3라운드를 받지 못했다. **수렴 판정 없음.**
+- 대신 R3 프롬프트에서 "의심하라" 고 지정했던 5개 지점을 **직접 점검**했다:
+  - (a) `stripAmbientBaseUrl` 부작용 — 평범한 `MapPropertySource` 로 교체하면 **환경변수 완화 매핑이 사라져** 다른 프로퍼티 해석까지 바뀐다 → `SystemEnvironmentPropertySource` 로 복원. unchecked cast 도 제거
+  - (b) 스위치 제거 후 죽은 코드 — `dispatchEnabled`/`reconcileEnabled`/`@ConditionalOnProperty` 잔존 0, `@Scheduled`/`@SchedulerLock` import 는 정상 유지
+  - (c) quarantine null 분기 — `PeekcartService` 4값 전부 매핑이 있어 현재는 안전하나, **서비스 추가 시 조용한 NPE** 가 되므로 "모든 서비스가 소유 매핑을 갖는다" 계약 테스트를 추가
+  - (d) type 키잉 ↔ `NotificationType` — `PAYMENT_FAILED`/`ORDER_CANCELLED` 실재 확인. 시나리오 A 는 `order.cancelled(reason=PAYMENT_FAILED)` 를 Notification 이 스킵하므로(④-b) `PAYMENT_FAILED` 키잉이 유일하게 의미 있는 조건이고, B(user 200)와 사용자도 다르다
+  - (e) 계획서 정합 — §6 완료 조건이 ④-d-2 **전체**의 것이라 분할 주석을 추가
+- **남은 위험**: 2R 수정이 만든 결함을 제3자 리뷰로 확인하지 못했다. ④-d-2b 착수 시 **이 diff 를 포함해** 1라운드를 먼저 돌린다.
+
+### 최종 검증 (2026-08-29)
+- `./gradlew test` **BUILD SUCCESSFUL** (21m 12s) · **813 테스트 0 실패**
+- lint **13종** 그린 — 신규 `e2e-network-contract`(self-test 9) · `kafka-subscription-contract`(self-test 9) + 기존 11종, pg-stub self-test 19
+- `TOSS_BASE_URL` 앰비언트 주입 상태에서도 계약 테스트 통과(환경 격리)
+- E2E: **A · B · C · D 각각 통과**(강화된 단언). **4종 연속 실행은 불안정**(§9-9)

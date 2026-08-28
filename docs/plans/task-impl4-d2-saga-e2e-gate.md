@@ -91,7 +91,7 @@
 
 ### E2E 하네스
 
-- [x] **P3.** **`docker-compose.e2e.yml` 신설 (V4·V5 · R2 #6).** ① 인프라 3종에서 `container_name` 제거·호스트 포트 미노출 ② **앱 서비스 4개 신설**(order/product/payment/notification), 태그는 `${PEEKCART_IMAGE_TAG}` ③ 연결 정보는 새 프로파일 yml 이 아니라 **환경변수** 주입(ADR-0007) ④ refund 스케줄러는 **켠 채** stub 으로 향한다(환불 체인을 닫아야 한다) ⑤ **앱·인프라·stub 을 `internal: true` 네트워크 하나에만** 부착 — 모든 앱이 오직 그 네트워크에만 붙음을 **compose 정적 계약**으로 검사하고, `internal: true` 삭제·보조 외부 네트워크 부착을 self-test 가 실패시킨다 ⑥ 인프라 `healthcheck` + 앱 `depends_on: {condition: service_healthy}` ⑦ 매 실행 새 volume(P4 가 판정) ⑧ user-service·gateway 미포함.
+- [x] **P3.** **`docker-compose.e2e.yml` 신설 (V4·V5 · R2 #6).** ① 인프라 3종에서 `container_name` 제거·호스트 포트 미노출 ② **앱 서비스 4개 신설**(order/product/payment/notification), 태그는 `${PEEKCART_IMAGE_TAG}` ③ 연결 정보는 새 프로파일 yml 이 아니라 **환경변수** 주입(ADR-0007) ④ refund 스케줄러는 **켠 채** stub 으로 향한다(환불 체인을 닫아야 한다) ⑤ **앱·인프라·stub 을 `internal: true` 네트워크 하나에만** 부착(양성 대조군 `egress-control` 은 `profiles: [control]` 로 기본 기동에서 빠지며, 이를 **쓰는** 검사는 P16 소관이다 — d2a 는 정의와 정적 계약까지만 갖는다) — 모든 앱이 오직 그 네트워크에만 붙음을 **compose 정적 계약**으로 검사하고, `internal: true` 삭제·보조 외부 네트워크 부착을 self-test 가 실패시킨다 ⑥ 인프라 `healthcheck` + 앱 `depends_on: {condition: service_healthy}` ⑦ 매 실행 새 volume(P4 가 판정) ⑧ user-service·gateway 미포함.
 - [x] **P4.** **cold start 판정 (R2 #5 · R3 #4).** `flyway_schema_history` 검사만으로는 warm reuse 를 못 가린다(직전 성공 volume 이 그대로 만족). 그리고 **warm datadir 에서는 `docker-entrypoint-initdb.d` 가 아예 재실행되지 않으므로**(`scripts/mysql-init/01-*.sql:2-4` 가 "첫 부팅 시 실행" 을 명시) "기존 marker 면 init 이 실패" 분기는 **도달하지 않는다.**
   → ① 기동 전 해당 project 의 volume 이 존재하면 실패 ② **E2E 메타데이터 스키마/테이블을 init 단계에서 만들고 현재 `run_id` 를 적는다**(정적 `.sql` 로는 run_id 주입이 불가하므로 **`.sh` init 자산**을 쓴다) ③ **readiness 가 `stored_run_id == current_run_id` 를 검사** — warm volume 은 옛 marker 불일치로 실패한다. 순서는 `스키마 생성 → marker 생성 → 앱/Flyway 시작` 으로 고정하고, marker 테이블은 **Flyway 관리 대상이 아님**을 명시한다(앱 테이블 DDL 은 Flyway 전용이라는 규칙과 구분).
   그 위에 별도 조건으로 4개 DB 의 `flyway_schema_history` **`success=1` 전량 + 최신 버전 적용**(migration 완전성)을 readiness 에 넣는다.
@@ -108,6 +108,7 @@
 - [x] **P7.** **시나리오 B — 예약 실패 체인 (부모 P12 명시 요구).** 재고 부족 seed → runner 가 `POST /api/v1/orders` 호출 → poller 가 `order.created` 발행 → `stock.reservation.result(success=false)` → `orders.status=CANCELLED` + `order.cancelled` payload 의 `reason=RESERVATION_FAILED`(V22) · 예약 원장 잔여 RESERVED 0 · notification 행.
 - [x] **P8.** **시나리오 C — 환불 체인 전구간 (R1 #1).** 트리거 2경로(Product marker · Order 보상 원장) → 요청 토픽 2종 → `payment_refunds` **1행 fence** → **dispatcher 가 stub 호출 → `SUCCEEDED` + `payments.status=REFUNDED`** → `payment.refunded` 회신 → **Order `RESOLVED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED`**. 두 경로 동시 투입에도 1행 수렴.
   **결과 3종 분기**: 4xx → `FAILED` → Order `REFUND_FAILED`+`failure_code` · `APPROVED` 유지 / 타임아웃 → `UNRESOLVED` → **어느 소비자도 전이하지 않음**.
+  **[④-d-2a 실제 범위 — diff 리뷰 #1]** 이 PR 이 실증한 구간은 **요청 2경로 → fence 1행 → dispatcher → stub → `SUCCEEDED` → `payments=REFUNDED` → `payment.refunded` outbox `PUBLISHED`** 까지다. **회신 소비 3곳의 종결**(Order `RESOLVED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED`)과 **결과 3종 분기**는 Order/Product 의 선행 원장 seed 가 필요해 ④-d-2b 로 넘긴다(§9-11). 지금 상태로는 그 세 소비자가 전부 no-op 이어도 시나리오 C 가 통과한다.
 - [x] **P9.** **시나리오 D — DLQ intake (V15).** 역직렬화 불가 레코드 주입 → `.dlq` 경유 → `dead_letter_records` 1행 + 식별자 6컬럼 non-null.
   **중복 판정은 재발행으로 만들 수 없다**(offset 이 달라져 다른 좌표다). **DLQ consumer group 의 offset 을 명시적으로 rewind** 해 같은 DLT 레코드를 재소비시키고, 동일 6컬럼 키에서 새 행 없이 **`attempt_count=2`** 를 본다.
 - [ ] **P10.** **시나리오 격리 (R2 #3 · R3 #5 · N13).** 모든 시나리오에 `scenario_id` 기반 **고유 `orderId`/`eventId`/`paymentKey`** 를 부여하고 **모든 DB 단언을 그 키 + 정확한 consumer group 에 결부**한다.
@@ -257,7 +258,9 @@
 7. **부하·동시성 시나리오 없음** — 단건 체인의 정확성만 본다.
 8. **시나리오 C 는 요청 토픽부터 시작한다** — 트리거 **감지**(Product marker · Order 보상 원장)는 "결제완료가 이미 취소된 주문에 도착" 하는 경합이라 HTTP 로 결정적 재현이 불가능하다(`Payment.ensureConfirmable:181-192` 가 PENDING 아닌 결제의 승인을 거부). 감지 → 요청 발행이 같은 트랜잭션이라는 계약은 ④-c-1b 통합테스트가 덮는다. E2E 가 cross-service 로 증명하는 구간은 **요청 토픽 → fence → PG → 회신 → 3소비자 종결** 이다.
 9. **4종 연속 실행이 불안정하다 (실측)** — 시나리오는 각각 실제 스택에서 통과했고(A 다회 · B 단독/A직후 · C · D), 4종을 한 번에 돌리면 뒤쪽 시나리오가 consumer 지연으로 타임아웃하는 경우가 있다. 관측: 단일 브로커에 group 28개가 붙은 상태에서 `order.created`·`product.updated` 소비가 수십 초~수 분 지연. 완화로 **자동생성 토픽 1파티션 고정 · 앱 순차 기동 · 시나리오 상한 180s** 를 넣었으나 제거하지 못했다. 근본 대응은 **P10(시나리오 격리)·P19(실행 예산)** 이며 후속 PR 소관이다.
-10. **시나리오 D 의 `attempt_count=2` 미검증** — 재발행은 offset 이 달라져 다른 좌표가 되므로(V15) DLQ consumer group offset rewind 가 필요하고, 그건 실행 중 group 을 멈춰야 해서 다른 시나리오와 간섭한다. 1행 + 식별자 6컬럼 non-null 까지만 본다.
+10. **환불 회신 소비 3곳의 종결 미실증** — 시나리오 C 는 `payment.refunded` 발행까지만 본다. Order `RESOLVED`/`REFUND_FAILED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED` 와 결과 3종 분기(4xx·타임아웃)는 선행 원장 seed 가 필요해 ④-d-2b 소관이다. 계약 자체는 ④-c-1b 통합테스트가 덮는다.
+11. **stub ledger 계약을 성공 script 에만 적용** — `POST×1`+Idempotency-Key 는 단언하나 transient 소진 `POST×3` · `ALREADY` `POST→GET` · reconciliation `GET×1,POST×0` 는 미실행(계획 P2 의 순서 계약 일부). ④-d-2b.
+12. **시나리오 D 의 `attempt_count=2` 미검증** — 재발행은 offset 이 달라져 다른 좌표가 되므로(V15) DLQ consumer group offset rewind 가 필요하고, 그건 실행 중 group 을 멈춰야 해서 다른 시나리오와 간섭한다. 1행 + 식별자 6컬럼 non-null 까지만 본다.
 
 ## 10. 정정 이력
 

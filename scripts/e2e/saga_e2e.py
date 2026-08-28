@@ -51,6 +51,10 @@ DLQ_INTAKE_GROUPS = [
     "order-svc-dlq-group", "product-svc-dlq-group",
     "payment-svc-dlq-group", "notification-svc-dlq-group",
 ]
+# 서비스별 기대 migration 수. runner 는 소스 트리를 마운트하지 않으므로 상수로 둔다 —
+# 값이 바뀌면 readiness 가 먼저 실패해서 갱신 지점을 알려준다.
+EXPECTED_MIGRATIONS = {"order": 6, "product": 5, "payment": 5, "notification": 3}
+
 DLQ_QUARANTINE_GROUPS = [
     "order-svc-dlq-quarantine-group", "product-svc-dlq-quarantine-group",
     "payment-svc-dlq-quarantine-group",
@@ -160,6 +164,12 @@ def check_readiness():
             raise AssertionError("%s: 실패한 migration %d건" % (svc, by[0]))
         if not by.get(1):
             raise AssertionError("%s: 적용된 migration 이 없다" % svc)
+        # "성공 행이 하나라도 있다" 로는 **최신 migration 누락**을 못 잡는다 —
+        # 시나리오가 그 스키마를 우연히 안 건드리면 끝까지 드러나지 않는다.
+        expected = EXPECTED_MIGRATIONS[svc]
+        if by[1] != expected:
+            raise AssertionError("%s: 성공 migration %d건 (기대 %d) — 최신 누락 의심"
+                                 % (svc, by[1], expected))
         flyway[svc] = by[1]
     result["flyway_applied"] = flyway
 
@@ -413,7 +423,8 @@ def scenario_b():
     stock.reservation.result(success=false) → 주문 취소까지 본다."""
     sid = "b"
     user_id = 200
-    product_id = create_product(sid, price=10000, stock=1)
+    initial_stock = 1
+    product_id = create_product(sid, price=10000, stock=initial_stock)
     wait_price_cached(product_id)
 
     # 장바구니에 재고보다 많이 담는다 — 예약이 실패해야 하는 조건
@@ -425,12 +436,22 @@ def scenario_b():
             "SELECT status FROM orders WHERE id = %s AND status = 'CANCELLED'", (order_id,))
     )[0]["status"]
 
-    row = wait_for("order.cancelled outbox",
-                   lambda: outbox_payload("order", "order.cancelled", order_id))
+    row = wait_for("order.cancelled outbox PUBLISHED",
+                   lambda: (lambda r: r if r and r["status"] == "PUBLISHED" else None)(
+                       outbox_payload("order", "order.cancelled", order_id)))
     reason = envelope_payload(row["payload"]).get("reason")
     if reason != "RESERVATION_FAILED":
         raise AssertionError("order.cancelled reason=%r (기대 RESERVATION_FAILED)" % reason)
     evidence["cancel_reason"] = reason
+    evidence["order_cancelled_outbox"] = row["status"]
+
+    # 예약 실패도 사용자에게 알려야 한다. 소비가 no-op 이어도 통과하면 안 된다.
+    evidence["notification_rows"] = wait_for(
+        "notification 알림 행 user=%s" % user_id,
+        lambda: nonzero(query("notification",
+                              "SELECT COUNT(*) AS c FROM notifications WHERE user_id = %s",
+                              (user_id,)))
+    )[0]["c"]
 
     held = query("product",
                  "SELECT COUNT(*) AS c FROM stock_reservations "
@@ -439,8 +460,12 @@ def scenario_b():
         raise AssertionError("예약 원장에 RESERVED 가 %d건 남았다" % held)
     evidence["reserved_remaining"] = held
 
-    evidence["stock_intact"] = query(
-        "product", "SELECT stock FROM inventories WHERE product_id = %s", (product_id,))[0]["stock"]
+    # 조회값을 evidence 에 담기만 하면 재고 불변식이 깨져도 통과한다 — 기대값과 비교한다.
+    stock = query("product", "SELECT stock FROM inventories WHERE product_id = %s",
+                  (product_id,))[0]["stock"]
+    if stock != initial_stock:
+        raise AssertionError("예약 실패인데 재고가 변했다 — %d (기대 %d)" % (stock, initial_stock))
+    evidence["stock_intact"] = stock
     return evidence
 
 
@@ -564,7 +589,11 @@ def scenario_d():
                         " origin_offset, failed_consumer_group, status, attempt_count"
                         " FROM dead_letter_records WHERE origin_topic = 'payment.failed'"),
                     120)
+    if len(rows) != 1:
+        raise AssertionError("dead_letter_records 가 %d행 — 좌표 1건은 1행이어야 한다" % len(rows))
     row = rows[0]
+    if row["attempt_count"] != 1:
+        raise AssertionError("최초 적재의 attempt_count=%r (기대 1)" % row["attempt_count"])
     for col in ("cluster_id", "topic_generation", "origin_topic", "origin_partition",
                 "origin_offset", "failed_consumer_group"):
         if row[col] is None:

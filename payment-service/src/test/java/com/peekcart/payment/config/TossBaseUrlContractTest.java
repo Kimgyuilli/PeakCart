@@ -1,7 +1,17 @@
 package com.peekcart.payment.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.peekcart.payment.infrastructure.toss.TossPaymentClient;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
+import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.net.URI;
@@ -74,5 +84,86 @@ class TossBaseUrlContractTest {
     @DisplayName("[SAGA-P1-BASEURL-OWN] local 프로파일은 명시 endpoint 를 갖는다 — 어느 환경도 sentinel 에 의존하지 않는다")
     void localProfileDeclaresEndpoint() throws IOException {
         assertThat(declaration("application-local.yml")).isEqualTo("https://api.tosspayments.com/v1");
+    }
+
+    /**
+     * YAML 문자열 검사는 <b>선언</b>만 본다 — 프로파일 병합·placeholder 해석·빈 생성 경로가
+     * 바뀌어도 통과한다. 실제 해석 결과를 컨텍스트로 확인한다(리뷰 #6).
+     */
+    @Nested
+    @DisplayName("[SAGA-P1-BASEURL-BOOT] 해석 결과")
+    class Resolution {
+
+        /** ConfigData 초기화를 붙여 **실제 application.yml + 프로파일 병합**을 태운다. */
+        private final ApplicationContextRunner runner = new ApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withUserConfiguration(PlaceholderSupport.class, ClientOnly.class);
+
+        /**
+         * <b>base 의 기본 활성 프로파일은 {@code local} 이다</b>({@code spring.profiles.active: local}).
+         * 따라서 아무 것도 지정하지 않고 뜨면 sentinel 이 아니라 <b>local 의 운영 URL</b> 이 이긴다 —
+         * 이건 로컬 개발자가 테스트 키로 Toss sandbox 를 쓰는 의도된 동작이다.
+         * sentinel 은 "local 도 k8s 도 아닌 프로파일에서 base-url 을 안 준 경우" 의 안전망이다.
+         * 이 사실을 테스트가 잡아냈다(초안은 sentinel 이 기본이라고 잘못 적었다).
+         */
+        @Test
+        @DisplayName("[SAGA-P1-BASEURL-BOOT] 기본 활성 프로파일 local 에서는 local 의 endpoint 가 이긴다")
+        void defaultProfileIsLocal() {
+            runner.run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getEnvironment().getProperty("toss.payments.base-url"))
+                        .isEqualTo("https://api.tosspayments.com/v1");
+            });
+        }
+
+        @Test
+        @DisplayName("[SAGA-P1-BASEURL-BOOT] base-url 을 주지 않는 프로파일에서는 도달 불가 sentinel 이 해석된다")
+        void unknownProfile_resolvesSentinel() {
+            runner.withPropertyValues("spring.profiles.active=e2e-unknown")
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        assertThat(context.getEnvironment().getProperty("toss.payments.base-url"))
+                                .isEqualTo("http://localhost:9/toss-base-url-not-configured");
+                    });
+        }
+
+        @Test
+        @DisplayName("[SAGA-P1-BASEURL-BOOT] k8s 프로파일에서 TOSS_BASE_URL 미주입이면 부팅이 실패한다")
+        void k8sProfileWithoutEnv_failsFast() {
+            runner.withPropertyValues("spring.profiles.active=k8s",
+                            "TOSS_SECRET_KEY=x", "TOSS_WEBHOOK_SECRET=y")
+                    .run(context -> assertThat(context).hasFailed());
+        }
+
+        @Test
+        @DisplayName("[SAGA-P1-BASEURL-BOOT] k8s 프로파일에 값을 주면 그 값이 해석된다 — 앞 검사가 다른 이유로 실패한 게 아니다")
+        void k8sProfileWithEnv_resolves() {
+            runner.withPropertyValues("spring.profiles.active=k8s",
+                            "TOSS_SECRET_KEY=x", "TOSS_WEBHOOK_SECRET=y",
+                            "TOSS_BASE_URL=http://pg-stub:8080/v1")
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        assertThat(context.getEnvironment().getProperty("toss.payments.base-url"))
+                                .isEqualTo("http://pg-stub:8080/v1");
+                    });
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class PlaceholderSupport {
+        @Bean
+        static PropertySourcesPlaceholderConfigurer placeholders() {
+            return new PropertySourcesPlaceholderConfigurer();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class ClientOnly {
+        @Bean
+        TossPaymentClient tossPaymentClient(
+                @Value("${toss.payments.secret-key}") String secretKey,
+                @Value("${toss.payments.base-url}") String baseUrl) {
+            return new TossPaymentClient(secretKey, baseUrl, RestClient.builder(), new ObjectMapper());
+        }
     }
 }

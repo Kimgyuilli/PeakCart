@@ -169,8 +169,10 @@ services:
       # UnknownHostException 으로 막았다. 격리가 없었으면 실 PG 로 나갔을 것이다).
       TOSS_PAYMENTS_BASE_URL: http://pg-stub:8080/v1
       TOSS_SECRET_KEY: e2e_sk_stub
+      # dispatcher 주기만 줄인다. 환불 체인이 시나리오 상한 안에 끝나야 하기 때문이다.
+      # reconcile 은 건드리지 않는다 — lockAtLeastFor=PT30S 라 5초를 줘도 실제 발화 주기가
+      # 그렇게 되지 않아 값이 거짓말을 한다(diff 리뷰 #8). 주기 override 의 계약화는 P19.
       APP_REFUND_DISPATCH_INTERVAL_MS: "2000"
-      APP_REFUND_RECONCILE_INTERVAL_MS: "5000"
 
   notification-service:
     <<: *app-common

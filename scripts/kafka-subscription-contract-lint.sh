@@ -148,8 +148,11 @@ for module, svc in SERVICES.items():
         violations.append("%s: DLQ intake listener 가 정확히 1개여야 한다 (현재 %d)" % (module, len(intake)))
     else:
         (expr, topics), = intake.items()
-        if not expr.startswith("DlqTopology."):
-            violations.append("%s: DLQ intake group 이 DlqTopology 상수 참조가 아니다 (%s)" % (module, expr))
+        # 접두사만 보면 order 와 product 가 **서로의 상수를 바꿔 써도** 통과한다.
+        # 서비스별 정확한 상수명으로 동등 비교한다.
+        want = "DlqTopology.%s_DLQ_GROUP" % svc
+        if expr != want:
+            violations.append("%s: DLQ intake group 이 %s 가 아니다 (%s)" % (module, want, expr))
         expected_topics = {t + ".dlq" for t, _ in expected}
         if topics != expected_topics:
             violations.append("%s: DLQ intake 구독 토픽 불일치 — 누락 %s / 초과 %s"
@@ -165,8 +168,9 @@ for module, svc in SERVICES.items():
             violations.append("%s: quarantine listener 가 정확히 1개여야 한다 (현재 %d)" % (module, len(quarantine)))
         else:
             (expr, topics), = quarantine.items()
-            if not expr.startswith("DlqTopology."):
-                violations.append("%s: quarantine group 이 DlqTopology 상수 참조가 아니다 (%s)" % (module, expr))
+            want_q = "DlqTopology.%s_DLQ_QUARANTINE_GROUP" % svc
+            if expr != want_q:
+                violations.append("%s: quarantine group 이 %s 가 아니다 (%s)" % (module, want_q, expr))
             if topics != q_expected:
                 violations.append("%s: quarantine 구독 토픽 불일치 — 누락 %s / 초과 %s"
                                   % (module, sorted(q_expected - topics), sorted(topics - q_expected)))
@@ -231,6 +235,16 @@ if [[ "${1:-}" == "--self-test" ]]; then
   check "DLQ intake group 을 literal 로 되돌림"
 
   seed
+  perl -0pi -e 's/groupId = DlqTopology\.ORDER_DLQ_GROUP/groupId = DlqTopology.PRODUCT_DLQ_GROUP/' \
+    "$TMP/repo/order-service/src/main/java/com/peekcart/global/deadletter/DeadLetterConsumer.java"
+  check "DLQ intake 상수를 다른 서비스 것으로 교환"
+
+  seed
+  perl -0pi -e 's/groupId = DlqTopology\.PAYMENT_DLQ_QUARANTINE_GROUP/groupId = DlqTopology.ORDER_DLQ_QUARANTINE_GROUP/' \
+    "$TMP/repo/payment-service/src/main/java/com/peekcart/global/deadletter/DeadLetterQuarantineConsumer.java"
+  check "quarantine 상수를 다른 서비스 것으로 교환"
+
+  seed
   perl -0pi -e 's/"product\.updated\.dlq",?\n//' \
     "$TMP/repo/order-service/src/main/java/com/peekcart/global/deadletter/DeadLetterConsumer.java"
   check "DLQ intake 구독 토픽 1개 누락"
@@ -255,7 +269,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
   fi
 
   if [[ $fails -gt 0 ]]; then echo "self-test 실패 ${fails}건"; exit 1; fi
-  echo "self-test 통과 (7종)"
+  echo "self-test 통과 (9종)"
   exit 0
 fi
 

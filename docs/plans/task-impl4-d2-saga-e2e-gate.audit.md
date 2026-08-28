@@ -106,15 +106,31 @@
   **C 통과** · **D 통과**(`rows=1`, `attempt_count=1`)
 - **4종 연속 실행은 여전히 불안정** — 이번에도 C 직후 D 가 타임아웃했고 단독 재실행은 통과했다(§9-9)
 
-## 2026-08-29 — diff 리뷰 라운드 3: **미실행 (Codex 사용량 한도)**
-- `codex exec` 가 `You've hit your usage limit` 로 종료해 3라운드를 받지 못했다. **수렴 판정 없음.**
-- 대신 R3 프롬프트에서 "의심하라" 고 지정했던 5개 지점을 **직접 점검**했다:
+## 2026-08-29 — diff 리뷰 라운드 3 (1차 시도: Codex 사용량 한도로 미실행 → 한도 해제 후 재실행)
+- 1차 시도는 `You've hit your usage limit` 로 종료했다. 그 사이 R3 프롬프트에서 "의심하라" 고 지정했던 5개 지점을 **직접 점검**했다:
   - (a) `stripAmbientBaseUrl` 부작용 — 평범한 `MapPropertySource` 로 교체하면 **환경변수 완화 매핑이 사라져** 다른 프로퍼티 해석까지 바뀐다 → `SystemEnvironmentPropertySource` 로 복원. unchecked cast 도 제거
   - (b) 스위치 제거 후 죽은 코드 — `dispatchEnabled`/`reconcileEnabled`/`@ConditionalOnProperty` 잔존 0, `@Scheduled`/`@SchedulerLock` import 는 정상 유지
   - (c) quarantine null 분기 — `PeekcartService` 4값 전부 매핑이 있어 현재는 안전하나, **서비스 추가 시 조용한 NPE** 가 되므로 "모든 서비스가 소유 매핑을 갖는다" 계약 테스트를 추가
   - (d) type 키잉 ↔ `NotificationType` — `PAYMENT_FAILED`/`ORDER_CANCELLED` 실재 확인. 시나리오 A 는 `order.cancelled(reason=PAYMENT_FAILED)` 를 Notification 이 스킵하므로(④-b) `PAYMENT_FAILED` 키잉이 유일하게 의미 있는 조건이고, B(user 200)와 사용자도 다르다
   - (e) 계획서 정합 — §6 완료 조건이 ④-d-2 **전체**의 것이라 분할 주석을 추가
-- **남은 위험**: 2R 수정이 만든 결함을 제3자 리뷰로 확인하지 못했다. ④-d-2b 착수 시 **이 diff 를 포함해** 1라운드를 먼저 돌린다.
+### 라운드 3 (재실행)
+- 항목: 4건 (P0:0, P1:1, P2:3) · 처리: 반영 4건 / 기각 0건
+- **3R 수정이 만든 새 결함 1건 (P1)**: 앰비언트 환경 격리를 `SystemEnvironmentPropertySource` 로 복원하자
+  **완화 매핑 때문에 `TOSS_PAYMENTS_BASE_URL` 이 다시 유입**됐다 — 하필 **E2E compose 가 쓰는 이름**이다.
+  리뷰어가 `TOSS_PAYMENTS_BASE_URL=http://ambient-relaxed.example:8888` 로 재현해 Resolution 5건 중 4건 실패.
+  → 이름 열거를 버리고 **정규화 키**(대문자·`_`·`.`·`-` 제거) 비교로 교체하고 `systemProperties` 도 함께 거른다.
+  같은 재현 조건 + `-Dtoss.payments.base-url=...` 으로 재실행해 통과 확인.
+- 문서 정합 3건: 영향 파일 표가 폐기된 스위치를 여전히 지시 · 상단 "이 PR 이 ④ 를 종결" 이 §6 분할과 충돌 ·
+  §9-5 가 "HTTP 표면을 지나지 않는다" 로 적혀 있으나 실제로는 진입점을 지난다(미검증은 gateway/`SIGNED_ONLY`) ·
+  §9-8 종점을 `payment.refunded` outbox 까지로 정정 · `TossPaymentClient` Javadoc 의 "기본값이 없다" 정정
+- **확인된 것**: A/B 의 `type`+`user` 조합은 겹치지 않는다 · DLQ 상수 **리터럴 값 교환**은 `PeekcartService`
+  정본 대조에서 실제로 실패한다(2R #3 수정이 유효)
+- raw: `.cache/codex-reviews/diff-d2a-r3.json`
+
+### 수렴 판정
+- 3라운드에서 **P0 0 · P1 1**(그 1건도 3R 수정이 만든 것) → 상한 3회 도달로 종료. **P1 = 0 은 아니다.**
+- 남은 위험: 3R 수정(정규화 키 필터·문서 정정)을 제3자 리뷰로 확인하지 못했다.
+  ④-d-2b 착수 시 **이 diff 를 포함해** 1라운드를 먼저 돌린다.
 
 ### 최종 검증 (2026-08-29)
 - `./gradlew test` **BUILD SUCCESSFUL** (21m 12s) · **813 테스트 0 실패**

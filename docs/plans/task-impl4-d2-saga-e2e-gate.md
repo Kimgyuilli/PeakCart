@@ -3,7 +3,7 @@
 > 부모 계획: `docs/plans/task-impl4-choreography-saga.md` **P12 · P14 · P15**
 > 형제: ④-d-1 (P11 관측성) — `task-impl4-d1-saga-metrics.md`, ✅ [#91](https://github.com/Kimgyuilli/PeakCart/pull/91)
 > 리뷰 이력: `task-impl4-d1-saga-metrics.audit.md` (d-1/d-2 공통) · `task-impl4-d2-saga-e2e-gate.audit.md`
-> **이 PR 이 구현 ④ 를 종결한다.**
+> **④-d-2 전체가 끝나면 구현 ④ 가 종결된다.** 이 문서는 두 PR 의 공통 스펙이며, **④-d-2a 는 P1~P9 까지**다 — ④ 종결은 ④-d-2b(P20) 소관이다(§6 분할 주석).
 > 이전 판(2026-08-26 "범위 정의")은 §9 에 정정 이력으로 보존한다.
 
 ---
@@ -147,7 +147,7 @@
 
 | 경로 | 처분 |
 |---|---|
-| `payment-service/.../RefundProperties.java` · `RefundDispatcher.java` · `RefundReconciliationScheduler.java` | 수정 — enabled 프로퍼티 + `@ConditionalOnProperty` |
+| ~~`RefundProperties.java` · `RefundDispatcher.java` · `RefundReconciliationScheduler.java`~~ | **변경 없음** — enabled 스위치는 diff 리뷰 2R #4 로 폐기했다(P1 참조). 두 스케줄러는 상시 배선을 유지한다 |
 | `payment-service/.../toss/TossPaymentClient.java` | 수정 — baseUrl 리터럴 제거 |
 | `payment-service/src/main/resources/application.yml` · `application-k8s.yml` · `application-local.yml` | 수정 — `base-url` 주입 (P1) |
 | `docker-compose.e2e.yml` | **신설** (P3) |
@@ -263,10 +263,10 @@
 3. **매트릭스 lint 는 "테스트가 옳은가" 를 못 본다** — 실행 여부와 `expected` 대조까지다. 구조적 한계.
 4. **PG stub 은 Toss 가 아니다** — 계약 형태만 흉내낸다. 실 API 스펙 변경·실호출 reconciliation 은 **D-020** 소관이며, 이 PR 은 `base-url` 설정화까지만 흡수한다.
 4b. **시나리오는 한 stack 을 공유한다** — 시나리오별 새 stack 이 가장 안전하지만 실행 예산(P19) 때문에 실행 순서 계약 + 키 기반 판정(P10)으로 대체했다.
-5. **E2E 가 HTTP 표면을 지나지 않는다** (V11) — gateway 인증·내부 토큰·user-service 는 이 경로에서 검증되지 않는다(구현 ③ GKE smoke 소관). 도메인 전이 **진입점**(주문 생성·결제 승인 API)도 우회되며, 시작 이벤트는 outbox 경유이지 API 호출이 아니다.
+5. **gateway 인증 경로는 미검증** — E2E 는 실제 HTTP 진입점(`/api/v1/cart/items`·`/api/v1/orders`·`/api/v1/payments/confirm`)을 **지난다**. 다만 `DUAL_ACCEPT` 평문 헤더를 쓰므로 **gateway 서명 내부 토큰과 `SIGNED_ONLY` 는 검증되지 않는다**(구현 ③ GKE smoke 소관). user-service 도 미포함이다.
 6. **user-service·gateway 는 E2E 에서 제외** — saga 체인에 참여하지 않는다.
 7. **부하·동시성 시나리오 없음** — 단건 체인의 정확성만 본다.
-8. **시나리오 C 는 요청 토픽부터 시작한다** — 트리거 **감지**(Product marker · Order 보상 원장)는 "결제완료가 이미 취소된 주문에 도착" 하는 경합이라 HTTP 로 결정적 재현이 불가능하다(`Payment.ensureConfirmable:181-192` 가 PENDING 아닌 결제의 승인을 거부). 감지 → 요청 발행이 같은 트랜잭션이라는 계약은 ④-c-1b 통합테스트가 덮는다. E2E 가 cross-service 로 증명하는 구간은 **요청 토픽 → fence → PG → 회신 → 3소비자 종결** 이다.
+8. **시나리오 C 는 요청 토픽부터 시작한다** — 트리거 **감지**(Product marker · Order 보상 원장)는 "결제완료가 이미 취소된 주문에 도착" 하는 경합이라 HTTP 로 결정적 재현이 불가능하다(`Payment.ensureConfirmable:181-192` 가 PENDING 아닌 결제의 승인을 거부). 감지 → 요청 발행이 같은 트랜잭션이라는 계약은 ④-c-1b 통합테스트가 덮는다. E2E 가 cross-service 로 증명하는 구간은 **요청 토픽 → fence → dispatcher → PG(stub) → `payment.refunded` outbox `PUBLISHED`** 까지다. 회신 소비 3곳의 종결은 §9-10 대로 미충족이다.
 9. **4종 연속 실행이 불안정하다 (실측)** — 시나리오는 각각 실제 스택에서 통과했고(A 다회 · B 단독/A직후 · C · D), 4종을 한 번에 돌리면 뒤쪽 시나리오가 consumer 지연으로 타임아웃하는 경우가 있다. 관측: 단일 브로커에 group 28개가 붙은 상태에서 `order.created`·`product.updated` 소비가 수십 초~수 분 지연. 완화로 **자동생성 토픽 1파티션 고정 · 앱 순차 기동 · 시나리오 상한 180s** 를 넣었으나 제거하지 못했다. 근본 대응은 **P10(시나리오 격리)·P19(실행 예산)** 이며 후속 PR 소관이다.
 10. **환불 회신 소비 3곳의 종결 미실증** — 시나리오 C 는 `payment.refunded` 발행까지만 본다. Order `RESOLVED`/`REFUND_FAILED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED` 와 결과 3종 분기(4xx·타임아웃)는 선행 원장 seed 가 필요해 ④-d-2b 소관이다. 계약 자체는 ④-c-1b 통합테스트가 덮는다.
 11. **운영 kill switch 없음(의도)** — 환불 스케줄러를 끄는 프로퍼티는 만들지 않았다. 필요하다면 ADR + readiness/경보 계약을 먼저 세운 뒤 별도로 도입한다.

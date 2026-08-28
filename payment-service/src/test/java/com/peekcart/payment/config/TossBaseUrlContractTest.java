@@ -14,6 +14,7 @@ import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.web.client.RestClient;
 
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.StandardEnvironment;
@@ -21,7 +22,9 @@ import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -161,20 +164,47 @@ class TossBaseUrlContractTest {
         }
     }
 
+    /**
+     * 실행 환경의 base-url 관련 값을 컨텍스트에서 걷어낸다.
+     *
+     * <p><b>이름을 열거하면 새는다.</b> 완화 매핑(relaxed binding) 때문에 {@code TOSS_BASE_URL} 만
+     * 지워도 {@code TOSS_PAYMENTS_BASE_URL} 이 {@code toss.payments.base-url} 로 해석돼 그대로 들어온다
+     * — 하필 E2E compose 가 쓰는 이름이다(3R #1 이 실제로 재현). 그래서 <b>정규화한 키</b>로 비교한다.
+     *
+     * <p>{@code systemProperties} 도 함께 거른다. {@code JAVA_TOOL_OPTIONS=-Dtoss.payments.base-url=...}
+     * 로도 같은 오염이 생긴다.
+     */
     private static void stripAmbientBaseUrl(ConfigurableApplicationContext context) {
         MutablePropertySources sources = context.getEnvironment().getPropertySources();
-        String name = StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME;
+        stripFrom(sources, StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, true);
+        stripFrom(sources, StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, false);
+    }
+
+    /** 대문자·구분자를 지운 형태. {@code TOSS_PAYMENTS_BASE_URL} 과 {@code toss.payments.base-url} 이 같아진다. */
+    private static String canonical(String key) {
+        return key.toLowerCase(Locale.ROOT).replace("_", "").replace(".", "").replace("-", "");
+    }
+
+    private static final Set<String> BASE_URL_ALIASES =
+            Set.of(canonical("toss.payments.base-url"), canonical("toss.base.url"));
+
+    private static void stripFrom(MutablePropertySources sources, String name, boolean systemEnvironment) {
         PropertySource<?> original = sources.get(name);
         if (original == null) {
             return;
         }
-        Map<String, Object> copy = new HashMap<>(((Map<?, ?>) original.getSource()).entrySet().stream()
-                .collect(HashMap::new, (m, e) -> m.put(String.valueOf(e.getKey()), e.getValue()), HashMap::putAll));
-        copy.remove("TOSS_BASE_URL");
-        copy.remove("toss.payments.base-url");
-        // SystemEnvironmentPropertySource 로 되돌린다 — 평범한 MapPropertySource 로 교체하면
-        // 환경변수 이름 완화 매핑(TOSS_X ↔ toss.x)이 사라져 다른 프로퍼티 해석까지 바뀐다.
-        sources.replace(name, new SystemEnvironmentPropertySource(name, copy));
+        Map<String, Object> copy = new HashMap<>();
+        ((Map<?, ?>) original.getSource()).forEach((k, v) -> {
+            String key = String.valueOf(k);
+            if (!BASE_URL_ALIASES.contains(canonical(key))) {
+                copy.put(key, v);
+            }
+        });
+        // systemEnvironment 는 SystemEnvironmentPropertySource 로 되돌린다 — 평범한 MapPropertySource
+        // 로 바꾸면 완화 매핑이 사라져 **다른** 프로퍼티 해석까지 달라진다.
+        sources.replace(name, systemEnvironment
+                ? new SystemEnvironmentPropertySource(name, copy)
+                : new MapPropertySource(name, copy));
     }
 
     @Configuration(proxyBeanMethods = false)

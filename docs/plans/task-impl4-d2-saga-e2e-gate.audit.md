@@ -137,3 +137,9 @@
 - lint **13종** 그린 — 신규 `e2e-network-contract`(self-test 9) · `kafka-subscription-contract`(self-test 9) + 기존 11종, pg-stub self-test 19
 - `TOSS_BASE_URL` 앰비언트 주입 상태에서도 계약 테스트 통과(환경 격리)
 - E2E: **A · B · C · D 각각 통과**(강화된 단언). **4종 연속 실행은 불안정**(§9-9)
+
+## 2026-08-29 — /done applied (PR https://github.com/Kimgyuilli/PeekCart/pull/92)
+- `docs/TASKS.md` 구현 ④ 행: **④-d-2a ✅ #92** 등재 + ④-d-2b 🔲 대기(P10~P20 + ④ 종결, 착수 시 #92 diff 포함 재리뷰 선행). ④ 자체는 **🔄 유지** — 종결은 d-2b 소관
+- `docs/progress/PHASE4.md`: ④-d-2a 이력 추가(분할 근거·설계 2회 뒤집힘·정본 복제 3건 중 1건 놓침·실행이 반증한 전제·리뷰 3라운드·미충족 5건)
+- **ADR**: 신규/상태 전환 없음 — 이 PR 은 새 아키텍처 결정을 만들지 않았다. `base-url` 소유는 ADR-0007 기존 결정의 적용이고, 스위치 폐기는 ADR-0018 을 **따른** 것이다
+- **Layer 1(01~07) 동기화**: 계획 P20 소관이라 **④-d-2b 로 이연**(이 PR 범위 밖)

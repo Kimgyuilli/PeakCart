@@ -1059,3 +1059,47 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 4. Grafana 대시보드 패널 · 토픽별 DLQ 분해 메트릭(카디널리티 이유로 의도적 제외)
 
 **다음**: ④-d-2(선결 D1~D8 — 특히 `RefundDispatcher` 비활성화 프로퍼티가 없어 E2E 가 CI 에서 실제 Toss 운영 API 를 호출하는 문제) → ④ 종결.
+
+---
+
+## 구현 ④ Choreography Saga — ④-d-2a: cross-service saga E2E 하네스 — 2026-08-28 — [#92](https://github.com/Kimgyuilli/PeekCart/pull/92)
+
+> 부모 P12. **④-d-2 는 계획 리뷰 3라운드(13→11→12건) 후 사용자 승인으로 2a/2b 로 분할**했다.
+> **이 PR 은 ④ 를 종결하지 않는다** — 종결은 ④-d-2b(P20) 소관이다.
+
+**분할 근거는 규모와 "실행 없이 완료 선언 불가" 다.** 계획이 P1~P20 이고 P1~P9 만으로 이미 2600줄이었다. 더 중요한 건, 시나리오를 **한 번도 실행하지 않은 상태**로 "cross-service E2E 를 세웠다" 고 보고하면 이 프로젝트가 반복해 겪은 false-green 그 자체가 된다는 점이었다. 그래서 2a 의 완료 조건에 **실제 스택 실행 증적**을 넣었다.
+
+### 설계가 두 번 뒤집혔다
+
+**seed runner 는 애초에 성립하지 않았다.** 계획 리뷰 3R 이 "E2E 전용 runner 를 운영 bootJar 에 넣지 말라" 고 했는데, 그러면 **컨테이너 안에서 실행될 수 없다**(컨테이너는 bootJar 를 돈다). main 에 넣으면 인증·업무 진입점을 우회하는 발행 스위치가 된다 — **두 선택지가 모두 막혀 있었다.** 대신 `app.internal-token.mode=DUAL_ACCEPT`(기존 운영 지원 전환기 모드)로 4서비스를 띄우고 runner 가 평문 `X-User-*` 로 **진짜 컨트롤러**를 호출한다. 새 운영 코드 0·새 모듈 0·새 스위치 0이면서 컨트롤러→도메인 전이→publisher 직렬화→outbox→poller 를 전부 지난다. 시나리오 A 의 `payment.failed` 는 합성이 아니라 stub 의 승인 5xx 로 `PaymentCommandService:58-62` 의 catch 가 실제로 발행한 것이다.
+
+**계획이 요구한 kill switch 는 폐기했다.** `dispatch-enabled`/`reconcile-enabled` 를 만든 이유는 "E2E 에서 PG 호출 표면을 끈다" 였는데, stub + `internal: true` 로 설계가 바뀌면서 **E2E 는 두 잡을 켠 채 돌린다**(환불 체인 전구간이 시나리오 C 의 대상이므로 꺼서는 안 된다). 즉 **아무도 쓰지 않는데** 환경변수 하나로 운영 스케줄러 빈을 조용히 없애는 위험만 남았다 — ADR-0018 은 dispatcher/reconciliation 을 미결 환불 수렴의 필수 구성요소로 규정한다. 오설정 시 health 는 정상인 채 `REQUESTED`/`CLAIMED`/`UNRESOLVED` 가 영구 적체된다.
+
+### 정본 복제를 두 번 피했고, 한 번은 놓쳤다
+
+업무 구독 21쌍은 **`DlqTopology` 에서 유도**한다 — 별도 상수로 복제하면 정본이 둘이 되고 양쪽을 함께 잘못 고치면 각자의 자기대조가 모두 통과한다. 그런데 **DLQ listener group 은 `PeekcartService.dlqListenerGroup()` 이 이미 정본이었는데** 내가 `DlqTopology` 에 상수를 신설해 중복 정본을 만들었다(diff 2R #3 이 지적). annotation 이 컴파일 상수를 요구해 상수 자체는 남기되, **전 enum 정합 계약 테스트**로 묶었다. 리터럴 값만 교환해도 잡힌다.
+
+### 실행이 전제를 계속 반증했다
+
+시나리오를 실제로 돌리기 전까지는 전부 추정이었다. 실행이 잡아낸 11건은 **전부 하네스 오류**였고 운영 코드 결함은 0이다: `categories`/`payments` seed SQL 컬럼 · 장바구니 응답 201 · **envelope 필드가 `data` 가 아니라 `payload`**(조용한 fallback 이 `reason=None` 을 만들어 계약 위반처럼 보이게 했다) · `dead_letter_records.origin_topic` 은 `.dlq` 가 아니라 원본 토픽 · **`wait_price_cached` 가 group 이름만 보고 앞 시나리오 행으로 즉시 통과**(계획 R2 #3 이 경고한 오염이 실제로 발생) · **가드 거부(`PAY-008`)와 PG 실패(`PAY-005`)를 구분하지 못했다**(전자는 Toss 를 부르지도 않아 `payment.failed` 가 없다).
+
+**하나는 유익한 부작용이었다.** `TOSS_BASE_URL` 이 `application-local.yml` 의 리터럴을 못 이겨 dispatcher 가 실제로 `api.tosspayments.com` 을 호출했고, **`internal: true` 가 `UnknownHostException` 으로 막았다.** 격리가 없었으면 CI 러너가 실 PG 로 나갔을 것이다 — 네트워크 수준 차단(N2)의 라이브 증거다.
+
+**환경 튜닝 3건도 실측으로 나왔다**: 자동생성 토픽 3파티션 × 20토픽 × 28 group 의 메타데이터 부하로 소비가 **3분 지연** → 1파티션 고정 / 4 JVM 동시 기동이 360s healthcheck 창을 넘김 → **순차 기동** / `docker compose down` 이 `E2E_RUN_ID` 를 요구해 **정리 절차가 실패**, 잔여 스택 13개가 이후 실행과 자원을 다퉜다.
+
+### diff 리뷰 3라운드 19건 전량 반영 (10 → 5 → 4)
+
+**매 라운드가 직전 수정의 결함을 잡았다.** 2R 5건 중 3건이 1R 수정이 남긴 false-green이고, **3R 의 P1 1건은 3R 수정 자신이 만든 것**이다 — 앰비언트 환경 격리를 `SystemEnvironmentPropertySource` 로 복원하자 **완화 매핑 때문에 `TOSS_PAYMENTS_BASE_URL` 이 재유입**됐다. 하필 E2E compose 가 쓰는 이름이라, 그 변수를 export 한 개발자 환경에서 계약 테스트 5건 중 4건이 깨진다(리뷰어가 재현). 이름 열거를 버리고 **정규화 키** 비교로 교체했다.
+
+1R 에서 추가한 알림 대기가 2R 에서 **여전히 vacuous** 로 판정된 것도 같은 패턴이다 — A 의 `user=100` 은 배제했지만 **B 자신의 `order.created` 가 만든 `ORDER_CREATED` 행**이 조건을 만족시켰다. `type` 으로 키잉해 해소했다.
+
+**검증**: 8모듈 **813 테스트 0 실패** · lint **13종**(신규 `e2e-network-contract-lint` self-test 9 · `kafka-subscription-contract-lint` self-test 9) · pg-stub self-test 19 · **E2E 실제 스택에서 시나리오 A/B/C/D 각각 통과**.
+
+**미충족(명시)**:
+1. **수렴 미달** — 3R 이 P1 1건으로 끝났고(그 1건도 3R 수정이 만든 것) 상한 3회로 종료했다. **3R 수정 자체는 제3자 리뷰를 받지 못했다** → ④-d-2b 착수 시 #92 diff 를 포함해 1라운드 선행
+2. **4종 연속 실행 불안정** — 각각은 통과하나 연속 실행 시 뒤쪽이 consumer 지연으로 타임아웃. 완화(1파티션·순차 기동·상한 180s)는 넣었으나 제거 못 함. 근본 대응은 P10/P19
+3. 환불 회신 3소비자 종결 · 결과 3종 분기 · stub ledger 순서 계약 · DLQ `attempt_count=2` 미검증
+4. gateway 서명 토큰/`SIGNED_ONLY` 미검증 (구현 ③ GKE smoke 소관)
+5. **④ 미종결** — P20 소관
+
+**다음**: ④-d-2b (P10~P20 + ④ 종결).

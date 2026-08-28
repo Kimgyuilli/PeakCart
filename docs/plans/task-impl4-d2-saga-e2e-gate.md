@@ -86,7 +86,8 @@
   그런데 그것은 환경변수 하나로 운영 스케줄러 빈을 조용히 없애는 스위치이고, ADR-0018 은 dispatcher/reconciliation 을 미결 환불 수렴의 필수 구성요소로 규정한다 — 오설정 시 health 는 정상인 채 `REQUESTED`/`CLAIMED`/`UNRESOLVED` 가 영구 적체된다. 쓰이지도 않는 운영 위험을 남길 이유가 없다(N16 · CLAUDE.md §2).
   **남는 것은 `toss.payments.base-url` 설정화뿐이다** — `TossPaymentClient` 생성자의 리터럴을 제거하고 `application-k8s.yml` 이 운영 URL 을, local 이 개발 endpoint 를, E2E 가 stub URL 을 **각각 명시 주입**한다.
   *R2 #7 을 기각했다가 R3 #8 로 철회했다*: "환경 불변 단일 값" 이라는 내 전제를 **내 계획서가 반증했다**(운영과 stub 으로 값이 갈린다). ADR-0007 Decision 표는 연결 정보를 프로파일 허용으로 분류한다.
-  base 기본값은 **도달 불가 sentinel**(`localhost:9`, discard 포트)이다. 단, **base 의 기본 활성 프로파일이 `local`** 이라 아무 것도 지정하지 않은 부팅은 sentinel 이 아니라 local 의 운영 URL 을 쓴다(구현 중 테스트가 반증) — sentinel 은 "local 도 k8s 도 아닌 프로파일" 의 안전망이고, 운영 fail-fast 는 `application-k8s.yml` 의 `${TOSS_BASE_URL}`(기본값 없음)이 담당한다.
+  base 기본값은 **도달 불가 sentinel**(`localhost:9`, discard 포트)이다. 단, **base 의 기본 활성 프로파일이 `local`** 이라 아무 것도 지정하지 않은 부팅은 sentinel 이 아니라 local 의 운영 URL 을 쓴다(구현 중 테스트가 반증) — sentinel 은 "local 도 k8s 도 아닌 프로파일" 의 안전망이다.
+  **[CI 실패 후 재정정]** 초안은 `application-k8s.yml` 이 `${TOSS_BASE_URL}` 을 **기본값 없이 강제**해 운영 fail-fast 를 하게 했는데, 그러면 **k8s 프로파일로 뜨는 모든 경로가 값 주입 전까지 부팅에 실패한다** — `docker-health-smoke.sh` 와 실제 k8s 배포가 그렇게 깨졌다(`Could not resolve placeholder 'TOSS_BASE_URL'`). k8s 매니페스트가 `TOSS_*` 를 비워 두는 건 **자격증명**이기 때문이고 `base-url` 은 endpoint 다 — 같은 파일이 `datasource.url`·`redis.host` 를 리터럴로 선언한다. → `${TOSS_BASE_URL:https://api.tosspayments.com/v1}` 로 바꿔 **누락될 값 자체를 없앴다**(env override 는 유지).
 
 - [x] **P2.** **로컬 PG stub (R1 #1 · R2 #8 · R3 #12).** `POST /payments/{key}/cancel` 과 `GET /payments/{paymentKey}` **둘 다** 구현한다 — `ALREADY_CANCELED` 분기와 reconciliation 이 **항상 조회를 먼저** 부르기 때문에(V18) 조회가 없으면 그 경로가 도달 불가다.
   응답은 전역 모드가 아니라 **paymentKey 별 불변 script**. 지원: 취소 성공 · 4xx 거절 · transient 반복 · `ALREADY_CANCELED_PAYMENT` × 조회 3분기(전액 취소 성공 · `cancels[].cancelAmount` 금액 불일치 · 조회 실패) · 타임아웃.
@@ -176,8 +177,9 @@
 | P1 | base `base-url` 선언 확인 | 도달 불가 sentinel(`localhost:9`) — 실 PG 호스트가 아님 |
 | P1 | 기본 부팅(프로파일 미지정) | **local 의 운영 URL** 이 이긴다(사실 고정 — 초안 진술 반증) |
 | P1 | base-url 을 안 주는 프로파일로 기동 | sentinel 이 해석된다 |
-| P1 | `k8s` 프로파일에서 `TOSS_BASE_URL` 미주입 / 주입 | **부팅 실패** / 그 값이 해석됨(양성 대조군) |
-| P1 | 앰비언트 `TOSS_BASE_URL` 을 띄운 채 테스트 실행 | 결과가 **바뀌지 않는다**(환경 격리) |
+| P1 | `k8s` 프로파일에서 `TOSS_BASE_URL` 미주입 / 주입 | **실 PG endpoint 로 해석**(배포가 주입을 기다리지 않는다) / env 값이 이김 |
+| P1 | `docker-health-smoke.sh payment-service` | k8s 프로파일 부팅 성공 — 필수 env 추가가 배포 경로를 깨지 않았음 |
+| P1 | 앰비언트 `TOSS_BASE_URL`·`TOSS_PAYMENTS_BASE_URL`·`SPRING_PROFILES_ACTIVE` 를 띄운 채 실행 | 결과가 **바뀌지 않는다**(환경 격리). CI 는 `SPRING_PROFILES_ACTIVE=test` 로 빌드한다 |
 | P2 | stub 에 `confirm` 요청 | **500** — 미구현 표면이 조용히 통과하지 않는다 |
 | P2 | `ALREADY_CANCELED` script | `GET /payments/{key}` 가 실제 호출됨을 ledger 로 단언. 조회 3분기가 서로 다른 종착 |
 | P2 | script 별 ledger 대조 | 성공 `POST×1` / transient 소진 `POST×3` / `ALREADY` `POST×1→GET×1` / reconcile `GET×1,POST×0` — **순서까지** |

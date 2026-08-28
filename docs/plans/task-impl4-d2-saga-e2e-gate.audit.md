@@ -151,3 +151,11 @@
 - **수정**: 격리 initializer 의 제거 대상에 `spring.profiles.active` 를 추가. 프로파일이 필요한 테스트는 각자 `withPropertyValues` 로 명시한다.
 - **재발 방지 관점**: 로컬에서 `./gradlew test` 만 돌리고 **CI 의 실제 명령(`./gradlew build` + `SPRING_PROFILES_ACTIVE=test`)을 재현하지 않은 것**이 누락 지점이다. 이번엔 그 조합으로 재현 → 수정 → 재검증했다.
 - **검증**: `SPRING_PROFILES_ACTIVE=test ./gradlew build --no-daemon` → **BUILD SUCCESSFUL (20m 32s)** · CI lint 블록 전량(self-test 포함) 그린 · `SPRING_PROFILES_ACTIVE=test TOSS_BASE_URL=... TOSS_PAYMENTS_BASE_URL=...` 동시 주입에서도 통과
+
+## 2026-08-29 — CI 실패 2차 (#92, images 잡)
+- **실패**: `images (payment-service)` health smoke — `Could not resolve placeholder 'TOSS_BASE_URL' in value "${TOSS_BASE_URL}" <-- "${toss.payments.base-url}"`
+- **원인**: 1차 수정으로 `build` 가 통과하자 **그 뒤에 도는 `images` 잡이 처음으로 실행**됐고, 거기서 P1 이 만든 결합이 드러났다. `application-k8s.yml` 에 기본값 없는 `${TOSS_BASE_URL}` 을 넣어 **k8s 프로파일로 뜨는 모든 경로**가 값 주입 전까지 부팅 실패한다 — `docker-health-smoke.sh:105` 가 `SPRING_PROFILES_ACTIVE=k8s` 로 띄우고 `TOSS_SECRET_KEY`/`TOSS_WEBHOOK_SECRET` 만 주입한다.
+- **판단 오류**: k8s 매니페스트가 `TOSS_*` 를 비워 두는 건 그것이 **자격증명**이기 때문이다(`secret.yml:12-15` 가 명시). `base-url` 은 endpoint 이고, 같은 파일이 `datasource.url`·`redis.host` 를 **리터럴로 선언**한다 — 규약을 잘못 읽고 자격증명 쪽에 붙였다.
+- **수정**: `base-url: ${TOSS_BASE_URL:https://api.tosspayments.com/v1}` — **누락될 값 자체를 없앴다**(env override 유지). 계약 테스트도 "미주입 시 부팅 실패" → "미주입이어도 실 PG 로 해석" 으로 정정.
+- **영향 범위 재점검**: 실제 k8s 배포도 같은 이유로 깨졌을 것이다(operator 가 `TOSS_BASE_URL` 을 주입할 이유가 없었다). 이번 수정이 그것도 함께 해소한다.
+- **검증**: `bash scripts/docker-health-smoke.sh payment-service:smoke` → **passed** (CI 와 같은 스크립트) · `SPRING_PROFILES_ACTIVE=test ./gradlew build` → **BUILD SUCCESSFUL (8m 52s)** · 프로파일+base-url env 동시 주입에서도 계약 테스트 통과

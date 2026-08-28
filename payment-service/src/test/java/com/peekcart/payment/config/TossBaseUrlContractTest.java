@@ -82,13 +82,13 @@ class TossBaseUrlContractTest {
     }
 
     @Test
-    @DisplayName("[SAGA-P1-BASEURL-OWN] application-k8s.yml 은 기본값 없이 강제한다 — 운영 fail-fast")
-    void k8sProfileHasNoFallback() throws IOException {
+    @DisplayName("[SAGA-P1-BASEURL-OWN] application-k8s.yml 은 실 PG endpoint 를 선언한다 — sentinel 에 의존하지 않는다")
+    void k8sProfileDeclaresRealEndpoint() throws IOException {
         String decl = declaration("application-k8s.yml");
 
         assertThat(decl)
-                .as("k8s 는 기본값이 있으면 sentinel 이 운영에 새어 환불이 전부 실패한다")
-                .isEqualTo("${TOSS_BASE_URL}");
+                .as("endpoint 는 자격증명이 아니다 — 이 파일의 datasource.url 처럼 선언하되 env override 는 허용")
+                .isEqualTo("${TOSS_BASE_URL:https://api.tosspayments.com/v1}");
     }
 
     @Test
@@ -143,11 +143,15 @@ class TossBaseUrlContractTest {
         }
 
         @Test
-        @DisplayName("[SAGA-P1-BASEURL-BOOT] k8s 프로파일에서 TOSS_BASE_URL 미주입이면 부팅이 실패한다")
-        void k8sProfileWithoutEnv_failsFast() {
+        @DisplayName("[SAGA-P1-BASEURL-BOOT] k8s 프로파일은 env 없이도 실 PG 로 해석된다 — 배포가 값 주입을 기다리지 않는다")
+        void k8sProfileWithoutEnv_resolvesRealEndpoint() {
             runner.withPropertyValues("spring.profiles.active=k8s",
                             "TOSS_SECRET_KEY=x", "TOSS_WEBHOOK_SECRET=y")
-                    .run(context -> assertThat(context).hasFailed());
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        assertThat(context.getEnvironment().getProperty("toss.payments.base-url"))
+                                .isEqualTo("https://api.tosspayments.com/v1");
+                    });
         }
 
         @Test

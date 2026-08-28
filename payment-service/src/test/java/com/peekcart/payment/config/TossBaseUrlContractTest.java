@@ -173,6 +173,11 @@ class TossBaseUrlContractTest {
      *
      * <p>{@code systemProperties} 도 함께 거른다. {@code JAVA_TOOL_OPTIONS=-Dtoss.payments.base-url=...}
      * 로도 같은 오염이 생긴다.
+     *
+     * <p><b>활성 프로파일도 같이 걷어낸다.</b> CI 는 {@code SPRING_PROFILES_ACTIVE=test} 로 빌드하므로
+     * (`.github/workflows/ci.yml`), 이걸 두면 "base 가 선언한 기본 프로파일" 을 검사하려던 테스트가
+     * 실제로는 <b>CI 환경 변수</b>를 검사하게 되어 로컬은 통과하고 CI 는 깨진다(실제로 그렇게 깨졌다).
+     * 프로파일을 지정해야 하는 테스트는 각자 {@code withPropertyValues} 로 명시한다.
      */
     private static void stripAmbientBaseUrl(ConfigurableApplicationContext context) {
         MutablePropertySources sources = context.getEnvironment().getPropertySources();
@@ -185,8 +190,11 @@ class TossBaseUrlContractTest {
         return key.toLowerCase(Locale.ROOT).replace("_", "").replace(".", "").replace("-", "");
     }
 
-    private static final Set<String> BASE_URL_ALIASES =
-            Set.of(canonical("toss.payments.base-url"), canonical("toss.base.url"));
+    private static final Set<String> STRIPPED_KEYS = Set.of(
+            canonical("toss.payments.base-url"),
+            canonical("toss.base.url"),
+            // 활성 프로파일 — CI 의 SPRING_PROFILES_ACTIVE=test 가 base 기본값을 덮는다.
+            canonical("spring.profiles.active"));
 
     private static void stripFrom(MutablePropertySources sources, String name, boolean systemEnvironment) {
         PropertySource<?> original = sources.get(name);
@@ -196,7 +204,7 @@ class TossBaseUrlContractTest {
         Map<String, Object> copy = new HashMap<>();
         ((Map<?, ?>) original.getSource()).forEach((k, v) -> {
             String key = String.valueOf(k);
-            if (!BASE_URL_ALIASES.contains(canonical(key))) {
+            if (!STRIPPED_KEYS.contains(canonical(key))) {
                 copy.put(key, v);
             }
         });

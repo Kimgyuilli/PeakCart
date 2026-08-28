@@ -143,3 +143,11 @@
 - `docs/progress/PHASE4.md`: ④-d-2a 이력 추가(분할 근거·설계 2회 뒤집힘·정본 복제 3건 중 1건 놓침·실행이 반증한 전제·리뷰 3라운드·미충족 5건)
 - **ADR**: 신규/상태 전환 없음 — 이 PR 은 새 아키텍처 결정을 만들지 않았다. `base-url` 소유는 ADR-0007 기존 결정의 적용이고, 스위치 폐기는 ADR-0018 을 **따른** 것이다
 - **Layer 1(01~07) 동기화**: 계획 P20 소관이라 **④-d-2b 로 이연**(이 PR 범위 밖)
+
+## 2026-08-29 — CI 실패 수정 (#92)
+- **실패**: `payment-service:test` 의 `[SAGA-P1-BASEURL-BOOT] 기본 활성 프로파일 local 에서는 local 의 endpoint 가 이긴다` (162 중 1건)
+- **원인**: CI 는 `SPRING_PROFILES_ACTIVE: test` 로 빌드하는데(`.github/workflows/ci.yml:104-106`) 그 테스트가 **앰비언트 활성 프로파일에 의존**했다. `test` 프로파일에는 `base-url` 선언이 없어 base sentinel 이 해석되고, "local 이 이긴다" 단언이 깨진다.
+- **성격**: diff 리뷰 3R #1(앰비언트 `TOSS_BASE_URL` 의존)과 **같은 부류**다. base-url 계열 키는 걷어냈으면서 **활성 프로파일은 걷어내지 않았다.**
+- **수정**: 격리 initializer 의 제거 대상에 `spring.profiles.active` 를 추가. 프로파일이 필요한 테스트는 각자 `withPropertyValues` 로 명시한다.
+- **재발 방지 관점**: 로컬에서 `./gradlew test` 만 돌리고 **CI 의 실제 명령(`./gradlew build` + `SPRING_PROFILES_ACTIVE=test`)을 재현하지 않은 것**이 누락 지점이다. 이번엔 그 조합으로 재현 → 수정 → 재검증했다.
+- **검증**: `SPRING_PROFILES_ACTIVE=test ./gradlew build --no-daemon` → **BUILD SUCCESSFUL (20m 32s)** · CI lint 블록 전량(self-test 포함) 그린 · `SPRING_PROFILES_ACTIVE=test TOSS_BASE_URL=... TOSS_PAYMENTS_BASE_URL=...` 동시 주입에서도 통과

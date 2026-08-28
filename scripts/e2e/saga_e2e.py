@@ -26,7 +26,10 @@ RUN_ID = os.environ.get("E2E_RUN_ID", "local")
 COMMIT_SHA = os.environ.get("E2E_COMMIT_SHA", "unknown")
 OUT_DIR = os.environ.get("E2E_OUT_DIR", "/work/out")
 
-DEADLINE = float(os.environ.get("E2E_SCENARIO_TIMEOUT", "90"))   # 계획 P19 절대 상한
+# 계획 P19 절대 상한. 무한 대기는 CI 를 매달고, 너무 짧으면 도착 전인 것을 실패로 만든다.
+# 실측: 부하가 걸린 로컬에서 예약 실패 체인(order.created → 예약 실패 → result → 취소)이
+# 90s 를 넘긴 적이 있다 — 홉마다 붙는 consumer 지연이 누적된다.
+DEADLINE = float(os.environ.get("E2E_SCENARIO_TIMEOUT", "180"))
 POLL = 1.0
 
 SERVICES = {
@@ -160,10 +163,18 @@ def check_readiness():
         flyway[svc] = by[1]
     result["flyway_applied"] = flyway
 
-    # (3) 앱 health
+    # (3) 앱 health.
+    #     연결/이름해석 실패는 **재시도 대상**이다 — 폴링 시작 시점에 컨테이너 DNS 가 아직
+    #     안 잡혀 있을 수 있다. http() 는 HTTPError 만 잡으므로 여기서 URLError 를 흡수하지
+    #     않으면 일시적 실패 하나가 readiness 전체를 죽인다(실측).
+    def health_ok(svc):
+        try:
+            return http(svc, "GET", "/actuator/health")[1].get("status") == "UP"
+        except (urllib.error.URLError, OSError):
+            return False
+
     for svc in SERVICES:
-        wait_for("%s health" % svc,
-                 lambda s=svc: http(s, "GET", "/actuator/health")[1].get("status") == "UP", 120)
+        wait_for("%s health" % svc, lambda s=svc: health_ok(s), 180)
     result["health"] = sorted(SERVICES)
 
     # (4) 토픽 — 업무 10 + 각 .dlq
@@ -218,8 +229,8 @@ def seed_category(name="e2e"):
         row = cur.fetchone()
         if row:
             return row["id"]
-        cur.execute(
-            "INSERT INTO categories (name, created_at) VALUES (%s, NOW(6))", (name,))
+        # categories 는 (id, name, parent_id) 뿐이다 — 타임스탬프 컬럼이 없다.
+        cur.execute("INSERT INTO categories (name) VALUES (%s)", (name,))
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         return cur.fetchone()["id"]
 
@@ -240,7 +251,7 @@ def create_product(scenario_id, price, stock):
 
 def place_order(scenario_id, user_id, product_id, quantity):
     http("order", "POST", "/api/v1/cart/items",
-         {"productId": product_id, "quantity": quantity}, user_id=user_id, expect=200)
+         {"productId": product_id, "quantity": quantity}, user_id=user_id, expect=201)
     status, payload = http("order", "POST", "/api/v1/orders", {
         "receiverName": "e2e-%s" % scenario_id,
         "phone": "010-0000-0000",
@@ -253,13 +264,29 @@ def place_order(scenario_id, user_id, product_id, quantity):
 
 
 def wait_price_cached(product_id):
-    """order-service 가 product.updated 를 소비해 단가를 캐싱할 때까지 — 안 기다리면
-    주문 생성이 ORD-007(캐시 미스)로 죽고 그게 'saga 실패' 로 오인된다."""
+    """order-service 가 **이 상품의** product.updated 를 소비해 단가를 캐싱할 때까지 기다린다.
+
+    안 기다리면 장바구니/주문이 ORD-009/ORD-007 로 죽고 그게 'saga 실패' 로 오인된다.
+    조건은 반드시 **product_id 로 키잉**한다 — 초안은 group 이름만 보고 아무 행이나 있으면
+    통과했는데, 앞 시나리오가 남긴 행이 그 조건을 만족시켜 **기다리지 않고 즉시 통과**했다
+    (계획 P10 이 말한 시나리오 간 오염이 실제로 터진 지점이다)."""
     wait_for("order-service 단가 캐시 적재 product=%s" % product_id,
              lambda: query("order",
-                           "SELECT 1 AS ok FROM processed_events "
-                           "WHERE consumer_group = 'order-svc-product-updated-group' LIMIT 1"),
+                           "SELECT product_id FROM product_price_cache WHERE product_id = %s",
+                           (product_id,)),
              120)
+
+
+def envelope_payload(raw):
+    """`KafkaEventEnvelope` 의 payload 를 꺼낸다.
+
+    필드 이름은 `data` 가 아니라 **`payload`** 다. 초안은 `.get("data", payload)` 로 조용히
+    fallback 했는데, 그러면 키가 틀렸을 때 `reason=None` 이 나와 **계약 위반처럼 보인다** —
+    실제로는 파서가 틀린 것이다. 없으면 그 자리에서 실패시킨다."""
+    doc = json.loads(raw)
+    if "payload" not in doc:
+        raise AssertionError("envelope 에 payload 키가 없다 — 키 %r" % sorted(doc))
+    return doc["payload"]
 
 
 def nonzero(rows):
@@ -286,27 +313,35 @@ def scenario_a():
     payment.fail() + publishPaymentFailed() 를 같은 트랜잭션에서 수행한다."""
     sid = "a"
     user_id = 100
-    product_id = create_product(sid, price=10000, stock=5)
+    initial_stock = 5
+    product_id = create_product(sid, price=10000, stock=initial_stock)
     wait_price_cached(product_id)
     order_id = place_order(sid, user_id, product_id, 2)
-
-    stock_before = query("product", "SELECT stock FROM inventories WHERE product_id = %s",
-                         (product_id,))[0]["stock"]
 
     # 예약 성공까지 기다린다 — ensureConfirmable 이 예약 확정을 요구한다
     wait_for("예약 RESERVED/CONFIRMED order=%s" % order_id,
              lambda: query("product",
                            "SELECT status FROM stock_reservations WHERE order_id = %s "
                            "AND status IN ('RESERVED','CONFIRMED')", (order_id,)))
-    wait_for("payment 행 생성 order=%s" % order_id,
-             lambda: query("payment", "SELECT id FROM payments WHERE order_id = %s", (order_id,)))
+    # ready_for_payment 는 payment-service 가 stock.reservation.result 를 소비해야 선다.
+    # 그 전에 승인을 부르면 ensureConfirmable 이 PAY-008 로 **가드 거부**하는데, 그건
+    # 결제 실패가 아니다 — Toss 를 부르지도 않았으므로 payment.failed 도 발행되지 않는다.
+    wait_for("payments 승인 준비 order=%s" % order_id,
+             lambda: query("payment",
+                 "SELECT id FROM payments WHERE order_id = %s AND ready_for_payment = 1 "
+                 "AND status = 'PENDING'", (order_id,)))
 
     payment_key = "e2e-cfail-%s-%s" % (sid, order_id)
-    status, _ = http("payment", "POST", "/api/v1/payments/confirm",
-                     {"paymentKey": payment_key, "orderId": order_id, "amount": 20000},
-                     user_id=user_id)
+    status, body = http("payment", "POST", "/api/v1/payments/confirm",
+                        {"paymentKey": payment_key, "orderId": order_id, "amount": 20000},
+                        user_id=user_id)
     if status == 200:
         raise AssertionError("승인이 성공했다 — cfail script 가 먹지 않았다")
+    # 가드 거부(PAY-008/009/010)와 PG 실패(PAY-005)를 구분한다. 구분하지 않으면 예약이
+    # 확정되지 않아 거부된 것을 '결제 실패 체인 검증' 으로 착각한다.
+    code = (body or {}).get("code")
+    if code != "PAY-005":
+        raise AssertionError("PG 실패가 아니라 가드 거부다 — code=%r body=%r" % (code, body))
 
     evidence = {}
     evidence["payment_status"] = wait_for(
@@ -323,8 +358,7 @@ def scenario_a():
     row = wait_for("order.cancelled outbox PUBLISHED",
                    lambda: (lambda r: r if r and r["status"] == "PUBLISHED" else None)(
                        outbox_payload("order", "order.cancelled", order_id)))
-    payload = json.loads(row["payload"])
-    reason = payload.get("data", payload).get("reason")
+    reason = envelope_payload(row["payload"]).get("reason")
     if reason != "PAYMENT_FAILED":
         raise AssertionError("order.cancelled reason=%r (기대 PAYMENT_FAILED)" % reason)
     evidence["cancel_reason"] = reason
@@ -336,10 +370,12 @@ def scenario_a():
             (order_id,))
     )[0]["status"]
 
+    # 기준은 **초기 재고**다. 주문 직후에 읽으면 비동기 예약 차감의 전/후 어느 쪽인지
+    # 불확정이라 기대값이 흔들린다. 불변식은 "복구 후 원래대로" 다.
     evidence["stock_restored"] = wait_for(
-        "재고 원복", lambda: query("product",
+        "재고 원복 → %d" % initial_stock, lambda: query("product",
             "SELECT stock FROM inventories WHERE product_id = %s AND stock = %s",
-            (product_id, stock_before + 2))
+            (product_id, initial_stock))
     )[0]["stock"]
 
     # payment.failed 소비자는 order/product/notification **3곳**이다.
@@ -391,8 +427,7 @@ def scenario_b():
 
     row = wait_for("order.cancelled outbox",
                    lambda: outbox_payload("order", "order.cancelled", order_id))
-    payload = json.loads(row["payload"])
-    reason = payload.get("data", payload).get("reason")
+    reason = envelope_payload(row["payload"]).get("reason")
     if reason != "RESERVATION_FAILED":
         raise AssertionError("order.cancelled reason=%r (기대 RESERVATION_FAILED)" % reason)
     evidence["cancel_reason"] = reason
@@ -428,15 +463,18 @@ def publish(topic, key, payload):
         producer.close()
 
 
-def compensation_payload(order_id, payment_key, reason, event_id):
+def compensation_payload(order_id, reason, event_id):
+    """KafkaEventEnvelope(eventId, eventType, timestamp, payload, schemaVersion) +
+    CompensationRequestedPayload(orderId, reason, detectedAt).
+
+    **금액을 싣지 않는다** — 환불 금액의 결정 주체는 Payment 다(ADR-0018 D1)."""
     return {
         "eventId": event_id,
         "eventType": "compensation.requested",
-        "occurredAt": "2026-08-27T12:00:00",
-        "data": {
+        "timestamp": "2026-08-27T12:00:00",
+        "schemaVersion": 1,
+        "payload": {
             "orderId": order_id,
-            "userId": 300,
-            "paymentKey": payment_key,
             "reason": reason,
             "detectedAt": "2026-08-27T12:00:00",
         },
@@ -451,16 +489,19 @@ def scenario_c():
     payment_key = "e2e-ok-%s-%s" % (sid, order_id)
 
     with db("payment") as conn, conn.cursor() as cur:
+        # payments 컬럼: order_id/user_id/payment_key/amount/status/ready_for_payment/
+        # method/approved_at/created_at/version. updated_at 은 없다.
         cur.execute(
-            "INSERT INTO payments (order_id, user_id, amount, status, payment_key, ready_for_payment,"
-            " created_at, updated_at) VALUES (%s, 300, 10000, 'APPROVED', %s, 1, NOW(6), NOW(6))",
+            "INSERT INTO payments (order_id, user_id, payment_key, amount, status,"
+            " ready_for_payment, method, approved_at, created_at, version)"
+            " VALUES (%s, 300, %s, 10000, 'APPROVED', 1, '간편결제', NOW(6), NOW(6), 0)",
             (order_id, payment_key))
 
     # 두 경로 동시 투입 — fence(order_id UNIQUE)가 1행으로 흡수해야 한다
     publish("stock.compensation.requested", str(order_id),
-            compensation_payload(order_id, payment_key, "PAID_BUT_UNRESERVED", "e2e-c-stock-%s" % order_id))
+            compensation_payload(order_id, "PAID_BUT_UNRESERVED", "e2e-c-stock-%s" % order_id))
     publish("order.compensation.requested", str(order_id),
-            compensation_payload(order_id, payment_key, "PAID_BUT_CANCELLED", "e2e-c-order-%s" % order_id))
+            compensation_payload(order_id, "PAID_BUT_CANCELLED", "e2e-c-order-%s" % order_id))
 
     evidence = {"order_id": order_id, "payment_key": payment_key}
 
@@ -516,11 +557,12 @@ def scenario_d():
     finally:
         producer.close()
 
+    # origin_topic 은 DLT_ORIGINAL_TOPIC — **원본** 토픽이지 .dlq 가 아니다(DlqHeaders:42,56).
     rows = wait_for("dead_letter_records 적재",
                     lambda: query("order",
                         "SELECT cluster_id, topic_generation, origin_topic, origin_partition,"
                         " origin_offset, failed_consumer_group, status, attempt_count"
-                        " FROM dead_letter_records WHERE origin_topic = 'payment.failed.dlq'"),
+                        " FROM dead_letter_records WHERE origin_topic = 'payment.failed'"),
                     120)
     row = rows[0]
     for col in ("cluster_id", "topic_generation", "origin_topic", "origin_partition",

@@ -38,11 +38,13 @@ x-app-common: &app-common
     test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
     interval: 5s
     timeout: 3s
+    # 4 JVM 이 동시에 뜨면서 CPU 를 두고 경합한다 — 실측 기동이 220s 창을 넘겼다.
+    # 여유를 주되 상한은 유지한다(계획 P19: 무한 대기 금지). 60 + 5×60 = 360s.
     retries: 40
-    start_period: 20s
+    start_period: 40s
   # 예산 (계획 P19) — 앱 하나가 러너 메모리를 다 먹으면 다른 앱이 OOM 으로 죽고
   # 그게 "시나리오 실패" 로 보인다. 원인을 분리하려면 상한이 필요하다.
-  mem_limit: 768m
+  mem_limit: 1g
 
 services:
   mysql:
@@ -51,7 +53,10 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root
       # P4 — init 단계에서 이 값이 marker 로 심긴다. readiness 가 현재 run_id 와 대조한다.
-      E2E_RUN_ID: ${E2E_RUN_ID:?E2E_RUN_ID 를 지정해야 한다 (cold start 판정 입력)}
+      # 기본값을 둔다 — `docker compose ... down` 같은 정리 명령까지 변수를 요구하면
+      # runbook 의 정리 절차가 실패한다(실측: 잔여 스택을 못 내려 이후 실행과 자원을 다퉜다).
+      # "지정 필수" 강제는 wrapper 가 한다 — 거기서만 cold start 판정에 쓰이기 때문이다.
+      E2E_RUN_ID: ${E2E_RUN_ID:-unset}
     volumes:
       - mysql-data:/var/lib/mysql
       - ./scripts/e2e/mysql-init:/docker-entrypoint-initdb.d:ro
@@ -92,6 +97,11 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # 자동 생성 토픽을 **1 파티션**으로 고정한다. 기본값 3 이면 브로커 1대에
+      # 토픽 20 × 3 파티션 × consumer group 28 의 메타데이터/리밸런스 부하가 걸려
+      # 소비가 수 분 단위로 지연된다(실측: product.updated 소비가 3분 지연).
+      # saga 이벤트는 aggregate 키 기준 순서가 필요해 단일 파티션이 의미상으로도 맞다.
+      KAFKA_NUM_PARTITIONS: 1
       CLUSTER_ID: peekcart-e2e-cluster-001
     volumes:
       - kafka-data:/var/lib/kafka/data
@@ -153,7 +163,11 @@ services:
       SPRING_DATASOURCE_PASSWORD: peekcart_payment
       # PG 표면은 끄지 않는다 — 환불 체인 전구간(dispatcher→PG→회신→종결)이 시나리오 C 의
       # 대상이기 때문이다. 대신 stub 으로 향하게 하고 네트워크로 외부를 막는다.
-      TOSS_BASE_URL: http://pg-stub:8080/v1
+      # 프로퍼티 이름 자체를 환경변수로 덮는다(relaxed binding). TOSS_BASE_URL 은 base yml 의
+      # placeholder 기본값만 채우므로 application-local.yml 의 리터럴을 이기지 못한다 —
+      # 실측: 그 상태로 dispatcher 가 api.tosspayments.com 을 호출했다(그리고 internal:true 가
+      # UnknownHostException 으로 막았다. 격리가 없었으면 실 PG 로 나갔을 것이다).
+      TOSS_PAYMENTS_BASE_URL: http://pg-stub:8080/v1
       TOSS_SECRET_KEY: e2e_sk_stub
       APP_REFUND_DISPATCH_INTERVAL_MS: "2000"
       APP_REFUND_RECONCILE_INTERVAL_MS: "5000"

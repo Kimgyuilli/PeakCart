@@ -25,6 +25,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 export E2E_RUN_ID="${E2E_RUN_ID:-local-$(date +%s)-$$}"
+if [[ "$E2E_RUN_ID" == "unset" ]]; then
+  echo "::error::[saga-e2e] E2E_RUN_ID 가 'unset' 이다 — cold start 판정이 무력화된다" >&2
+  exit 1
+fi
 export E2E_COMMIT_SHA="${E2E_COMMIT_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 export PEEKCART_IMAGE_TAG="${PEEKCART_IMAGE_TAG:-ci}"
 PROJECT="${E2E_PROJECT:-e2e-${E2E_RUN_ID}}"
@@ -66,7 +70,16 @@ bash scripts/kafka-subscription-contract-lint.sh --emit-groups | sort -u > scrip
 
 echo "== 스택 기동 (project=$PROJECT, run_id=$E2E_RUN_ID) =="
 dc build runner >/dev/null
-dc up -d --wait --wait-timeout 300
+
+# 인프라 먼저, 그 다음 앱을 **하나씩** 띄운다.
+# 4 JVM 을 동시에 올리면 CPU 를 서로 뺏어 각자의 기동이 healthcheck 창을 넘긴다
+# (실측: 동시 기동 시 order-service 가 360s 창 안에 뜨지 못했다). 순차 기동은
+# 전체 시간이 조금 늘지만 각 서비스가 온전한 창을 쓰므로 결정적이다.
+dc up -d --wait --wait-timeout 300 mysql redis kafka pg-stub
+for svc in product-service order-service payment-service notification-service; do
+  echo "  기동: $svc"
+  dc up -d --wait --wait-timeout 300 "$svc"
+done
 
 echo "== readiness =="
 dc run --rm -T -e E2E_OUT_DIR="/work/out/${E2E_RUN_ID}" runner \

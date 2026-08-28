@@ -36,3 +36,32 @@
   - **`hpx_plan_lint` 실제 위반** — 등장 순서 P1..Pn 강제 + `목표/목적`·`영향 파일` 필수 섹션
 - 조치: 전면 재번호 P1~P20(등장 순서), §4 영향 파일 신설, `✗` 검증 행 0으로, lint 직접 실행 통과
 - 수렴 판정: **P1 = 0 이 아니므로 상한(3회) 도달로 종료.** 잔여 위험은 §9 미충족 + 이 audit 에 기록
+
+## 2026-08-28 — 구현 (④-d-2a: P1~P9) · 실제 스택 실행 증적
+
+**실행 결과 (docker compose E2E, 실제 4서비스 + Kafka + MySQL + PG stub)**
+- readiness: **통과** — run marker 대조 · flyway 6/5/5/3 success · 앱 4 health · 토픽 20 · consumer group 28 (active member ≥ 1, 할당 partition ≥ 1)
+- 시나리오 A(결제 실패 체인): **통과** (다회) — `payment_status=FAILED` · `order_status=CANCELLED` · `cancel_reason=PAYMENT_FAILED`(outbox payload) · `reservation=RELEASED` · `stock_restored=5` · `processed_events` order/product/notification 각 1 · `payment.failed`/`order.cancelled` outbox `PUBLISHED` · 알림 2행
+- 시나리오 B(예약 실패 체인): **통과** (단독 실행 · A 직후 실행 각 1회) — `order_status=CANCELLED` · `cancel_reason=RESERVATION_FAILED` · `reserved_remaining=0`
+- 시나리오 C(환불 체인 전구간): **통과** — fence `refund_rows=1` · `refund_status=SUCCEEDED` · `payment_status=REFUNDED` · `payment.refunded` outbox `PUBLISHED` · stub 취소 POST **정확히 1회** · Idempotency-Key 전송
+- 시나리오 D(DLQ intake): **통과** — 원장 1행 · 식별자 6컬럼 non-null · `failed_consumer_group=order-svc-payment-failed-group`
+- **4종 연속 실행은 불안정** — 계획 §9-9 에 미충족으로 기록
+
+**실행이 잡아낸 결함 (전부 내 코드/기대의 오류, 운영 코드 아님)**
+1. `categories` 에 `created_at` 컬럼 없음 — seed SQL 오류
+2. `payments` 에 `updated_at` 컬럼 없음 — seed SQL 오류
+3. 장바구니 담기 응답이 200 이 아니라 **201**
+4. envelope 필드가 `data` 가 아니라 **`payload`** — 초안이 `.get("data", payload)` 로 조용히 fallback 해 `reason=None` 이 나왔고, 이는 **계약 위반처럼 보였다**(실제로는 파서 오류). 엄격 실패로 교체
+5. `dead_letter_records.origin_topic` 은 `.dlq` 가 아니라 **원본 토픽**(`DLT_ORIGINAL_TOPIC`)
+6. **`wait_price_cached` 가 vacuous wait** — group 이름만 보고 아무 행이나 있으면 통과해, 앞 시나리오가 남긴 행으로 **기다리지 않고 즉시 통과**했다(R2 #3 이 경고한 시나리오 간 오염이 실제로 발생). `product_id` 로 키잉해 수정
+7. **가드 거부와 결제 실패를 구분하지 못했다** — `ready_for_payment` 가 서기 전에 승인을 불러 `PAY-008` 을 맞고도 "승인 실패" 로 넘겼다. 그 경로는 Toss 를 부르지도 않아 `payment.failed` 가 발행되지 않는다. `PAY-005` 명시 단언 추가
+8. `stock_before` 를 주문 **후**에 읽어 비동기 예약 차감의 전/후가 불확정 → 초기 재고 기준으로 교체
+9. **`TOSS_BASE_URL` 이 `application-local.yml` 의 리터럴을 이기지 못했다** — dispatcher 가 실제로 `api.tosspayments.com` 을 호출했고 **`internal: true` 가 `UnknownHostException` 으로 막았다**. 격리가 없었으면 실 PG 로 나갔다. → `TOSS_PAYMENTS_BASE_URL`(프로퍼티 직접 override)로 교체. **N2 network-level 강제의 라이브 증거이기도 하다**
+10. readiness health 폴링이 `URLError` 를 안 잡아 일시적 DNS 실패 하나로 죽었다
+11. `docker compose ... down` 이 `E2E_RUN_ID` 를 요구해 **정리 절차가 실패** → 잔여 스택 13개가 이후 실행과 자원을 다퉜다. compose 기본값 부여 + 강제는 wrapper 로 이동
+
+**환경 튜닝**: 자동생성 토픽 1파티션 고정(3파티션 × 20토픽 × 28group 메타데이터 부하로 소비 3분 지연 실측) · 앱 **순차 기동**(동시 기동 시 order-service 가 360s healthcheck 창을 넘김) · 시나리오 상한 180s
+
+**검증**: 8모듈 **800 테스트 0 실패**(792 → 신규 8) · lint **13종**(신규 `e2e-network-contract-lint` self-test 9 · `kafka-subscription-contract-lint` self-test 7 · pg-stub self-test 19)
+
+**분할**: 사용자 승인으로 ④-d-2a(P1~P9) / ④-d-2b(P10~P20 + ④ 종결)로 나눔

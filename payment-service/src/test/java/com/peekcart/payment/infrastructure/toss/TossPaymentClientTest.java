@@ -28,8 +28,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class TossPaymentClientTest {
 
     private static final String PAYMENT_KEY = "toss-key-1";
-    private static final String CANCEL_URL = "https://api.tosspayments.com/v1/payments/toss-key-1/cancel";
-    private static final String FIND_URL = "https://api.tosspayments.com/v1/payments/toss-key-1";
+    private static final String BASE_URL = "https://api.tosspayments.com/v1";
+    private static final String CANCEL_URL = BASE_URL + "/payments/toss-key-1/cancel";
+    private static final String FIND_URL = BASE_URL + "/payments/toss-key-1";
 
     private MockRestServiceServer server;
     private TossPaymentClient client;
@@ -38,7 +39,22 @@ class TossPaymentClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new TossPaymentClient("test-secret", builder, new ObjectMapper());
+        client = new TossPaymentClient("test-secret", BASE_URL, builder, new ObjectMapper());
+    }
+
+    @Test
+    @DisplayName("[SAGA-P1-BASEURL] base-url 을 바꾸면 요청 URL 이 그쪽으로 간다 — 생성자 리터럴이 제거됐다")
+    void baseUrlIsHonoured() {
+        RestClient.Builder stubBuilder = RestClient.builder();
+        MockRestServiceServer stubServer = MockRestServiceServer.bindTo(stubBuilder).build();
+        TossPaymentClient stubClient =
+                new TossPaymentClient("test-secret", "http://pg-stub:8080/v1", stubBuilder, new ObjectMapper());
+
+        stubServer.expect(requestTo("http://pg-stub:8080/v1/payments/toss-key-1/cancel"))
+                .andRespond(withSuccess("{\"status\":\"CANCELED\"}", MediaType.APPLICATION_JSON));
+
+        stubClient.cancel(PAYMENT_KEY, "사유", "refund-7");
+        stubServer.verify();
     }
 
     @Test

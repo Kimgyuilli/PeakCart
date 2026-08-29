@@ -22,3 +22,8 @@ logging:
   level:
     com.peekcart: DEBUG
     org.springframework.security: DEBUG
+
+# [ADR-0007] PG endpoint — 로컬 개발은 실 Toss 를 향한다(테스트 키로 sandbox 동작).
+toss:
+  payments:
+    base-url: https://api.tosspayments.com/v1

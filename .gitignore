@@ -51,3 +51,6 @@ loadtest/reports/local/
 docs/learning/
 # RS256 개인키 로컬 dev 마운트 (ADR-0013 D2 — 산출물 비포함)
 local-keys/
+scripts/e2e/business-groups.txt
+__pycache__/
+*.py[cod]

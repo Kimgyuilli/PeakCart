@@ -29,16 +29,21 @@ public class TossPaymentClient {
     private final ObjectMapper objectMapper;
 
     /**
+     * @param baseUrl PG endpoint. 운영/로컬/E2E 가 서로 다른 값을 쓰는 <b>연결 정보</b>다(ADR-0007).
+     *                base {@code application.yml} 은 <b>도달 불가 sentinel</b>(discard 포트)을 기본값으로
+     *                두어 설정 누락이 실 PG 로 새지 않게 하고, {@code application-k8s.yml} 이
+     *                {@code ${TOSS_BASE_URL}} 을 기본값 없이 강제해 운영에서 fail-fast 한다.
      * @param builder 타임아웃은 {@link TossClientConfig} 의 {@code RestClientCustomizer} 가 이미
      *                적용한 상태로 주입된다 — 여기서 {@code requestFactory} 를 다시 세팅하지 않는다
      *                (그러면 테스트의 {@code MockRestServiceServer} 바인딩까지 덮어쓴다)
      */
     public TossPaymentClient(@Value("${toss.payments.secret-key}") String secretKey,
+                             @Value("${toss.payments.base-url}") String baseUrl,
                              RestClient.Builder builder,
                              ObjectMapper objectMapper) {
         String credentials = Base64.getEncoder().encodeToString((secretKey + ":").getBytes());
         this.restClient = builder
-                .baseUrl("https://api.tosspayments.com/v1")
+                .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Basic " + credentials)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();

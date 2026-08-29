@@ -175,6 +175,35 @@ for module, svc in SERVICES.items():
                 violations.append("%s: quarantine 구독 토픽 불일치 — 누락 %s / 초과 %s"
                                   % (module, sorted(q_expected - topics), sorted(topics - q_expected)))
 
+if os.environ.get("EMIT_TOPICS") == "1":
+    # 토픽별 **선언된 파티션 수**. 정본은 각 서비스의 TopicBuilder 호출이다.
+    #
+    # E2E 가 이걸 필요로 하는 이유: 브로커의 `KAFKA_NUM_PARTITIONS=1` 은 **자동 생성**에만
+    # 적용된다. 앱의 KafkaAdmin 이 나중에 같은 토픽을 partitions(3) 으로 만들거나 확장하면,
+    # 이미 구독 중이던 소비자는 새 파티션을 **메타데이터 갱신 주기(기본 300s)** 가 지나야
+    # 발견한다. 그 사이 그 파티션으로 간 메시지는 소비되지 않는다 —
+    # 실측: `order.created` 발행 18:59:39 → 소비 19:03:02 (약 203초).
+    # 그래서 E2E 는 앱 기동 **전에** 선언된 파티션 수 그대로 토픽을 만들어 둔다.
+    topic_re = re.compile(
+        r'TopicBuilder\s*\.\s*name\s*\(\s*"([^"]+)"\s*\)\s*\.\s*partitions\s*\(\s*(\d+)\s*\)')
+    found = {}
+    for module in SERVICES:
+        for path in java_files(module):
+            with open(path, encoding="utf-8") as f:
+                for name, parts in topic_re.findall(f.read()):
+                    prev = found.get(name)
+                    if prev is not None and prev != int(parts):
+                        print("토픽 %s 의 파티션 선언이 %s 와 %s 로 갈린다" % (name, prev, parts),
+                              file=sys.stderr)
+                        sys.exit(1)
+                    found[name] = int(parts)
+    if not found:
+        print("TopicBuilder 선언을 하나도 못 찾았다 — 파서가 깨졌다", file=sys.stderr)
+        sys.exit(1)
+    for name in sorted(found):
+        print("%s\t%d" % (name, found[name]))
+    sys.exit(0)
+
 if os.environ.get("EMIT_GROUPS") == "1":
     # readiness 가 쓸 업무 group 목록. 별도 상수 파일을 두면 정본이 둘이 되므로
     # 같은 파서가 DlqTopology 에서 유도한 값을 그대로 내보낸다(계획 P5).
@@ -275,6 +304,11 @@ fi
 
 if [[ "${1:-}" == "--emit-groups" ]]; then
   EMIT_GROUPS=1 python3 "$LINT_PY" "$(pwd)"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--emit-topics" ]]; then
+  EMIT_TOPICS=1 python3 "$LINT_PY" "$(pwd)"
   exit 0
 fi
 

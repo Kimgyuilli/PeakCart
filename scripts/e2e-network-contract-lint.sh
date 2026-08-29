@@ -37,12 +37,23 @@ networks = doc.get("networks") or {}
 INTERNAL = "internal"
 CONTROL = "external-control"
 # 격리돼야 하는 것 = 앱 4 + 인프라 3 + stub + runner. 양성 대조군만 예외다.
-CONTROL_ONLY = {"egress-control"}
+CONTROL_ONLY = {"egress-control", "egress-canary"}
+# 격리 대상 정본. "붙은 것들이 internal 전용인가" 만 보면 **서비스를 지운 파일이 통과한다**
+# — 검사 대상이 줄어들 뿐이라 위반이 0이 된다(#92 후속 리뷰 #1 이 fixture 로 반증).
+REQUIRED = {
+    "mysql", "kafka", "redis",
+    "order-service", "product-service", "payment-service", "notification-service",
+    "pg-stub", "runner",
+}
 
 violations = []
 
 if not services:
     violations.append("services 가 비어 있다 — 파일을 잘못 읽었다")
+
+missing = REQUIRED - set(services)
+if missing:
+    violations.append(f"격리 대상 서비스 누락: {sorted(missing)} — 삭제는 검사 대상만 줄인다")
 
 net = networks.get(INTERNAL)
 if net is None:
@@ -56,7 +67,6 @@ if ctrl is None:
 elif isinstance(ctrl, dict) and ctrl.get("internal") is True:
     violations.append(f"networks.{CONTROL}.internal 이 true 다 — 양성 대조군이 대조군 구실을 못 한다")
 
-control_seen = False
 for name, spec in services.items():
     spec = spec or {}
     nets = spec.get("networks")
@@ -68,7 +78,6 @@ for name, spec in services.items():
     nets = list(nets)
 
     if name in CONTROL_ONLY:
-        control_seen = True
         if nets != [CONTROL]:
             violations.append(f"{name}: 양성 대조군은 [{CONTROL}] 에만 붙어야 한다 (현재 {nets})")
         continue
@@ -85,8 +94,13 @@ for name, spec in services.items():
     if spec.get("container_name"):
         violations.append(f"{name}: container_name 고정 — project 병렬 기동이 충돌한다")
 
-if not control_seen:
-    violations.append("egress-control 서비스가 없다 — canary 검사가 음성 대조만 하게 된다")
+# **집합 전체**를 요구한다. "하나라도 보였는가" 로 두면 표적(egress-canary)이나 프로브
+# (egress-control) 중 하나가 사라져도 통과하고, 그러면 양성 대조가 성립하지 않는다.
+missing_control = CONTROL_ONLY - set(services)
+if missing_control:
+    violations.append(
+        f"양성 대조군 서비스 누락: {sorted(missing_control)} — 음성 대조만 남으면 "
+        "격리가 아니라 '아무 이유로든 실패' 를 격리로 오인한다")
 
 if violations:
     print("\n".join(f"  - {v}" for v in violations))
@@ -139,6 +153,9 @@ PYEOF
   mutate "$TMP/5.yml" "doc['services'].pop('egress-control')"
   check "양성 대조군 삭제" "$TMP/5.yml"
 
+  mutate "$TMP/5b.yml" "doc['services'].pop('egress-canary')"
+  check "양성 대조군 표적(canary) 삭제" "$TMP/5b.yml"
+
   mutate "$TMP/6.yml" "doc['networks']['external-control']['internal'] = True"
   check "대조군 네트워크까지 격리" "$TMP/6.yml"
 
@@ -147,6 +164,13 @@ PYEOF
 
   mutate "$TMP/8.yml" "doc['services']['product-service']['network_mode'] = 'host'"
   check "network_mode: host" "$TMP/8.yml"
+
+  # 서비스 삭제 대조군 — REQUIRED 집합이 없으면 위반 0 으로 조용히 통과한다
+  mutate "$TMP/9.yml" "doc['services'].pop('payment-service')"
+  check "격리 대상 서비스 삭제(payment-service)" "$TMP/9.yml"
+
+  mutate "$TMP/10.yml" "doc['services'].pop('pg-stub')"
+  check "격리 대상 서비스 삭제(pg-stub)" "$TMP/10.yml"
 
   # 양성: 원본은 통과해야 한다
   if run_lint "docker-compose.e2e.yml" >/dev/null 2>&1; then
@@ -160,7 +184,7 @@ PYEOF
     echo "self-test 실패 ${fails}건"
     exit 1
   fi
-  echo "self-test 통과 (9종)"
+  echo "self-test 통과 (12종)"
   exit 0
 fi
 

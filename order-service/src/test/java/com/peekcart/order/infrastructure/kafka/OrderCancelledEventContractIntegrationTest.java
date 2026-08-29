@@ -3,6 +3,7 @@ package com.peekcart.order.infrastructure.kafka;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.outbox.OutboxEvent;
+import com.peekcart.global.outbox.OutboxPollingScheduler;
 import com.peekcart.global.outbox.OutboxEventRepository;
 import com.peekcart.global.outbox.dto.KafkaEventEnvelope;
 import com.peekcart.order.domain.model.Order;
@@ -19,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -74,6 +76,21 @@ class OrderCancelledEventContractIntegrationTest extends AbstractIntegrationTest
     @Autowired ObjectMapper objectMapper;
 
     @MockitoSpyBean OutboxEventRepository outboxEventRepository;
+
+    /**
+     * Outbox poller 를 무력화한다.
+     *
+     * <p>{@code OutboxEventRepository} 를 context-wide spy 로 바꾸는 순간, **5초마다 도는**
+     * {@link OutboxPollingScheduler} 가 그 spy 를 호출하게 된다
+     * ({@code OutboxPollingService:71} 의 {@code findPendingEvents}). 그런데 Mockito 의
+     * {@code willThrow(...).given(spy).save(...)} 는 <b>두 단계</b>라, 그 사이에 다른 스레드가
+     * spy 를 건드리면 {@code UnfinishedStubbingException} 이 난다 — 코드가 아니라
+     * <b>주사위</b>가 결정하는 실패다(CI 에서 실제로 터졌다).
+     *
+     * <p>이 테스트가 보는 것은 "취소와 Outbox 저장이 같은 트랜잭션인가" 이고 발행 여부가 아니다.
+     * poller 를 no-op mock 으로 대체하면 경합이 사라지고 검증 대상은 그대로 남는다.
+     */
+    @MockitoBean OutboxPollingScheduler outboxPollingScheduler;
 
     @BeforeEach
     void setUp() {

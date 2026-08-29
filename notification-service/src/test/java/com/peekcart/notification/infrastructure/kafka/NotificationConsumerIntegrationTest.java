@@ -114,7 +114,7 @@ class NotificationConsumerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("payment.refunded(SUCCEEDED) 소비 시 환불 완료 알림을 1건 생성한다 (ADR-0018 D6)")
+    @DisplayName("[SAGA-REFUND-RESULT-NOTIFICATION-SUCCEEDED] payment.refunded(SUCCEEDED) 소비 시 환불 완료 알림을 1건 생성한다 (ADR-0018 D6)")
     void paymentRefundedSucceeded_createsNotification() {
         String eventId = UUID.randomUUID().toString();
         kafkaTemplate.send("payment.refunded", "9001", refundedMessage(eventId, 9001L, "SUCCEEDED"));
@@ -128,7 +128,7 @@ class NotificationConsumerIntegrationTest extends AbstractIntegrationTest {
      * 살아남은 알림이 <b>어느 주문의 것인지</b>까지 단언해야 ADR-0018 D6 을 실제로 증명한다.
      */
     @Test
-    @DisplayName("payment.refunded(FAILED) 는 사용자에게 알리지 않는다 — 내부 미결을 전가하지 않는다")
+    @DisplayName("[SAGA-REFUND-RESULT-NOTIFICATION-FAILED] payment.refunded(FAILED) 는 사용자에게 알리지 않는다 — 내부 미결을 전가하지 않는다")
     void paymentRefundedFailed_createsNoNotification() throws Exception {
         kafkaTemplate.send("payment.refunded", "9002",
                         refundedMessage(UUID.randomUUID().toString(), 9002L, "FAILED"))
@@ -145,6 +145,31 @@ class NotificationConsumerIntegrationTest extends AbstractIntegrationTest {
 
         // 살아남은 1건은 9003(성공)이어야 하고, 9002(실패)와 연결된 알림은 0건이어야 한다
         assertThat(refundNotifications().get(0).getMessage()).contains("9003").doesNotContain("9002");
+    }
+
+    /**
+     * {@code UNRESOLVED} 는 <b>결과가 확정되지 않았다</b>는 뜻이다 — 실패도 성공도 아니다.
+     * Payment 가 나중에 확정해 다시 회신하므로, 이 시점에 사용자에게 무엇이든 알리면
+     * 그 알림은 뒤집힐 수 있다(ADR-0018 D4: 어느 소비자도 UNRESOLVED 로 전이하지 않는다).
+     *
+     * <p>FAILED 검사와 같은 방식으로 <b>고정 대기 없이</b> 판정한다 — 뒤이어 보낸 성공 회신이
+     * 도착하면 앞의 UNRESOLVED 는 이미 소비가 끝났다는 뜻이다.
+     */
+    @Test
+    @DisplayName("[SAGA-REFUND-RESULT-NOTIFICATION-UNRESOLVED] payment.refunded(UNRESOLVED) 는 알리지 않는다 — 확정되지 않은 결과를 통지하면 뒤집힌다")
+    void paymentRefundedUnresolved_createsNoNotification() throws Exception {
+        kafkaTemplate.send("payment.refunded", "9004",
+                        refundedMessage(UUID.randomUUID().toString(), 9004L, "UNRESOLVED"))
+                .get(10, TimeUnit.SECONDS);
+
+        kafkaTemplate.send("payment.refunded", "9005",
+                        refundedMessage(UUID.randomUUID().toString(), 9005L, "SUCCEEDED"))
+                .get(10, TimeUnit.SECONDS);
+
+        await().atMost(15, TimeUnit.SECONDS).untilAsserted(() ->
+                assertThat(refundNotifications()).hasSize(1));
+
+        assertThat(refundNotifications().get(0).getMessage()).contains("9005").doesNotContain("9004");
     }
 
     /**

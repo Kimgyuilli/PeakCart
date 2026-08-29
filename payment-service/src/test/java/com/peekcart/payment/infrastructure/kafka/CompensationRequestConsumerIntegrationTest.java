@@ -80,7 +80,7 @@ class CompensationRequestConsumerIntegrationTest extends AbstractIntegrationTest
     }
 
     @Test
-    @DisplayName("stock.compensation.requested 소비 → 원장 REQUESTED 1행 (PG 호출 없음)")
+    @DisplayName("[SAGA-REFUND-CRASH-D] stock.compensation.requested 소비 → 원장 REQUESTED 1행 (PG 호출 없음)")
     void stockRequest_createsRequestedLedger() {
         Payment payment = seedApprovedPayment(2001L);
 
@@ -131,7 +131,7 @@ class CompensationRequestConsumerIntegrationTest extends AbstractIntegrationTest
     }
 
     @Test
-    @DisplayName("로컬 감지가 먼저여도 뒤늦은 요청과 1행으로 접힌다 (세 진입점 수렴)")
+    @DisplayName("[SAGA-REFUND-FENCE-CONVERGE] 로컬 감지가 먼저여도 뒤늦은 요청과 1행으로 접힌다 (세 진입점 수렴)")
     void localDetectionThenRequest_singleLedgerRow() {
         Payment payment = seedApprovedPayment(2005L);
 

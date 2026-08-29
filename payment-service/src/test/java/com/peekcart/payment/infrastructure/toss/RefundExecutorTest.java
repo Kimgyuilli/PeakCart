@@ -59,7 +59,7 @@ class RefundExecutorTest {
     }
 
     @Test
-    @DisplayName("transient 3회 소진 → UNRESOLVED, 모든 시도가 동일 멱등키를 쓴다")
+    @DisplayName("[SAGA-REFUND-CRASH-C] transient 3회 소진 → UNRESOLVED, 모든 시도가 동일 멱등키를 쓴다")
     void transientRetries_useSameIdempotencyKey() {
         given(client.cancel(anyString(), anyString(), anyString()))
                 .willReturn(TossOutcome.transient_("SERVER_ERROR", "{}"));
@@ -119,7 +119,7 @@ class RefundExecutorTest {
     }
 
     @Test
-    @DisplayName("확정 경로는 조회를 먼저 한다 — 이미 취소됐으면 cancel 을 호출하지 않는다 (crash matrix b)")
+    @DisplayName("[SAGA-REFUND-CRASH-B] 확정 경로는 조회를 먼저 한다 — 이미 취소됐으면 cancel 을 호출하지 않는다 (crash matrix b)")
     void verifyThenExecute_alreadyCanceled_doesNotRecall() {
         given(client.find("toss-key-7"))
                 .willReturn(Optional.of(new TossPaymentSnapshot("CANCELED", AMOUNT, "{}")));

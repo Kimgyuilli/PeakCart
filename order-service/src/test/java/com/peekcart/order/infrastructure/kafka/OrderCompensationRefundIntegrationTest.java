@@ -156,7 +156,7 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     // ---------------- P12: 회신 소비 종결 ----------------
 
     @Test
-    @DisplayName("payment.refunded(SUCCEEDED) → RESOLVED (④-a R-2 가 닫히는 경로)")
+    @DisplayName("[SAGA-REFUND-RESULT-ORDER-SUCCEEDED] payment.refunded(SUCCEEDED) → RESOLVED (④-a R-2 가 닫히는 경로)")
     void refundSucceeded_resolvesLedger() {
         Long orderId = seedOpenCompensation();
         LocalDateTime resolvedAt = LocalDateTime.now().withNano(0);
@@ -170,7 +170,7 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("payment.refunded(FAILED) → REFUND_FAILED + failure_code — '해결됨'이 아니다")
+    @DisplayName("[SAGA-REFUND-RESULT-ORDER-FAILED] payment.refunded(FAILED) → REFUND_FAILED + failure_code — '해결됨'이 아니다")
     void refundFailed_closesAsUnresolvedTerminal() {
         Long orderId = seedOpenCompensation();
 
@@ -183,7 +183,7 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("payment.refunded(UNRESOLVED) → 전이하지 않는다 (OPEN 유지)")
+    @DisplayName("[SAGA-REFUND-RESULT-ORDER-UNRESOLVED] payment.refunded(UNRESOLVED) → 전이하지 않는다 (OPEN 유지)")
     void refundUnresolved_doesNotTransition() {
         Long orderId = seedOpenCompensation();
 

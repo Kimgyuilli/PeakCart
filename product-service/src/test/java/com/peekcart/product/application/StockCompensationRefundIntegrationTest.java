@@ -142,7 +142,7 @@ class StockCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     // ---------------- P12: 회신 소비 종결 ----------------
 
     @Test
-    @DisplayName("payment.refunded(SUCCEEDED) → 종결 컬럼 기록 (marker 와 별개)")
+    @DisplayName("[SAGA-REFUND-RESULT-PRODUCT-SUCCEEDED] payment.refunded(SUCCEEDED) → 종결 컬럼 기록 (marker 와 별개)")
     void refundSucceeded_recordsClosure() {
         seedReleasedReservation();
         LocalDateTime resolvedAt = LocalDateTime.now().withNano(0);
@@ -158,7 +158,7 @@ class StockCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("payment.refunded(FAILED) → 실패 코드와 함께 기록")
+    @DisplayName("[SAGA-REFUND-RESULT-PRODUCT-FAILED] payment.refunded(FAILED) → 실패 코드와 함께 기록")
     void refundFailed_recordsFailureCode() {
         seedReleasedReservation();
 
@@ -171,7 +171,7 @@ class StockCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("payment.refunded(UNRESOLVED) → 아무것도 기록하지 않는다")
+    @DisplayName("[SAGA-REFUND-RESULT-PRODUCT-UNRESOLVED] payment.refunded(UNRESOLVED) → 아무것도 기록하지 않는다")
     void refundUnresolved_recordsNothing() {
         seedReleasedReservation();
 

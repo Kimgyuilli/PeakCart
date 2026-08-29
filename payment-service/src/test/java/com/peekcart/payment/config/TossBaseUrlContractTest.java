@@ -41,7 +41,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 두 가지를 동시에 고정한다:
  * <ol>
  *   <li>base 의 기본값은 <b>도달 불가 sentinel</b> — 설정 누락이 조용히 실 PG 로 나가면 안 된다</li>
- *   <li>{@code k8s} 프로파일은 <b>기본값 없이 강제</b> — 운영에서 sentinel 이 쓰이면 환불이 전부 실패한다</li>
+ *   <li>{@code k8s} 프로파일은 <b>실 PG endpoint 를 기본값으로</b> 선언 — 운영에서 sentinel 이 쓰이면
+ *       환불이 전부 실패한다. 기본값 없이 강제하지는 않는다: base-url 은 자격증명이 아니라 endpoint 라
+ *       강제하면 값 주입 전까지 배포가 깨질 뿐이다(실측 — health smoke·k8s 배포가 그렇게 깨졌다)</li>
  * </ol>
  *
  * <p>YAML 을 직접 읽는다. 스프링 컨텍스트로는 "base 가 무엇을 기본값으로 선언했나" 를 볼 수 없다 —

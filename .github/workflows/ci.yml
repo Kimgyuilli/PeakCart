@@ -105,11 +105,30 @@ jobs:
         env:
           SPRING_PROFILES_ACTIVE: test
 
+      # saga 계약 매트릭스 게이트 (계획 P11~P15).
+      # **build 뒤**에 둔다 — JUnit XML 이 있어야 --jvm-evidence 가 대조할 것이 생긴다.
+      # required-ID 정본은 lint 안에 있으므로 매트릭스에서 행을 지워도 통과하지 않는다(N4).
+      - name: saga contract matrix gate (structure + jvm evidence)
+        if: always()
+        run: |
+          bash scripts/saga-contract-matrix-lint.sh --structure
+          bash scripts/saga-contract-matrix-lint.sh --self-test
+          SAGA_COMMIT_SHA="${GITHUB_SHA}" bash scripts/saga-contract-matrix-lint.sh --jvm-evidence
+          # 시나리오 실행 순서 계약 — 스택이 필요 없어 여기서 돈다(계획 P10).
+          bash scripts/saga-e2e-smoke.sh --self-test
+          # E2E 격리·구독 정본 계약 (스택 무관)
+          bash scripts/e2e-network-contract-lint.sh --self-test
+          bash scripts/kafka-subscription-contract-lint.sh --self-test
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-reports
-          path: build/reports/
+          # 멀티모듈이라 루트 build/reports 만 올리면 **어느 모듈도** 담기지 않는다.
+          path: |
+            build/reports/
+            */build/test-results/**
+            */build/reports/**
 
   # [PR3a] 서비스별 이미지 — 단일 Dockerfile + ARG SERVICE 매트릭스.
   # build/smoke(PR+push, contents:read 만) 와 publish(main push 한정, packages:write) 를 **분리**한다.
@@ -144,17 +163,98 @@ jobs:
       - name: Health smoke
         run: bash scripts/docker-health-smoke.sh ${{ matrix.service }}:ci
 
-      - name: Save image for publish (main push only)
-        if: github.event_name == 'push'
+      # push 는 publish 가 쓰고, PR 은 e2e 잡이 쓴다. **PR 에서도 saga 4개는 올려야 한다** —
+      # 초안은 push 한정이라 PR 러너에 이미지가 하나도 없었다(④-d-1 계획 리뷰가 잡은 전제).
+      # 두 조건을 한 식으로 합쳐 Save/Upload 가 어긋날 수 없게 한다.
+      - name: Save image (publish 또는 e2e 소비용)
+        if: github.event_name == 'push' || contains(fromJSON('["order-service","product-service","payment-service","notification-service"]'), matrix.service)
         run: docker save ${{ matrix.service }}:ci | gzip > image.tar.gz
 
-      - name: Upload image artifact (main push only)
-        if: github.event_name == 'push'
+      - name: Upload image artifact
+        if: github.event_name == 'push' || contains(fromJSON('["order-service","product-service","payment-service","notification-service"]'), matrix.service)
         uses: actions/upload-artifact@v4
         with:
           name: image-${{ matrix.service }}
           path: image.tar.gz
           retention-days: 1
+          # 조용한 빈 artifact 는 e2e 잡에서 '이미지 없음' 으로 뒤늦게 터진다.
+          if-no-files-found: error
+
+  # cross-service saga E2E (계획 P12·P16·P18·P19).
+  # 시나리오 4종 + 음성 대조군을 **실제 스택**에서 돌리고 매트릭스와 대조한다.
+  e2e:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # ⑤ 실행 예산 — 전체 상한. 인프라가 매달려도 러너를 오래 잡지 않는다.
+    timeout-minutes: 45
+    env:
+      PEEKCART_IMAGE_TAG: ci
+      E2E_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+      E2E_COMMIT_SHA: ${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download saga service images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: image-*-service
+          path: /tmp/images
+
+      - name: Load images
+        run: |
+          set -euo pipefail
+          # saga 4개가 **정확히** 있어야 한다. 하나라도 없으면 compose 가 옛 이미지를 쓰거나
+          # pull 을 시도해 무엇을 검증했는지 알 수 없게 된다.
+          expected="notification-service order-service payment-service product-service"
+          for svc in $expected; do
+            f="/tmp/images/image-${svc}/image.tar.gz"
+            [[ -f "$f" ]] || { echo "::error::${svc} 이미지 artifact 가 없다"; exit 1; }
+            gunzip -c "$f" | docker load
+          done
+          loaded=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -c ':ci$' || true)
+          echo "loaded ${loaded} images"
+          for svc in $expected; do
+            docker image inspect "${svc}:ci" >/dev/null \
+              || { echo "::error::${svc}:ci 가 로드되지 않았다"; exit 1; }
+          done
+
+      - name: Build runner image
+        run: docker compose -f docker-compose.e2e.yml -p e2e-${E2E_RUN_ID} build runner
+
+      - name: 시나리오 4종
+        run: bash scripts/saga-e2e-smoke.sh
+
+      # 대조군은 **자기 run_id(=compose project)** 로 돈다. 같은 project 를 쓰면 앞 단계의
+      # teardown 이 완전히 끝나야만 cold-start volume 가드를 통과하는 순서 결합이 생긴다.
+      # (증적 디렉터리 분리는 smoke 스크립트가 별도로 보장한다 — R2 #1)
+      - name: 음성 대조군
+        env:
+          E2E_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}-nc
+        run: bash scripts/saga-e2e-smoke.sh --negative-control
+
+      - name: saga contract matrix gate (structure + e2e evidence)
+        run: |
+          bash scripts/saga-contract-matrix-lint.sh --structure
+          SAGA_COMMIT_SHA="${GITHUB_SHA}" \
+            bash scripts/saga-contract-matrix-lint.sh --e2e-evidence ".cache/e2e/${E2E_RUN_ID}"
+
+      # ③ 실패해도 증적은 남긴다 — 실패한 실행의 로그가 가장 필요하다.
+      - name: 증적 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidence-${{ github.run_id }}
+          path: .cache/e2e/
+          retention-days: 7
+
+      - name: 스택 정리
+        if: always()
+        run: |
+          docker compose -f docker-compose.e2e.yml -p "e2e-${E2E_RUN_ID}" \
+            down -v --remove-orphans || true
 
   # GHCR publish — main push 한정. smoke 를 통과한 이미지를 load 후 push 한다.
   # packages:write 는 이 job 에만 부여되어 PR build/smoke 경로엔 write 토큰이 닿지 않는다.

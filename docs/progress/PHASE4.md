@@ -1106,7 +1106,7 @@ ADR-0002 의 "모놀리식 → MSA 진화" 4단계 중 최종 단계. 5개 서�
 
 ---
 
-## 구현 ④ Choreography Saga — ④-d-2b: 계약 게이트 · 음성 대조군 · ④ 종결 — 2026-08-29
+## 구현 ④ Choreography Saga — ④-d-2b: 계약 게이트 · 음성 대조군 · ④ 종결 — 2026-08-29 — [#93](https://github.com/Kimgyuilli/PeekCart/pull/93)
 
 > 부모 P10~P20. **이 PR 이 구현 ④ 를 종결한다.**
 

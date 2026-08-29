@@ -254,3 +254,10 @@
 - **실행으로 #1 해소 검증**: 같은 `E2E_RUN_ID` 로 정상 실행 → 음성 대조군 순차 실행 후 최상위 manifest 4종 전부 `success` 유지, 대조군 failure 는 `negative-control/manifest-a.json` 에 격리, `--e2e-evidence` **OK**
 - 새 검사 4종 전부 self-test 대조군 동반(총 **40종**)
 - raw: `.cache/codex-reviews/diff-d2b-r2-*.json`
+
+## 2026-08-29 — /done applied (PR https://github.com/Kimgyuilli/PeekCart/pull/93)
+- `docs/TASKS.md`: 구현 ④ **🔄 → ✅**, ④-d-2b 요약 + PR 링크 등재. `L-013` 은 #84 에서 이미 해소, `D-020` 은 이미 등재돼 추가 작업 없음
+- `docs/progress/PHASE4.md`: ④-d-2b 이력 + PR 링크. **ADR-0012 ④ 산출물 대비 실제 범위 차이** 절 추가(ADR 은 immutable 이라 Layer 3 에 기록)
+- Layer 1: `02` 토픽 수 **7 → 10** 정정(ADR-0018 보상/환불 3종 누락) · `06` 에 cross-service saga E2E·음성 대조군·계약 게이트 계층 등재
+- **ADR**: 신규/상태 전환 없음 — 이 PR 은 새 아키텍처 결정을 만들지 않았다. properties 소유는 ADR-0007 적용, 게이트 설계는 ADR-0015/0019 의 연장이다
+- 커밋 11개 (`3f03922`..`4dbec88`)

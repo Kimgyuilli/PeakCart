@@ -26,6 +26,14 @@ x-app-env: &app-env
   # 새 진입점이나 스위치를 만들지 않는다(N16). 대가는 SIGNED_ONLY 미검증(계획 §9-5).
   APP_INTERNAL_TOKEN_MODE: DUAL_ACCEPT
   JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
+  # local 프로파일은 **디버깅 전용**으로 show-sql·format_sql·DEBUG 로깅을 켠다. E2E 는 그
+  # 프로파일을 연결 정보 때문에 빌려 쓸 뿐이므로 디버그 표면은 되돌린다 — 4서비스가 모든
+  # 쿼리를 여러 줄로 stdout 에 쏟으면 docker json-file 로깅과 JVM 이 함께 느려진다.
+  # (실측: 시나리오 연속 실행에서 `order.created` 소비가 3분 38초 밀렸다 — 계획 P19)
+  SPRING_JPA_SHOW_SQL: "false"
+  SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "false"
+  LOGGING_LEVEL_COM_PEEKCART: INFO
+  LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY: INFO
 
 x-app-common: &app-common
   networks: [internal]
@@ -209,6 +217,17 @@ services:
     networks: [external-control]
     profiles: [control]
     entrypoint: ["/bin/bash"]
+    mem_limit: 128m
+
+  # egress 대조군의 **표적**. 호스트에 TCP 서버를 띄우는 방식은 이식성이 없다 — Docker Desktop
+  # 에서 브리지 게이트웨이는 VM 안 주소라 macOS 호스트 프로세스에 닿지 않는다(실측: 양성
+  # 대조가 rc=7 로 실패했다). 표적을 컨테이너로 두면 양·음 프로브가 **같은 주소**를 겨누고
+  # 어느 환경에서도 같게 동작한다.
+  egress-canary:
+    image: peekcart-e2e-runner:${PEEKCART_IMAGE_TAG:-ci}
+    networks: [external-control]
+    profiles: [control]
+    entrypoint: ["python3", "-m", "http.server", "8080"]
     mem_limit: 128m
 
 networks:

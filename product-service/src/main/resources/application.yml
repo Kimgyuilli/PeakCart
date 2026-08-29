@@ -57,6 +57,13 @@ app:
         location: classpath:keys/dev-gateway-internal-public.pem
   # 재고 예약 lease (계획 ④-a P4 · ADR-0012 D3) — 동작 정책이므로 base 소유(ADR-0007).
   # 회수 순서 불변식: Order 취소(ttl 시점) → Product sweeper(ttl + sweeper-grace). 역전되면 oversell.
+  # 예약 lease sweeper 의 주기·lock 정책 (계획 P17 · ADR-0007 — 동작 정책이므로 base 소유).
+  # 회수 '대상' 판정은 app.reservation.lease 소관이고 여기는 '언제 도는가' 만 다룬다.
+  scheduler:
+    stock:
+      lease-sweep-delay: 60s
+      lock-at-most-for: 10m
+      lock-at-least-for: 30s
   reservation:
     lease:
       ttl: 30m

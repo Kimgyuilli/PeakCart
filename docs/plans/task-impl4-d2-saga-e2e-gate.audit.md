@@ -159,3 +159,98 @@
 - **수정**: `base-url: ${TOSS_BASE_URL:https://api.tosspayments.com/v1}` — **누락될 값 자체를 없앴다**(env override 유지). 계약 테스트도 "미주입 시 부팅 실패" → "미주입이어도 실 PG 로 해석" 으로 정정.
 - **영향 범위 재점검**: 실제 k8s 배포도 같은 이유로 깨졌을 것이다(operator 가 `TOSS_BASE_URL` 을 주입할 이유가 없었다). 이번 수정이 그것도 함께 해소한다.
 - **검증**: `bash scripts/docker-health-smoke.sh payment-service:smoke` → **passed** (CI 와 같은 스크립트) · `SPRING_PROFILES_ACTIVE=test ./gradlew build` → **BUILD SUCCESSFUL (8m 52s)** · 프로파일+base-url env 동시 주입에서도 계약 테스트 통과
+
+---
+
+# ④-d-2b (P10~P20 + ④ 종결)
+
+## 2026-08-29 — 선행 재리뷰 (#92 diff, 계획이 요구한 착수 조건)
+- 대상: `git diff 85dd363 275cda3` (3137줄) — 머지된 #92 **전체**
+- 사유: #92 는 diff 리뷰 3라운드를 받았으나 **3R 수정 자체가 제3자 검토를 받지 못했다**(계획 §9-1)
+- 결과: **5건 (P0:0 · P1:0 · P2:5)** · 반영 4 / 계획서 정정 1 / 기각 0
+- **3R 수정 4건은 전부 유효 판정** — 앰비언트 환경 격리(정규화 키)·알림 `type` 키잉·DLQ enum 정합 계약에서 새 결함 없음. 착수 조건 해소.
+- 처리:
+  1. `e2e-network-contract-lint.sh` — `services` 비어있음만 검사해 **`payment-service` 를 지운 fixture 가 exit 0**. 위반이 준 게 아니라 **검사 대상이 줄어든 것** → `REQUIRED` 집합 대조 + self-test 삭제 대조군 2종
+  2. `saga_e2e.py` 시나리오 C — docstring 은 "동시 투입" 인데 `send().get()` 직렬 → `publish_together()` 한 배치 flush. **소비 동시성까지는 보장 못 하므로** docstring 을 실제 보장 수준으로 낮춤(진짜 경합 증명은 ④-c-1b JVM 통합테스트)
+  3. Flyway readiness — 성공 **개수**만 비교 → **버전 집합** 정확 대조
+  4. 문서 3곳 정정 — `ce7d75a` 가 k8s 를 `${TOSS_BASE_URL:https://...}` 로 바꿨는데 `TossPaymentClient` Javadoc·`application.yml` 주석·`TossBaseUrlContractTest` Javadoc 이 **여전히 "기본값 없이 강제해 fail-fast"** 로 반대 안내
+  5. **기각 → 계획서 정정**: "stub `confirm` 을 계획대로 500 으로" 는 **P6 을 깨뜨린다**(P6 이 `POST /api/v1/payments/confirm` 을 실제 진입점으로 요구, confirm 이 항상 500 이면 가드 거부 `PAY-008` 과 PG 실패 `PAY-005` 를 구분 불가). 초안 문장이 P6 확정 전에 쓰였다 → 계획 §3 P2·§5 를 정정하고 "조용한 통과 차단" 은 `STUB_UNSCRIPTED_KEY` 가 **키 단위로** 담당함을 명시
+- raw: `.cache/codex-reviews/diff-pr92-precheck-*.json`
+
+## 2026-08-29 — P10 시나리오 격리
+- **false-green 2건 실측**:
+  1. 시나리오 A 의 `processed_events` 단언이 **`consumer_group` 만** 조회 — 이 테이블은 `(event_id, consumer_group)` UNIQUE 라 **앞 시나리오가 남긴 행**이 조건을 만족시킨다. 세 소비자가 전부 no-op 이어도 통과했다 → 발행 outbox envelope 의 `eventId` 로 키잉
+  2. 시나리오 D 가 `origin_topic='payment.failed'` 로만 조회 — **시나리오 A 가 같은 토픽에 실제 `payment.failed` 를 흘린다** → poison 본문에 marker 를 심고 `payload LIKE` 로 키잉(`DLT_ORIGINAL_KEY` 부재는 #92 실측)
+- 시나리오 C 의 `order_id` 를 `time.time()` → `sid + RUN_ID` CRC 유도로 결정화
+- 실행 순서 계약: "배경 스케줄러 간섭 0" 은 **단언하지 않음**(`UNRESOLVED` 는 reconciliation 의 명시적 후보라 값이 바뀌는 게 정상) → ① 키 결부(주 방어) ② `LINGERING_SCENARIOS` 를 꼬리에 고정. 정본은 `saga_e2e.py` 하나이고 smoke 가 import 해 **스택 기동 전에** 검사(`pymysql` 지연 임포트로 전환)
+- 검증: 순서 self-test 9종 · 위반 순서 `d,a` 가 기동 전에 차단됨
+
+## 2026-08-29 — P11~P15 매트릭스 게이트
+- 매트릭스 정본 `docs/plans/fixtures/saga-contract-matrix.tsv` — 26행 · 6열 · `expected` 는 canonical JSON object
+- `scripts/saga-contract-matrix-lint.sh` 3분기 + **required-ID 정본을 lint 안에**(N4 — 매트릭스가 유일 입력이면 행 삭제가 검사 대상만 줄여 통과)
+- 증적 키 = **`testcase@classname` + `[SAGA-xxx]`**(`testsuite@name` 은 클래스 `@DisplayName` 으로 덮여 키가 될 수 없다). 기존 테스트 **19개 태깅** + **Notification `UNRESOLVED` 테스트 신설**(3×3 중 유일한 부재)
+- manifest 를 `evidence[key] = {actual: …}` 로 재구성하고 진단값은 `diagnostics` 로 분리 — exact equality 를 쓰되 메타필드로 항상 실패하지 않도록
+- **self-test 36종 전량 통과**: 구조 훼손·canonical 위반·필수행 삭제·missing/failure/error/skipped/duplicate·`testsuite@name` 무관·중첩 `Outer$Inner`·키 순서 무관/타입 불일치(`"1"` vs `1`)·subset 금지·stale commit
+
+## 2026-08-29 — P17 스케줄러 배선
+- 기존 타임아웃/sweeper 테스트는 `@InjectMocks` 객체를 **직접 호출**해 `@Scheduled` 를 지워도 통과했다
+- 주기·lock 을 base 소유 타입 안전 properties 로 분리(`OrderSchedulerProperties`/`StockSchedulerProperties`, ADR-0007 동작 정책) + placeholder 에 **인라인 기본값 금지**(base 선언이 사라져도 조용히 도는 경로 차단)
+- **결정성은 계획 원안과 다르게 잡았다.** 원안의 "컨텍스트 기동 **전** seed initializer" 는 **성립하지 않는다** — 앱 테이블 스키마를 Flyway 가 컨텍스트 기동 **중**에 만들기 때문이다. 대신 주기·lock 하한만 짧게 덮어 반복 발화가 seed 를 잡게 하고, **운영 기본값은 별도 properties 계약 테스트**가 고정한다(한 테스트에 두 관심사를 넣으면 둘 중 하나는 반드시 거짓이 된다)
+- **변이 검사로 false-green 아님을 실증**: `@Scheduled` 한 줄 제거 → Order 2건·Product 2건 전부 FAILED, 원복 후 통과
+- 구현 중 실측 2건: `categories` 에 `created_at` 컬럼 없음 / 회수는 재고 복구까지 한 트랜잭션이라 `inventories` 행이 없으면 **RELEASED 전이까지 롤백**되어 배선이 끊긴 것처럼 보인다
+
+## 2026-08-29 — P16 음성 대조군 (실제 스택)
+- 명령: `E2E_RUN_ID=nc4-… bash scripts/saga-e2e-smoke.sh --negative-control` → **exit 0 · 7종 전량 통과**
+- **양성 대조군이 제 설계 결함 3건을 연속 반증했다**:
+  1. 컨테이너 안 `host.docker.internal`/`ip` 로 주소를 못 구해 **HOST_ADDR 빈 값**
+  2. 프로브가 `python3` 를 썼는데 **payment-service 이미지에 python3 가 없다**(실측) → 음성이 "격리돼서" 가 아니라 **"명령이 없어서"** 통과했다 — 정확히 이 대조군이 막으려던 false-green
+  3. 표적을 호스트 프로세스로 두니 Docker Desktop 에서 브리지 게이트웨이가 VM 안 주소라 **비격리 컨테이너조차 닿지 못했다** → 표적을 컨테이너(`egress-canary`)로 이동
+- 스크립트 자체 결함 2건: `external-control` 이 `profiles: [control]` 이라 미생성 → `docker network inspect` 실패가 **`pipefail` 때문에 대입문에서 스크립트를 죽였다** / `docker compose run` 은 `--profile` 을 받지 않는다(top-level 플래그) → `COMPOSE_PROFILES`
+- 판정은 **rc 를 특정**한다 — "아무 비정상 종료" 로 받으면 127(도구 없음)이 다시 통과한다
+- `egress-canary` 추가가 기존 lint 를 느슨하게 만든 것도 잡았다("대조군이 하나라도 보이면 통과") → 집합 전체 요구, self-test 12종
+- **증명 범위**: internal-only 앱이 다른 네트워크 호스트에 닿지 못한다. 인터넷 egress 차단 자체의 증거는 #92 의 `UnknownHostException` 라이브 관측이 따로 있다
+
+## 2026-08-29 — P18/P19, 그리고 #92 미충족 #2 의 근본 원인
+- P18: `images` 매트릭스 6개 유지(줄이면 `image-contract-lint` 파서가 깨진다 — 통과 확인) · Save/Upload 단일 조건식으로 **PR 에서도 saga 4개 업로드** + `if-no-files-found: error` · `e2e` 잡 신설(artifact 정확히 4개 검증 후 `docker load`) · `if: always()` 증적 업로드 후 `down -v` · build=`--structure`+`--jvm-evidence` / e2e=`--structure`+`--e2e-evidence` · 게이트는 `gradlew build` **뒤** · test artifact glob `*/build/**`
+- P19: 구간별 절대 상한 + `durations.tsv` + "재시도는 인프라 기동에만"
+- **가설 3개가 실측으로 반증됐다**: `local` 프로파일 디버그 로깅(기동·A 는 빨라졌으나 B 는 그대로) / 토픽 파티션 late discovery 사전 생성(`생성 성공 1`, B 여전히 189초) / 소비 없이 유실(운영 버그 — `processed_events` 2행 확인으로 **유실 아님**)
+- **실제 원인은 내가 쓴 코드의 버그였다.** `while read` 루프 안의 `docker compose exec -T` 가 **루프의 stdin(토픽 목록)을 통째로 삼켜** 첫 반복 뒤 루프가 끝났다 → 20종 중 1종만 생성. **같은 버그로 검증 루프도 1건만 돌아 "대조 실패 0" 이 vacuous 였다** — 검사가 스스로를 속였다
+- `</dev/null` 추가 후: `토픽 20종 — 생성 성공 20 · 대조 실패 0`, `scenario:b` **162~189초(실패/경계) → 21s → 10s → 14s**
+- 원리: 소비자가 토픽 생성 **전에** 구독하면 파티션 0만 보고, 나머지 파티션의 메시지는 메타데이터 갱신(~200초) 뒤에야 소비된다 — 그래서 **두 번째 시나리오만** 느렸다
+- 재발 방지: **`생성 성공 == 선언 개수`를 계약으로 강제**. 토픽 파티션 정본은 `--emit-topics` 로 `TopicBuilder` 선언에서 유도(정본 복제 회피)
+- **실행 증적 (§5 실패 주입)**:
+  | 명령 | exit | 결과 |
+  |---|---|---|
+  | `saga-e2e-smoke.sh --self-test` | 0 | 순서 계약 9종 |
+  | `e2e-network-contract-lint.sh --self-test` | 0 | 12종 |
+  | `saga-contract-matrix-lint.sh --self-test` | 0 | 36종 |
+  | `saga-contract-matrix-lint.sh --structure` | 0 | 26행 |
+  | `kafka-subscription-contract-lint.sh --self-test` | 0 | 9종 |
+  | `pg-stub/self-test.py` | 0 | 19종 |
+  | `saga-e2e-smoke.sh --negative-control` (nc4) | 0 | 7종 |
+  | `saga-e2e-smoke.sh` (fix / v1 / v2) | 0 / 0 / 0 | 시나리오 4종 **3회 연속** |
+  | `@Scheduled` 제거 변이 (order / product) | 1 / 1 | 배선 테스트가 잡는다 |
+  | 증적 artifact | — | `.cache/e2e/<run_id>/` (manifest·durations·compose.log) |
+
+## 2026-08-29 — diff 리뷰 라운드 1 (④-d-2b)
+- 항목: **5건 (P0:0 · P1:4 · P2:1)** · 반영 5 / 기각 0
+- **전부 게이트가 스스로를 속이는 경로였다**:
+  1. **(P1)** e2e `expected` 의 의미가 매트릭스에만 있다 — 매트릭스와 `saga_e2e.py` 의 actual 을 **함께** `{"refund_rows":1}` 로 줄이면 `--structure` 도 `--e2e-evidence` 도 통과하며 `payment_status`·`refund_status`·outbox 계약이 사라진다. required-ID 를 lint 밖에 둔 것과 같은 논리가 **관측 키에도** 필요했다 → `REQUIRED_E2E_KEYS` 정본 추가
+  2. **(P1)** duplicate 가 **같은 결과**로 반복되면 통과했다(P15·N5 는 non-zero 를 요구). e2e 쪽도 `manifests[sid]` 대입이 같은 시나리오의 성공 manifest 를 조용히 덮어썼다 → outcome 을 리스트로 모아 2건 이상이면 실패, manifest 중복도 실패
+  3. **(P1)** 배선 테스트가 `PAYMENT_REQUESTED` 주문 하나만 seed 해 **타임아웃 3종 중 1종만** 검증했다. 나머지 둘은 `PENDING` 전용 조회라 그 fixture 를 집지 않는다 — **`OrderTimeoutScheduler:61`·`:83` 의 `@Scheduled` 를 지워도 통과**했다. audit 의 "한 줄 제거" 주장도 첫 잡만 증명한 것이었다 → PENDING 계열 fixture 2종 추가
+  4. **(P1)** readiness 음성 대조군이 앱을 정지시킨 뒤 `check_readiness()` 를 부르는데, readiness 는 health(3) → group(5) 순서라 **health 에서 먼저 죽어 group 검사가 실행되지 않았다**. 게다가 모든 `Exception` 을 성공으로 처리해 Kafka/DB 오류까지 '감지 성공' 이 됐다 → `skip_health=True` 신설 + 실패 사유가 `consumer group` 인지 특정
+  5. **(P2)** `BUDGET_CONTROL` 을 선언만 하고 쓰지 않아 대조군의 유일한 상한이 CI 잡 45분이었다 → 워치독으로 실제 적용
+- **변이 검사 3회로 #3 해소를 실증**: `cancel-expired-delay`·`unconfirmed-reservation-delay`·`lease-expiry-delay` 의 `@Scheduled` 를 각각 제거 → 전부 exit 1
+- raw: `.cache/codex-reviews/diff-d2b-r1-*.json`
+
+## 2026-08-29 — diff 리뷰 라운드 2 (④-d-2b)
+- 항목: **4건 (P0:0 · P1:3 · P2:1)** · 반영 4 / 기각 0
+- **`skip_health` 기본 경로와 스케줄러 fixture 3종의 교차 조건에서는 결함 없음** 확인(1R 수정 4건 중 2건은 새 결함을 만들지 않았다)
+- **1라운드 수정이 만든 새 결함 1건 + 기존 비대칭 3건**:
+  1. **(P1 · 실제 CI 결함)** CI 가 정상 실행과 음성 대조군을 **같은 `E2E_RUN_ID`·출력 디렉터리**로 돌린다. 대조군은 시나리오 A 를 일부러 실패시키므로 그 failure manifest 가 앞서 만든 success 를 덮어쓰고 `--e2e-evidence` 가 `result=failure` 로 실패한다. **내 로컬 검증이 둘을 서로 다른 run_id 로 따로 돌려서 이 조합을 재현하지 않았다** → 대조군 증적을 `negative-control/` 하위로 격리 + CI 에서 대조군에 별도 run_id 부여(project 결합 제거)
+  2. **(P1)** 워치독이 명시적 말단 2곳에서만 정리되고 teardown 에 연결되지 않았다 — `set -e` 로 중간에 죽으면 백그라운드 sleep 이 살아남아 나중에 저장된 `$$` 로 TERM 을 보낸다(PID 재사용 시 무관한 프로세스) → 센티넬 파일 + `stop_watchdog()` 를 teardown 이 소유
+  3. **(P1)** `REQUIRED_IDS` 를 **누락만** 검사해 임의의 `SAGA-*` 행 추가가 통과했다(계획 §7 은 정확 일치를 요구) → 초과 ID 도 실패
+  4. **(P2)** `REQUIRED_E2E_KEYS.get(id)` 가 None 이면 조용히 건너뛰어, 새 e2e 행을 등록 없이 추가하면 1R 에서 막은 축소 우회가 **그 행에서 부활**한다 → e2e 행 전량 등록 강제 + 역방향(등록만 있고 행이 없음)도 검사
+- **실행으로 #1 해소 검증**: 같은 `E2E_RUN_ID` 로 정상 실행 → 음성 대조군 순차 실행 후 최상위 manifest 4종 전부 `success` 유지, 대조군 failure 는 `negative-control/manifest-a.json` 에 격리, `--e2e-evidence` **OK**
+- 새 검사 4종 전부 self-test 대조군 동반(총 **40종**)
+- raw: `.cache/codex-reviews/diff-d2b-r2-*.json`

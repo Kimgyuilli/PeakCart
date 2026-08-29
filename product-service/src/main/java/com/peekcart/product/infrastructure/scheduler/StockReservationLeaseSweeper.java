@@ -22,13 +22,15 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@EnableConfigurationProperties(ReservationLeaseProperties.class)
+@EnableConfigurationProperties({ReservationLeaseProperties.class, StockSchedulerProperties.class})
 public class StockReservationLeaseSweeper {
 
     private final StockReservationService reservationService;
 
-    @Scheduled(fixedDelay = 60_000)
-    @SchedulerLock(name = "stockReservationLeaseSweepJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
+    @Scheduled(fixedDelayString = "${app.scheduler.stock.lease-sweep-delay}")
+    @SchedulerLock(name = "stockReservationLeaseSweepJob",
+            lockAtMostFor = "${app.scheduler.stock.lock-at-most-for}",
+            lockAtLeastFor = "${app.scheduler.stock.lock-at-least-for}")
     public void sweep() {
         try {
             int reclaimed = reservationService.sweepExpiredLeases();

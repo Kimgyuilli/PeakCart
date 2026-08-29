@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -30,14 +31,17 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+@EnableConfigurationProperties(OrderSchedulerProperties.class)
 public class OrderTimeoutScheduler {
 
     private final OrderRepository orderRepository;
     private final OrderCommandService orderCommandService;
     private final OrderSagaMetrics sagaMetrics;
 
-    @Scheduled(fixedDelay = 60_000)
-    @SchedulerLock(name = "orderTimeoutCancelJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
+    @Scheduled(fixedDelayString = "${app.scheduler.order.cancel-expired-delay}")
+    @SchedulerLock(name = "orderTimeoutCancelJob",
+            lockAtMostFor = "${app.scheduler.order.lock-at-most-for}",
+            lockAtLeastFor = "${app.scheduler.order.lock-at-least-for}")
     public void cancelExpiredOrders() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
         List<Order> expiredOrders = orderRepository.findExpiredPaymentRequested(cutoff);
@@ -54,8 +58,10 @@ public class OrderTimeoutScheduler {
     /**
      * 예약 미확정 PENDING 주문 수렴. 정상 예약 진행 중(확정됨) 주문은 제외되어 조기 취소되지 않는다.
      */
-    @Scheduled(fixedDelay = 60_000)
-    @SchedulerLock(name = "orderReservationTimeoutJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
+    @Scheduled(fixedDelayString = "${app.scheduler.order.unconfirmed-reservation-delay}")
+    @SchedulerLock(name = "orderReservationTimeoutJob",
+            lockAtMostFor = "${app.scheduler.order.lock-at-most-for}",
+            lockAtLeastFor = "${app.scheduler.order.lock-at-least-for}")
     public void cancelUnconfirmedReservations() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(5);
         List<Order> stuck = orderRepository.findUnconfirmedReservationBefore(cutoff);
@@ -74,8 +80,10 @@ public class OrderTimeoutScheduler {
      * 만료 시각은 Product 가 {@code stock.reservation.result} 로 부여한 값이라 Order 가 독자적으로
      * 추측하지 않는다 — 양측이 같은 시각을 보는 것이 sweeper 와의 순서(Order 가 먼저)를 보장한다.
      */
-    @Scheduled(fixedDelay = 60_000)
-    @SchedulerLock(name = "orderReservationLeaseExpiryJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
+    @Scheduled(fixedDelayString = "${app.scheduler.order.lease-expiry-delay}")
+    @SchedulerLock(name = "orderReservationLeaseExpiryJob",
+            lockAtMostFor = "${app.scheduler.order.lock-at-most-for}",
+            lockAtLeastFor = "${app.scheduler.order.lock-at-least-for}")
     public void cancelExpiredReservationLeases() {
         List<Order> expired = orderRepository.findExpiredReservationLease(LocalDateTime.now());
 

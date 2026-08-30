@@ -174,6 +174,12 @@ for f in "${CANDIDATES[@]:-}"; do
     non_import=$(python3 - "$f" <<'PYLEX'
 import re, sys
 
+def eat_escape(text, idx):
+    """escape 2글자를 공백으로 지우되 줄바꿈은 보존한다 — 줄 번호가 밀리면 안 된다."""
+    nxt = text[idx + 1] if idx + 1 < len(text) else ""
+    return " \n" if nxt == "\n" else "  "
+
+
 src = open(sys.argv[1], encoding="utf-8").read()
 out, i, n = [], 0, len(src)
 in_block = in_line = in_str = in_char = in_text = False
@@ -187,10 +193,13 @@ while i < n:
         if c == "\n": in_line = False; out.append("\n")
         i += 1; continue
     if in_text:                       # text block """..."""
+        # escape 를 먼저 소비한다. 이걸 빼면 유효한 \""" 의 첫 따옴표부터를 종료 토큰으로
+        # 오인해 상태가 뒤집히고, 이후 실제 선언이 EOF 까지 문자열로 지워진다(false-green).
+        if c == "\\": out.append(eat_escape(src, i)); i += 2; continue
         if nxt3 == '"""': in_text = False; i += 3; continue
         out.append("\n" if c == "\n" else " "); i += 1; continue
     if in_str or in_char:
-        if c == "\\": out.append("  "); i += 2; continue
+        if c == "\\": out.append(eat_escape(src, i)); i += 2; continue
         if (in_str and c == '"') or (in_char and c == "'"): in_str = in_char = False
         out.append(" "); i += 1; continue
     if nxt3 == '"""': in_text = True; i += 3; continue

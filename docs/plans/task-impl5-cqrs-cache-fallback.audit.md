@@ -124,3 +124,19 @@
 | 4R | **3R 수정이 만든 2건** (복원이 과해 비가용성 하위 삼킴 · sed 3형태 잔존) |
 
 **교훈**: 이 표면은 "허용 범위" 라는 **연속적인 축**을 다루는데, 매 라운드가 그 축 위에서 한쪽으로 과보정했다. 넓히면 정합성 오류가 새고, 좁히면 가용성 장애가 5xx 가 된다. 수렴은 **경계를 타입 계층 전수 확인으로 고정**(4R #1)하고 **판별 fixture 를 테스트로 못 박은**(4R #2 self-test) 뒤에야 왔다. 다음에 이런 축을 만나면 라운드를 돌리기 전에 먼저 전수 열거부터 할 것.
+
+## 2026-08-30 — diff 리뷰 라운드 5
+
+- 항목: 3건 (P0:0, P1:2, P2:1)
+- 처리: 반영 2건 / **기각 1건**
+- **예외 분류 축(A) 은 이번 라운드 결함 0건 — 첫 수렴 신호.** 리뷰어가 lettuce-core 6.6.0 과 spring-data-redis 3.5.10 바이트코드를 대조해 "standalone Spring Cache 경로의 연결 장애가 누락된 증거를 찾지 못했다" 고 명시했다. `LettuceExceptionConverter` 가 `ChannelException`/`RedisConnectionException` → `RedisConnectionFailureException`, `RedisCommandTimeoutException`/`TimeoutException` → `QueryTimeoutException` 으로 번역하고, 연결 종료는 정확 타입 `RedisException` 으로 전달된다. 4R 의 경계 설정이 맞았다.
+- 반영 2건 — 둘 다 **lint lexer(B)** 소관:
+  - **#2 (P1) text block escape 미처리** — `in_text` 상태에서 backslash 를 소비하지 않아 유효한 `\"""` 의 첫 따옴표를 종료 토큰으로 오인했다. 상태가 뒤집혀 이후 실제 선언이 EOF 까지 문자열로 지워진다(false-green). → `eat_escape()` 신설(줄바꿈 보존 — 줄 번호가 밀리면 안 된다). 문자열/문자 리터럴에도 동일 적용.
+  - **#3 (P2) self-test 가 검출과 고장을 구별 못 했다** — lint 의 모든 비정상 종료를 `detected` 로 취급해, lexer traceback 이나 preflight 실패(rc=2)에서도 위반 5케이스가 전부 ok 로 찍혔다. → 종료 코드를 그대로 판정(0=clean, 1=detected, 그 외 즉시 실패)하고 stderr 를 출력에 포함.
+  - fixture 2종 추가(text block escape 뒤 선언 = 위반, text block 안 식별자 언급 = 정상). **변이 실증**: `eat_escape` 를 제거하면 새 fixture 만 정확히 FAIL.
+- **기각 1건**:
+  - **#1 (P1) 유니코드 escape 우회** — `@Bean MeterFilter rogue()` 는 javac 이 `MeterFilter` 로 해석하지만 원문 grep 후보 선별에서 빠져 통과한다. 지적은 사실이다.
+  - **기각 사유**: 이 lint 는 **실수로 인한 중복 선언을 막는 가드레일**이지 적대적 우회를 막는 통제가 아니다. 식별자를 유니코드 escape 로 난독화해 lint 를 통과시키려는 개발자는 lint 자체를 지우거나 `@Bean` 을 다른 모듈에 두는 편이 더 쉽다 — 즉 이 구멍을 막아도 위협 모델이 닫히지 않는다. 반면 대응 비용은 후보 선별을 전체 Java 파일 순회 + 유니코드 변환으로 바꾸는 것이라 lint 실행 시간과 복잡도가 실질적으로 는다.
+  - **재검토 조건**: 이 lint 가 보안 통제로 승격되거나(예: 외부 기여 수용), 유니코드 escape 가 코드베이스에 실제로 등장하면 다시 연다.
+- 회귀: 통합 7/7 · 단위 12/12 · 바인딩 2/2 · S7·기존 캐시 통과 · lint EXIT=0 · D5-V2 self-test **10/10**
+- raw: `.cache/codex-reviews/diffreview-task-impl5-cqrs-cache-fallback-r5-*.json`

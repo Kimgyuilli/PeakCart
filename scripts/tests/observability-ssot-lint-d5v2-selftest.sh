@@ -18,8 +18,9 @@ cd "$REPO_ROOT"
 TARGET="product-service/src/main/java/com/peekcart/global/config/CacheConfig.java"
 ANCHOR='    @Bean'
 BACKUP="$(mktemp)"
+STDERR_LOG="$(mktemp)"
 cp "$TARGET" "$BACKUP"
-trap 'cp "$BACKUP" "$TARGET"; rm -f "$BACKUP"' EXIT
+trap 'cp "$BACKUP" "$TARGET"; rm -f "$BACKUP" "$STDERR_LOG"' EXIT
 
 DECL='public org.springframework.boot.actuate.autoconfigure.metrics.MeterRegistryCustomizer<io.micrometer.core.instrument.MeterRegistry> selfTestRogue() { return r -> {}; }'
 FAILURES=0
@@ -35,13 +36,24 @@ PY
 }
 
 expect () {   # expect <detected|clean> <label> <snippet>
-    local want="$1" label="$2" snippet="$3"
+    local want="$1" label="$2" snippet="$3" rc
     inject "$snippet"
-    if bash scripts/observability-ssot-lint.sh >/dev/null 2>&1; then got="clean"; else got="detected"; fi
+    # 종료 코드를 그대로 본다. `if !` 로 뭉뚱그리면 lexer traceback 이나 preflight 실패(rc=2)가
+    # '검출 성공' 으로 위장돼, 검사기가 고장난 상태에서도 위반 케이스가 전부 ok 로 찍힌다.
+    bash scripts/observability-ssot-lint.sh >/dev/null 2>"$STDERR_LOG"
+    rc=$?
+    case "$rc" in
+        0) got="clean" ;;
+        1) got="detected" ;;
+        *) echo "  FAIL  [lint 비정상 종료 rc=$rc] $label"
+           sed 's/^/          /' "$STDERR_LOG" >&2
+           FAILURES=$((FAILURES + 1))
+           return ;;
+    esac
     if [[ "$got" == "$want" ]]; then
         echo "  ok    [$want] $label"
     else
-        echo "  FAIL  [want=$want got=$got] $label"
+        echo "  FAIL  [want=$want got=$got rc=$rc] $label"
         FAILURES=$((FAILURES + 1))
     fi
 }
@@ -71,6 +83,18 @@ expect clean "여러 줄 주석 시작 줄의 식별자 언급" "    /* MeterReg
 expect clean "문자열 리터럴 안의 식별자" "    private static final String SELF_TEST_NOTE = \"MeterFilter 는 공유 모듈 소유\";"
 
 expect clean "javadoc 안의 식별자 언급" "    /** {@code MeterRegistryCustomizer} 는 여기서 선언하지 않는다. */"
+
+# text block: escape 된 따옴표를 종료 구분자로 오인하면 이후 코드가 EOF 까지 문자열로 지워진다.
+expect detected "text block 안의 escape 된 따옴표 뒤 선언" '    private static final String TB = """
+        escape 된 삼중따옴표: \"""
+        """;
+
+    @Bean
+    '"$DECL"
+
+expect clean "text block 안의 식별자 언급" '    private static final String TB2 = """
+        MeterFilter 는 공유 모듈이 소유한다
+        """;'
 
 if [[ $FAILURES -gt 0 ]]; then
     echo "[D5-V2 self-test] 실패 ${FAILURES}건" >&2

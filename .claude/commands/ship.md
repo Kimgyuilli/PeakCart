@@ -1,462 +1,212 @@
 # /ship — 커밋 / 푸시 / PR 생성 / done 갱신
 
 사용법:
-- `/ship` — active state (stage ∈ { `work.done`, `ship.*` }) 에 대해 **dry-run 모드** 실행 (기본)
-- `/ship <task-id>` — 지정 task 의 state 로 dry-run
+- `/ship` — 현재 브랜치의 task 를 찾아 **dry-run** (기본)
+- `/ship <task-id>` — 지정 task 로 dry-run
 - `/ship --execute` — 실제 commit / push / `gh pr create` / `/done` 수행
 - `/ship <task-id> --execute` — 지정 task 에 대해 execute
 
-입력: `$ARGUMENTS`
+> **축소 이력 (2026-08-30)**: 11-step 상태머신(lock · `state.json` · drift detector · resume cursor · gate events · archive)을 제거했다.
+> 사유 — `/plan`·`/work` 는 2026-08-26 축소에서 이미 `state.json` 을 버렸는데 `/ship` 만 그것을 **필수 전제**로 남겨두어, Step 1 이 "state 가 없습니다. /work 를 먼저 완료하세요" 로 **정상 흐름을 차단**했다. 구현 ⑤(#94) 에서 실제로 이 불일치에 부딪혀 Step 1/10 을 건너뛰고 수행했다.
+> 진행 상태는 `state.json` 이 아니라 **git 과 gh 의 사실**(브랜치·커밋·원격·PR)로 판정한다. 이력은 계획서·audit 파일·git 이력에 남는다.
+>
+> 이 축소로 `hpx_ship_pr_body_data` 는 호출처가 사라진다. `hpx_state_*`·`hpx_lock_*`·`hpx_gate_events_append`·`hpx_diff_absorption_status` 는 `/plan`·`/work` 축소 때 이미 죽어 있었다. 셸 라이브러리 정리는 별도 task 로 한 번에 한다 — 이 커맨드는 호출을 멈출 뿐 삭제하지 않는다.
 
-본 커맨드는 `harness-plan.md` §6-3-3 (11-step) 을 구현한다.
-`/ship` 자체는 Codex 를 호출하지 않는다 (shell precheck / commit / push / gh 만).
+`/ship` 은 Codex 를 호출하지 않는다 (shell precheck / commit / push / gh 만).
 
 ---
 
 ## 모드 구분
 
-- **dry-run (default)**: Steps 1–2 실행, Steps 3/5 산출물 미리보기만, Steps 4/7/8/9/10 건너뜀. state 는 **갱신하지 않음**. `.cache/` 산출물만 생성.
-- **execute**: 모든 Step 풀 실행. state 갱신. 부작용 발생.
+- **dry-run (기본)**: 1~5 실행(부작용 없음), 6~8 은 "무엇을 할지" 만 보고. `.cache/` 산출물은 생성.
+- **execute**: 전 단계 실행. push · PR 생성 · 문서 갱신 발생.
 
-dry-run 이 passed 된 뒤 **같은 세션에서 `--execute` 로 재호출**하면 Steps 3 부터 deterministic 하게 재계산 후 실행.
+dry-run 통과 후 `--execute` 로 재호출하면 같은 판정을 다시 계산해 실행한다.
 
 ---
 
 ## 실행 규칙
 
-- 모든 Bash 호출은 `bash -c '...'` 서브셸
-- 각 Bash 호출 선두에 `set -euo pipefail && source .claude/scripts/shared-logic.sh`
-- state.json 은 `hpx_state_write` 로 원자 치환 (execute 모드에서만)
-- execute 모드의 state mutation 은 `hpx_state_patch`, `hpx_state_set_*`, `hpx_state_append_*` helper 로만 수행
-- raw JSON 직접 조립이나 direct state overwrite 우회는 금지한다.
-- `hpx_state_init` 이외의 mutation helper 는 state 파일이 없으면 실패해야 한다.
-- 외부 부작용 직전 → state 예약 → 부작용 → state 재기록
-- **`git add -A` 절대 금지**. 파일 명시 커밋만
-- dry-run 은 lock 을 획득하되 종료 시 해제 (다른 세션 간섭 차단)
+- **`git add -A` 금지.** 커밋할 파일을 명시한다.
+- push · PR 생성은 되돌리기 어려운 외부 작업이다. **execute 모드에서만** 수행하고, 그 전에 사용자 승인을 받는다.
+- 머지는 하지 않는다.
+- 실패하면 그 지점에서 멈추고 보고한다. 자동 rebase·force push 금지.
 
 ---
 
-## 11-step 절차
+## 절차
 
-### Step 1. 인자 파싱 + task 확정 + state 로드 + lock
+### 1. task 확정 + 사전 확인
+
+- 인자에서 `--execute` 를 떼고 남은 것이 `TASK_ID`. 없으면 현재 브랜치명과 `docs/plans/*.md` 에서 추론해 제시하고 승인받는다.
+- `TASK_ID` 는 `[A-Za-z0-9._-]+` 만 허용하고 `..` · 선두 `-`/`.` 를 금지한다.
+- 다음을 확인하고 어긋나면 **중단하고 보고**한다:
+  - `docs/plans/${TASK_ID}.md` 존재 (없으면 `/plan` 부터)
+  - 현재 브랜치가 `main` 이 **아님** (main 에서 직접 ship 금지)
+  - 계획서의 작업 항목 체크박스가 전부 `- [x]` (미완이면 어느 항목이 남았는지 보고)
 
 ```bash
-bash -c 'set -euo pipefail
+git branch --show-current
+git status -sb
+git log --oneline "$(git merge-base HEAD origin/main)"..HEAD
+```
+
+### 2. Consistency precheck
+
+```bash
+bash -c 'set -uo pipefail
 source .claude/scripts/shared-logic.sh
-# 아래 변수는 Claude 가 $ARGUMENTS 파싱으로 주입
-echo "TASK_ID=$TASK_ID"
-echo "MODE=$MODE"  # dry-run | execute
+RES=$(hpx_consistency_precheck "<TASK_ID>")
+echo "$RES" | head -3
+LOG=$(echo "$RES" | sed -n 2p); [ -f "$LOG" ] && tail -30 "$LOG"
 '
 ```
 
-- `$ARGUMENTS` 파싱: `--execute` 토큰 제거 후 남은 인자가 `TASK_ID`. 없으면 active state 스캔
-- active state 스캔: `docs/plans/*.state.json` 중 `stage ∈ { work.done, ship.* }` 을 updated_at 내림차순 → 후보 제시
-- `hpx_state_exists "$TASK_ID"` false → "state 가 없습니다. /work 를 먼저 완료하세요." 종료
-- state 로드 후 `stage` 확인:
-  - `work.done` 또는 `ship.*` 이면 진행
-  - 그 외 → "/ship 은 work.done 이후에만 진행 가능" 안내 후 종료
-- `SID=$(hpx_lock_acquire "$TASK_ID" ship "$(python3 -c 'import json; print(json.load(open("docs/plans/'"$TASK_ID"'.state.json")).get("session_id",""))')")` — state.session_id 재사용으로 re-enter idempotent
-- HEAD 와 `state.branch` 교차 검증 (`git branch --show-current` == `state.branch`). 불일치 → 사용자 보고 후 중단
-- `work.done` 진입에서는 `last_diff_path` 기준 **state drift detector** 를 먼저 수행:
-  ```bash
-  bash -c 'set -euo pipefail
-  source .claude/scripts/shared-logic.sh
-  STAGE=$(python3 -c "import json; print(json.load(open('"'"'docs/plans/'"$TASK_ID"'.state.json'"'"')).get('"'"'stage'"'"','"'"''"'"'))")
-  DIFF_PATH=$(python3 -c "import json; print(json.load(open('"'"'docs/plans/'"$TASK_ID"'.state.json'"'"')).get('"'"'last_diff_path'"'"','"'"''"'"'))")
-  if [ "$STAGE" = "work.done" ] && [ -n "$DIFF_PATH" ] && [ -f "$DIFF_PATH" ]; then
-    STATUS=$(hpx_diff_absorption_status "$DIFF_PATH")
-    echo "DRIFT_STATUS=$STATUS"
-    if [ "$STATUS" = "all_absorbed" ]; then
-      hpx_diff_files "$DIFF_PATH" || true
-    fi
-  fi
-  '
-  ```
-- `DRIFT_STATUS=all_absorbed` 이면 **GS-0 게이트**:
-  ```
-  === state drift 감지 ===
-  last_diff_path 의 변경이 현재 working tree 에 없습니다.
-  diff 캐시 기준 변경은 이미 커밋에 흡수되었을 가능성이 높습니다.
-
-    [1] archive — state 정리 후 종료
-    [2] 종료
-  >
-  ```
-  - `[1]` 선택 시 audit log 에 `state_drift_archive` 기록 후 state 를 `docs/plans/.archive/` 로 이동하고 종료
-  - `[2]` 선택 시 audit log 에 `state_drift_abort` 기록 후 종료
-- `DRIFT_STATUS=partially_live` 이면 partial drift 로 간주하고 경고 후 종료. 자동 진행 금지
-
-### Step 2. Consistency precheck (GS-1 conditional)
-
-```bash
-bash -c 'set -euo pipefail
-source .claude/scripts/shared-logic.sh
-RES=$(hpx_consistency_precheck "'"$TASK_ID"'")
-STATUS=$(echo "$RES" | sed -n 1p)
-LOG=$(echo "$RES" | sed -n 2p)
-EC=$(echo "$RES" | sed -n 3p)
-echo "STATUS=$STATUS LOG=$LOG EC=$EC"
-tail -30 "$LOG" 2>/dev/null || true
-'
-```
-
-분기 (§6-3-3 Step 2 + §7-5-E):
-- `STATUS=ok` (warnings 0) → 자동 통과 (§6-2 conditional, GS-1 skip). `hpx_gate_events_append` 로 `shown=false, auto_passed=true` 기록
-- `STATUS=warnings` → **GS-1 게이트** 노출 (log 요약 + `[MISS] ADR-NNNN` 항목 제시):
+- `ok` (warnings 0) → 자동 통과. 게이트 노출하지 않는다
+- `warnings` → 항목을 제시하고 선택받는다:
   ```
   === Consistency precheck — warnings ===
-  [MISS] ADR-0009 — 해당 ADR 파일 없음
-  ...
+  [MISS] ADR-NNNN — ...
     [1] 수정 (편집 후 재실행)
     [2] 무시하고 진행 (사유 필수)
     [3] 종료
-  >
   ```
-  - 선택 `[2]` 시 사유를 audit log + state 에 기록, PR 본문에 "Skipped consistency checks" 섹션 추가 플래그 설정
-- `STATUS=script_error` → §7-5-E 실행 실패 분기: stderr 요약 + exit code 제시, 동일 3 선택지 (환경 수정/무시+사유/종료)
-- `STATUS=unavailable` → "docs/consistency-hints.sh 미존재. Skip." 안내. audit log 한 줄만 기록. 자동 진행
+  `[2]` 선택 시 사유를 **PR 본문의 "Skipped consistency checks" 섹션**에 적는다
+- `script_error` → stderr 와 exit code 를 그대로 제시하고 동일 3선택지
+- `unavailable` → "`docs/consistency-hints.sh` 없음. skip" 한 줄 안내 후 진행
 
-**dry-run 이면**: precheck 만 실행하고 게이트 미노출. 결과 요약만 출력 후 Step 3 로 진행.
+### 3. 커밋 정리
 
-**execute 통과 후**:
-- `hpx_state_patch "$TASK_ID" '{"stage":"ship.precheck","updated_at":"<now ISO8601>"}' ship step2.precheck` 로 기록
-
-### Step 3. 커밋 분할 제안 (GS-2 always)
+`/work` 가 이미 분류별로 커밋했으면 이 단계는 **확인만** 한다. 커밋을 다시 만들지 않는다.
 
 ```bash
-bash -c 'set -euo pipefail
-source .claude/scripts/shared-logic.sh
-DIFF_PATH=$(python3 -c "import json; s=json.load(open('"'"'docs/plans/'"$TASK_ID"'.state.json'"'"')); print(s.get('"'"'last_diff_path'"'"','"'"''"'"'))")
-if [ -z "$DIFF_PATH" ] || [ ! -f "$DIFF_PATH" ]; then
-  # 재진입이거나 diff 캐시 유실 — fresh capture
-  TS=$(hpx_epoch_ts)
-  DIFF_PATH=$(hpx_diff_capture "'"$TASK_ID"'" "$TS")
-fi
-echo "DIFF_PATH=$DIFF_PATH"
-hpx_commit_plan_group "$DIFF_PATH"
-'
+git status --porcelain          # 미커밋 잔여
+git log --reverse --format='%h  %s' "$(git merge-base HEAD origin/main)"..HEAD
 ```
 
-위 TSV 출력을 받아 Claude 가 §10-3 기준으로 partition 결정:
-- category ∈ `{adr, docs, test, chore, src}` 별로 묶되, src 는 필요 시 scope(패키지/도메인) 기준 분할
-- 한 커밋 = 한 분류 (mixed 금지)
-- 한 커밋 100파일 초과 → 재분할
-- ADR/계획서는 별도 커밋
+- **미커밋 잔여가 없으면**: 기존 커밋 목록을 보여주고 "한 커밋 = 한 분류" 가 지켜졌는지 확인만 한다
+- **미커밋 잔여가 있으면**: 분류별로 나눠 커밋한다
+  - category ∈ `{adr, docs, test, chore, src}`. 한 커밋 = 한 분류 (mixed 금지)
+  - **ADR 과 계획서는 별도 커밋.** ADR 본문 정정은 `fix(adr):` 접두사 (see `docs/adr/README.md` §원칙)
+  - 100파일 초과 시 재분할
+  - 커밋 메시지: `feat(<scope>)` / `fix(<scope>)` / `refactor(<scope>)` / `test(<scope>)` / `docs(<scope>)` / `chore(<scope>)`
+  - `git add -- <파일 명시>` 후 `git diff --cached --quiet` 이면 중단 (스테이징이 비었다는 뜻)
 
-예상 커밋 메시지 생성 (§10-3 표 참조):
-- `feat(<scope>): ...` / `fix(<scope>): ...` / `refactor(<scope>): ...` / `test(<scope>): ...` / `docs(adr): ADR-NNNN ...` / `chore(<scope>): ...`
-
-**commit_plan 구조** (state 원자 저장용):
-```json
-[
-  {
-    "partition_id": "p1",
-    "category": "src",
-    "scope": "global/cache",
-    "subject": "feat(cache): HarnessSmokeTtl — TTL 유틸 도입",
-    "files": ["src/main/java/com/peekcart/global/cache/HarnessSmokeTtl.java"],
-    "line_count": 24
-  }
-]
+분할이 필요하면 승인 게이트를 노출한다:
+```
+=== 커밋 분할 제안 (N 개) ===
+p1. feat(cache): ...  (+24)
+p2. test(cache): ...  (+23)
+  [1] 승인  [2] 수정  [3] 종료
 ```
 
-**GS-2 게이트 (always)** 미리보기:
-```
-=== 커밋 분할 제안 (N 개 partition) ===
-p1. feat(cache): HarnessSmokeTtl — TTL 유틸 도입
-    src/main/java/com/peekcart/global/cache/HarnessSmokeTtl.java  (+24)
-p2. test(cache): HarnessSmokeTtl 3 case 추가
-    src/test/java/com/peekcart/global/cache/HarnessSmokeTtlTest.java  (+23)
+### 4. PR 본문 생성
 
-  [1] 승인 (이 분할로 진행)
-  [2] 수정 (partition 재지정)
-  [3] 종료
->
-```
+`state.json` 이 아니라 **계획서·audit·git 이력**에서 조립한다:
 
-**dry-run 이면**: 미리보기 후 "execute 모드에서 확정" 안내. state 미갱신.
+| 섹션 | 출처 |
+|---|---|
+| Why | 계획서 §1 명제 · §2 배경(범위가 바뀌었으면 그 사실) |
+| What | 계획서 §3 작업 항목 중 실제 구현된 것 |
+| How | 핵심 결정과 근거. ADR 이 있으면 `(see ADR-NNNN)` |
+| Test plan | 계획서 §검증 방법의 각 행 + **실제 실행 결과** |
+| 리뷰 이력 | `docs/plans/${TASK_ID}.audit.md` 의 라운드별 요약 |
+| 관련 | Task · Plan · ADR · 부채 ID · runbook |
 
-**execute 통과 후**:
-- `hpx_state_set_commit_plan "$TASK_ID" "$COMMIT_PLAN_JSON" ship step3.partition`
-- `hpx_state_patch "$TASK_ID" '{"stage":"ship.partition.previewed","updated_at":"<now ISO8601>"}' ship step3.partition`
-- audit log: GS-2 결정 1 엔트리
+**조건부 섹션** — 해당하면 반드시 넣는다:
+- **Skipped findings** — diff 리뷰에서 기각한 항목. **사유와 재검토 조건**을 함께 적는다
+- **Skipped consistency checks** — Step 2 에서 `[2]` 를 골랐으면 그 사유
+- **미충족** — 계획서 §미해결 + 작업 중 드러난 한계. "완료했다" 로 뭉개지 않는다
 
-### Step 4. 커밋 생성
+본문은 `.cache/pr-body-${TASK_ID}.md` 에 저장한다 (재시도 시 재사용).
 
-```bash
-bash -c 'set -euo pipefail
-source .claude/scripts/shared-logic.sh
-# Claude 가 commit_plan 각 partition 에 대해 다음 루프를 순차 실행:
-git add -- <files_of_partition>
-if git diff --cached --quiet; then
-  echo "partition=<id> staged diff empty"
-  exit 20
-fi
-git commit -m "<subject>"
-SHA=$(git rev-parse HEAD)
-echo "partition=<id> sha=$SHA"
-'
-```
-
-- `git add -A` **금지**. partition 의 `files[]` 만 명시
-- `git add` 직후 `git diff --cached --quiet` 이면 fail-fast 로 중단. 이는 stale state/drift 재발생 신호로 간주하며 Step 1 detector 경로로 되돌아가야 함
-- 각 커밋 직후 `git rev-parse HEAD` 로 sha 수집 → `hpx_state_append_created_commit "$TASK_ID" "$COMMIT_JSON" ship step4.commit` 으로 append
-- `created_commits[]` append 는 동일 `partition_id` 재기록 시 중복 추가하지 않는 idempotent helper 계약을 따른다.
-- 재진입 시 재커밋 방지 교차 검증:
-  ```bash
-  # 마지막 N 개 커밋 subject 를 state.commit_plan 의 예상 subject 와 비교
-  git log --pretty=format:'%H %s' -n <N> | ...
-  ```
-  이미 생성된 partition 은 skip
-- 모든 partition 완료 후 → `hpx_state_patch "$TASK_ID" '{"stage":"ship.commits.created","updated_at":"<now ISO8601>"}' ship step4.done`
-
-**dry-run 이면**: Step 4 전체 skip. "execute 모드에서 커밋 예정" 안내.
-
-### Step 5. PR 본문 생성
-
-```bash
-bash -c 'set -euo pipefail
-source .claude/scripts/shared-logic.sh
-DATA=$(hpx_ship_pr_body_data "'"$TASK_ID"'")
-echo "$DATA"
-'
-```
-
-위 JSON 데이터를 근거로 §10-2 템플릿을 채워 PR 본문 작성:
-
-```markdown
-## Why
-> <task 배경: plan.md §1 또는 §2 의 목적. Task 링크 포함>
-
-## What
-> <한 줄 요약>
-- completed_plan_items[] 를 bullet 으로 변환
-
-## How
-> <핵심 구현 결정. ADR 언급이 있으면 (see ADR-NNNN) 로 인용>
-
-## Test plan
-- [ ] 단위 테스트
-- [ ] 통합 테스트
-- [ ] 수동 확인
-
-## 관련
-- Task: docs/TASKS.md §...
-- Plan: docs/plans/<task-id>.md
-- Commits:
-  - <commit_subjects[]>
-```
-
-**조건부 섹션**:
-- `p0_ignores[]` 비어있지 않으면 (Q19 default):
-  ```
-  ## Skipped P0 findings
-  > 본 PR 은 다음 P0 findings 를 수용하지 않았습니다. 사유:
-  - <reason 1>
-  - <reason 2>
-  ```
-- consistency precheck 에서 `무시하고 진행` 선택했으면:
-  ```
-  ## Skipped consistency checks
-  > 사유: <user reason>
-  ```
-
-본문을 `.cache/pr-body-${TASK_ID}.md` 에 저장 (재시도 시 재사용 — §7-5-D).
-
-### Step 6. GS-3 게이트 (always, 본문 미리보기)
+### 5. 본문 승인 게이트 (always)
 
 ```
 === PR 본문 미리보기 (.cache/pr-body-<task>.md, N 줄) ===
-## Why
 ...
-
-  [1] 승인 (이 본문으로 진행)
-  [2] 수정 (본문 편집 후 재검토)
-  [3] 종료
->
+  [1] 승인  [2] 수정  [3] 종료
 ```
 
-**dry-run 이면**: 미리보기만. `.cache/pr-body-*.md` 는 생성 OK. 게이트 미노출.
+**dry-run 은 여기까지.** 아래를 보고하고 종료한다:
+```
+=== /ship dry-run 완료 ===
+- 커밋: N개 (분할 필요 M개)
+- Push 예정: origin/<branch>
+- PR: 신규 생성 (또는 기존 #NN 갱신)
+- 본문: .cache/pr-body-<task-id>.md
+- 실제 실행: /ship <task-id> --execute
+```
 
-### Step 7. Push (`git push -u origin <branch>`)
-
-**execute 모드에서만**. dry-run 은 전체 skip.
+### 6. Push (execute 전용)
 
 ```bash
-bash -c 'set -euo pipefail
-source .claude/scripts/shared-logic.sh
+git push -u origin "$(git branch --show-current)"
+```
+
+- `Everything up-to-date` 도 성공으로 본다 (멱등)
+- 실패 시:
+  - non-fast-forward → `git fetch origin` 후 **사용자에게 rebase 여부를 묻는다**. 자동 rebase 금지
+  - 인증 실패 → `gh auth login` 안내. 자동 재시도 금지
+  - 네트워크 → 30초 후 1회만 재시도
+- 어느 경우든 실패하면 멈추고 보고한다. 다음 호출은 이 단계부터 재개된다
+
+### 7. PR 생성 (execute 전용)
+
+```bash
 BRANCH=$(git branch --show-current)
-git push -u origin "$BRANCH"
-'
+gh pr list --head "$BRANCH" --state open --json url -q ".[0].url"   # 선조회
+gh pr create --base "$(hpx_base_branch_name)" --head "$BRANCH" \
+  --title "<한 줄 요약>" --body-file ".cache/pr-body-<TASK_ID>.md"
 ```
 
-- 성공 → `hpx_state_patch "$TASK_ID" '{"push_status":"pushed","remote_branch":"<branch>","ship_resume_cursor":"pr.pending","stage":"ship.pushed","updated_at":"<now ISO8601>"}' ship step7.push`
-- `Everything up-to-date` → 동일하게 성공 처리 (멱등)
-- 실패 → §7-5-C ladder:
-  - `fetch first` / non-fast-forward → `git fetch origin` 후 사용자에게 rebase 여부 확인 (자동 rebase X)
-  - auth failure → `gh auth login` / 인증 갱신 안내, 자동 재시도 X
-  - network → 30 초 후 1 회 자동 재시도
-  - 종료 전 `hpx_state_patch "$TASK_ID" '{"push_status":"failed","ship_resume_cursor":"push.failed","updated_at":"<now ISO8601>"}' ship step7.push_failed` 기록
-  - 재호출 시 Step 7 부터 재진입
+- 이미 열린 PR 이 있으면 **생성하지 않고** 그 URL 을 쓴다
+- 실패 시:
+  - `gh: command not found` → 본문 파일 경로와 수동 생성 URL 을 제시하고 종료
+  - 인증 만료 → 갱신 안내 후 재시도 선택
+  - 5xx/네트워크 → 60초 후 1회 재시도
+  - rate limit → `Retry-After` 고지 후 수동 재시도
+- 3회 실패하면 수동 생성 안내 후 종료한다. **문서는 갱신하지 않는다**
 
-### Step 8. PR 생성 (`gh pr list` 선조회 후 `gh pr create`)
+### 8. `/done` 갱신 (PR URL 확정 후에만)
 
-**execute 모드에서만**.
+1. `docs/TASKS.md` — 해당 Task 행에 **PR 링크**를 달고 `🔄`/`🔲` → `✅`.
+   범위가 착수 전과 달라졌으면 **그 사실과 근거를 행에 기록한다** (구현 ④·⑤ 선례)
+2. 편입 부채가 있으면 `docs/progress/phase4-prep-debt-roadmap.md` 의 해당 행에 ✅ + PR 번호
+3. `docs/progress/PHASE{N}.md` — 작업 이력에 PR URL. **미충족 항목을 함께 남긴다**
+4. 결정 사항 분류:
+   - 대안 비교·후속 전제가 있으면 → ADR (Layer 2)
+   - ADR 의 **사실 진술**이 틀렸으면 → 새 ADR 이 아니라 **Update Log + `fix(adr):`** (`docs/adr/README.md` §원칙)
+   - 구현 디테일 → progress (Layer 3)
+   - 확신이 없으면 사용자에게 묻는다
+5. Layer 1(01~07) 이 코드 사실과 어긋나면 **What 만** 정정. Why 는 ADR
+6. `docs/plans/${TASK_ID}.audit.md` 에 `/ship` 결과 1블록 append (PR URL · precheck 결과 · 갱신 항목)
 
-```bash
-bash -c 'set -euo pipefail
-source .claude/scripts/shared-logic.sh
-BRANCH=$(git branch --show-current)
-EXISTING=$(gh pr list --head "$BRANCH" --state open --json url -q ".[0].url" 2>/dev/null || true)
-if [ -n "$EXISTING" ]; then
-  echo "PR_URL=$EXISTING (existing)"
-else
-  PR_URL=$(gh pr create \
-    --base "$(hpx_base_branch_name)" \
-    --head "$BRANCH" \
-    --title "<Claude 가 commit 1 subject 를 제목으로 변환>" \
-    --body-file ".cache/pr-body-'"$TASK_ID"'.md")
-  echo "PR_URL=$PR_URL"
-fi
-'
-```
+갱신분은 별도 커밋 후 push 한다.
 
-- PR title 은 commit_plan[0].subject 또는 Claude 가 요약 1줄
-- 성공 → `hpx_state_patch "$TASK_ID" '{"pr_url":"<pr_url>","ship_resume_cursor":"done.pending","stage":"ship.pr.created","updated_at":"<now ISO8601>"}' ship step8.pr`
-- 실패 → §7-5-D ladder:
-  - `gh: command not found` → 수동 PR 생성 안내 (본문 경로 + URL 템플릿 제시), 종료
-  - `gh auth` 만료 → 갱신 안내 + 재시도 선택
-  - 5xx / 네트워크 → 60 초 후 1 회 자동 재시도
-  - API rate limit → `Retry-After` 대기 고지, 수동 재시도
-  - 3회 실패 → "수동 PR 생성 (본문 파일 제시) / 종료" 선택. TASKS 미갱신
-  - 종료 전 `hpx_state_patch "$TASK_ID" '{"ship_resume_cursor":"pr.failed","updated_at":"<now ISO8601>"}' ship step8.pr_failed` 기록. 본문 `.cache/pr-body-*.md` 재사용 보장
-
-### Step 9. `/done` 상당 로직 (PR 성공 후에만)
-
-**execute 모드 + `pr_url` 확정된 경우에만 실행**. dry-run 은 skip.
-
-Claude 는 다음을 직접 수행 (`/done` 과 동일한 판단 과정):
-
-1. `docs/TASKS.md` 를 읽어 현재 `🔄` Task 의 완료 항목을 `🔲` → `✅` 로 갱신
-2. Task 전체가 완료되면 Task 상태도 `🔄 진행 중` → `✅ 완료`
-3. 결정 사항 분류 (ADR 우선):
-   - ADR 후보 (대안 비교 / 후속 전제) → 먼저 ADR 작성, progress 는 참조만
-   - 구현 디테일 → progress 표에 직접 기록
-   - 확신 없으면 사용자에게 질문
-4. 활성 ADR 상태 점검: `Proposed → Accepted` 전환, 대체된 ADR Status 갱신
-5. `docs/progress/PHASE{N}.md` 작업 이력 추가 (PR URL 포함)
-6. Layer 1 문서 영향 시 해당 문서 (01~07) 갱신 (What 만, Why 는 ADR)
-
-성공 후:
-- `hpx_state_patch "$TASK_ID" '{"done_applied":true,"stage":"ship.done","updated_at":"<now ISO8601>"}' ship step9.done`
-- audit log append: `## YYYY-MM-DD HH:MM — /done applied (PR <pr_url>)` + 갱신 항목 요약
-
-실패 (편집 중 오류) → 사용자에게 보고 후 종료. TASKS 미갱신, PR 은 이미 존재 → 다음 호출 시 Step 9 만 재시도 (재진입 매트릭스 `ship.pr.created` 행).
-
-### Step 10. state.json archive (Q24 default = archive)
-
-```bash
-bash -c 'set -euo pipefail
-mkdir -p docs/plans/.archive
-mv "docs/plans/'"$TASK_ID"'.state.json" "docs/plans/.archive/'"$TASK_ID"'.state.$(hpx_utc_ts).json"
-'
-```
-
-- archive 디렉토리는 gitignore 대상 (`docs/plans/*.state.json` 패턴에 포함 안 됨 — 별도 `.archive/` 도 gitignore 에 추가 필요 → P3 smoke 검증 시 확인)
-- lock 해제: `hpx_lock_force_release "$TASK_ID"`
-
-### Step 11. PR URL 반환
+### 9. 완료 보고
 
 ```
 === /ship 완료 ===
 Task: <task-id>
-PR: <pr_url>
-Commits: <N>개 생성
-Branch: <branch>
+PR:   <pr_url>
+Commits: N개
+Branch:  <branch> (origin 동기화됨)
+미충족: <있으면 나열>
 ```
 
-dry-run 모드에서 종료 시:
-```
-=== /ship dry-run 완료 ===
-다음 실행 예상:
-- Commits: <N>개
-- Push: origin/<branch>
-- PR body: .cache/pr-body-<task-id>.md
-- 실제 실행: /ship <task-id> --execute
-```
+머지는 하지 않았음을 명시한다.
 
 ---
 
-## 재진입 매트릭스 (§6-3-3 v4)
+## 재진입
 
-| 현재 stage / cursor | 확인 | 다음 Step |
-|-----------|----|----------|
-| 없음 / `work.done` | — | Step 2 (precheck) 부터 |
-| `work.done` + drift=`all_absorbed` | cached diff files vs current uncommitted 불일치 | **GS-0 (`archive` / `종료`)** |
-| `ship.precheck` | — | Step 3 (분할 제안) |
-| `ship.partition.previewed` | — | Step 4 (커밋 생성) |
-| `ship.commits.created`, cursor 없음 | `created_commits[]` vs `git log` 교차 확인 | Step 5 (PR 본문) |
-| `ship.commits.created` + cursor=`push.failed` | `push_status=="failed"` + 원격 반영 재확인 | **Step 7 (push 재시도)** |
-| `ship.pushed` | `git ls-remote` + `gh pr list --head` | Step 8 (PR 조회 후 없을 때만 생성) |
-| `ship.pushed` + cursor=`pr.failed` | `pr_url` 부재 + `gh pr list` 선조회 | **Step 8 (PR 생성 재시도)** |
-| `ship.pr.created` | `pr_url` 필수 + `done_applied==false` | **Step 9 (`/done` 재시도)** |
-| `ship.done` | `done_applied==true` | Step 10 (archive) 만, 완료 |
+`state.json` 이 아니라 **git/gh 사실**로 판정한다. 같은 명령을 다시 부르면 아래를 확인해 남은 지점부터 진행한다.
 
----
-
-## 사용자 게이트 UX
-
-### GS-1 (warnings)
-```
-=== Consistency precheck — warnings ===
-[MISS] ADR-0009 — 해당 ADR 파일 없음
-
-  [1] 수정 (편집 후 재실행)
-  [2] 무시하고 진행 (사유 필수)
-  [3] 종료
->
-```
-
-### GS-1 (script_error — §7-5-E)
-```
-=== Consistency precheck 실행 실패 (exit=127) ===
-stderr:
-  bash: docs/consistency-hints.sh: Permission denied
-
-  [1] 환경 수정 후 재실행
-  [2] 무시하고 진행 (사유 필수)
-  [3] 종료
->
-```
-
-### GS-2 (partition preview)
-```
-=== 커밋 분할 제안 (N 개 partition) ===
-p1. feat(cache): ... (+24)
-p2. test(cache): ... (+23)
-
-  [1] 승인
-  [2] 수정
-  [3] 종료
->
-```
-
-### GS-3 (PR body preview)
-```
-=== PR 본문 미리보기 ===
-## Why
-...
-
-  [1] 승인
-  [2] 수정
-  [3] 종료
->
-```
-
----
-
-## 비용/빈도 제어
-
-- `/ship` 은 Codex 호출 없음 → tokens 측정 대상 아님 (§7-6-1 `_metrics.tsv` 는 plan/work 만)
-- Push / PR 자동 재시도 상한: network 1회 (§9-2)
-- Step 9 `/done` 실패는 재시도가 아니라 중단 + 다음 호출 재진입
+| 확인 | 판정 | 재개 지점 |
+|---|---|---|
+| `git status --porcelain` 비어있지 않음 | 커밋 안 된 변경 있음 | Step 3 |
+| `git ls-remote --heads origin <branch>` 없음 | 미push | Step 6 |
+| `gh pr list --head <branch> --state open` 비어있음 | PR 없음 | Step 7 |
+| PR 있고 TASKS 에 PR 링크 없음 | `/done` 미적용 | Step 8 |
+| 위 전부 충족 | 완료 | 보고만 |

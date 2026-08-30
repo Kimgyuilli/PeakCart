@@ -2,8 +2,7 @@ package com.peekcart.global.config;
 
 import io.lettuce.core.RedisCommandExecutionException;
 import io.lettuce.core.RedisCommandInterruptedException;
-import io.lettuce.core.RedisCommandTimeoutException;
-import io.lettuce.core.RedisConnectionException;
+import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -83,16 +82,24 @@ public class ResilientCacheErrorHandler implements CacheErrorHandler {
      * 가용성 장애로 인정하는 예외 — 이 계열만 삼킨다.
      * <p>Spring 번역 타입({@code DataAccessResourceFailureException} = 연결 실패,
      * {@code QueryTimeoutException} = 명령 타임아웃)과 번역 전 원인 양쪽을 본다.
-     * <p>Lettuce 최상위 {@code RedisException} 을 통째로 허용하지 <b>않는다</b> — 그 아래에는
-     * 명령 거부·interrupt 처럼 가용성과 무관한 예외가 함께 산다. 실측된 연결 거부 체인
-     * {@code RedisSystemException ← RedisException ← SocketException} 은 안쪽
-     * {@link IOException} 으로 이미 판별되므로 최상위 타입이 필요 없다.
+     * <p><b>Lettuce 최상위 {@link RedisException} 을 포함한다.</b> 연결이 이미 끊긴 뒤 들어온 명령은
+     * I/O 를 타지 않으므로 원인이 <b>없는</b> bare {@code RedisException} 으로 온다 —
+     * lettuce-core 6.6.0 {@code DefaultEndpoint} 가 {@code "Connection is closed"},
+     * {@code "Currently not connected. Commands are rejected."}, {@code "Connection disconnected"}
+     * 를 {@code new RedisException(String)} 으로 만든다(바이트코드 확인). Spring 의
+     * {@code LettuceExceptionConverter} 는 이를 {@code RedisSystemException} 으로 감쌀 뿐
+     * {@link IOException} 을 원인에 붙이지 않는다. 이 형태를 되던지면 "Redis 가 죽어도 조회가
+     * 5xx 로 실패하지 않는다"는 계약이 in-flight 연결 종료에서 깨진다.
+     *
+     * <p>{@code RedisException} 하위의 정합성 계열은 {@link #NEVER_SWALLOWED} 가 <b>먼저</b>
+     * 걸러낸다 — {@code RedisLoadingException}/{@code BusyException}/{@code ReadOnlyException}/
+     * {@code NoScriptException} 은 전부 {@link RedisCommandExecutionException} 하위이므로
+     * deny 한 줄로 함께 막힌다.
      */
     private static final List<Class<? extends Throwable>> AVAILABILITY_FAULTS = List.of(
             DataAccessResourceFailureException.class,
             QueryTimeoutException.class,
-            RedisConnectionException.class,
-            RedisCommandTimeoutException.class,
+            RedisException.class,
             IOException.class);
 
     @Override

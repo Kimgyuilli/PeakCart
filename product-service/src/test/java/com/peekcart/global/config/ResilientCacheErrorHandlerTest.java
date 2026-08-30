@@ -1,10 +1,12 @@
 package com.peekcart.global.config;
 
+import io.lettuce.core.RedisBusyException;
 import io.lettuce.core.RedisCommandExecutionException;
 import io.lettuce.core.RedisCommandInterruptedException;
 import io.lettuce.core.RedisCommandTimeoutException;
 import io.lettuce.core.RedisConnectionException;
 import io.lettuce.core.RedisException;
+import io.lettuce.core.RedisLoadingException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +72,25 @@ class ResilientCacheErrorHandlerTest {
             assertThat(fallbackCount("get")).isEqualTo(5.0);
         }
 
+        /**
+         * 연결이 이미 끊긴 뒤 들어온 명령은 I/O 를 타지 않아 <b>원인이 없는</b> bare
+         * {@code RedisException} 으로 온다. lettuce-core 6.6.0 {@code DefaultEndpoint} 가
+         * 실제로 만드는 메시지들이다 — 이걸 되던지면 in-flight 연결 종료에서 조회가 5xx 가 된다.
+         */
+        @Test
+        @DisplayName("원인 없는 bare RedisException(연결 종료 상태)도 삼킨다")
+        void swallowsBareConnectionStateException() {
+            Stream.of("Connection is closed",
+                            "Currently not connected. Commands are rejected.",
+                            "Connection disconnected")
+                    .map(message -> new RedisSystemException("wrapped", new RedisException(message)))
+                    .forEach(exception ->
+                            assertThatCode(() -> handler.handleCacheGetError(exception, CACHE, 1L))
+                                    .doesNotThrowAnyException());
+
+            assertThat(fallbackCount("get")).isEqualTo(3.0);
+        }
+
         @Test
         @DisplayName("콜백별로 operation 태그가 나뉜다")
         void tagsEachOperationSeparately() {
@@ -133,13 +154,16 @@ class ResilientCacheErrorHandlerTest {
         }
 
         @Test
-        @DisplayName("Lettuce 최상위 RedisException 만으로는 삼키지 않는다 — 가용성 근거가 없다")
-        void rethrowsBareRedisException() {
-            RuntimeException bare = new RedisSystemException("근거 없음", new RedisException("무엇인지 모름"));
-
-            assertThatThrownBy(() -> handler.handleCacheGetError(bare, CACHE, 1L))
-                    .as("RedisException 전체를 허용하면 명령 거부·interrupt 까지 함께 들어온다")
-                    .isSameAs(bare);
+        @DisplayName("LOADING/BUSY 등 서버 오류 하위 계열도 되던진다 — deny 가 allow 보다 먼저다")
+        void rethrowsCommandExecutionSubclasses() {
+            // 이들은 전부 RedisCommandExecutionException 하위다. allow 에 RedisException 이
+            // 있으므로, deny 를 먼저 보지 않으면 조용히 삼켜진다.
+            Stream.<RuntimeException>of(
+                    new RedisSystemException("loading", new RedisLoadingException("LOADING")),
+                    new RedisSystemException("busy", new RedisBusyException("BUSY"))
+            ).forEach(exception ->
+                    assertThatThrownBy(() -> handler.handleCacheGetError(exception, CACHE, 1L))
+                            .isSameAs(exception));
 
             assertThat(fallbackCount("get")).isZero();
         }

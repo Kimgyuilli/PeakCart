@@ -1226,6 +1226,16 @@ ADR-0012 `:124-127` 은 구현 ⑤ 의 산출물을 `"product.updated 발행/소
 - **put 실패의 DB 전이 실증** — 장애 중 동일 상품 5회 조회 시 `findById` 5회(스파이), 양성 대조군(정상 캐시)은 1회
 - **변이 검사** — `errorHandler()` 오버라이드를 맨 `@Bean` 으로 바꾸면 **7건 중 6건 FAILED**. 정상 경로인 양성 대조군만 통과했다. 바이트코드로 세운 전제가 런타임에서 확인된 지점
 
+### 리뷰 라운드가 서로를 고쳤다
+
+이 PR 의 리뷰는 3라운드 모두 **직전 라운드 수정이 만든 결함**을 잡았다.
+
+- 1R → 2R: 예외 허용 범위를 좁히려다 Lettuce 최상위 `RedisException` 을 통째로 허용
+- 2R → 3R: 그 축소가 이번엔 **너무 좁아** in-flight 연결 종료를 5xx 로 되돌렸다. lettuce-core 6.6.0 `DefaultEndpoint` 는 연결이 끊긴 뒤 들어온 명령에 **원인 없는 bare `RedisException`** 을 만들고(바이트코드 확인), Spring 은 여기에 `IOException` 을 붙이지 않는다. 2R 의 우려("`RedisException` 을 허용하면 명령 거부·interrupt 가 함께 들어온다")는 **deny 를 먼저 보는 구조에서 성립하지 않았다** — 서버 오류 계열은 전부 `RedisCommandExecutionException` 하위라 deny 한 줄로 막힌다
+- 2R → 3R: lint 의 주석 제외가 라인을 통째로 버려 `/* note */ @Bean MeterFilter ...` 우회를 열었다. 주석 토큰만 제거하도록 고쳤고, 그 과정에서 sed 구분자 `:` 가 `grep -n` 접두사의 `:` 와 충돌해 치환이 통째로 죽는 자체 결함도 변이 검사가 잡았다
+
+교훈은 **"좁히는 수정도 결함을 만든다"** 는 것이다. 넓힌 것만 위험하다고 보고 축소를 안전하다고 취급하면, 2R→3R 같은 회귀를 놓친다.
+
 ### diff 리뷰가 잡은 내 버그
 
 `@Configuration` 에 `MeterRegistry` 를 **직접 주입**한 것이 `MeterRegistryCustomizer` 적용 **전에** 레지스트리를 생성시켜, 이후 모든 메트릭에서 `application=product-service` 태그(ADR-0009 S2)가 사라졌다. 기존 `ProductObservabilityMetricsIntegrationTest` 가 이를 잡았다 — 관측성 계약 회귀 테스트가 **다른 작업의 실수를 잡은 첫 사례**다. `ObjectProvider` 지연 해석으로 수정.
@@ -1238,7 +1248,7 @@ ADR-0012 `:124-127` 은 구현 ⑤ 의 산출물을 `"product.updated 발행/소
 4. **무응답 상한(1.5s)은 로컬 Docker 기준 실측** — 클러스터에서의 재측정은 미실시
 5. **`local path` 동일 패턴이 `common.sh:20`·`audit.sh:8`·`state.sh` 에 잔존** — 본 PR 범위 밖이라 손대지 않았다
 6. **`StockCompensationRefundIntegrationTest:273` flake 관측** — 전체 스위트 1회 실행에서 Kafka 왕복 listener 배선 테스트가 실패했고 재실행에서 통과했다(최종 실행은 전 모듈 그린). 본 PR 이 손대지 않은 경로라 원인 규명은 하지 않았다 — 재발 시 ④ 계열로 다룬다
-7. **diff 리뷰 라운드 3 미실행** — 세션 중 Codex CLI 설치가 깨져(`Missing optional dependency @openai/codex-darwin-arm64`) 돌리지 못했다. 라운드 2 에서 P1 1건을 수정했으므로 수렴 조건상 1회 더 필요하다. 그 사이의 검증은 자동 게이트(통합 7/7 · 단위 9/9 · 변이 6/7 FAILED · lint · bats 55/55)로만 뒷받침된다
+7. ~~diff 리뷰 라운드 3 미실행~~ → **해소.** Codex 재설치 후 실행했고 P1 2건이 나왔다 — **둘 다 라운드 2 수정이 만든 새 결함**이다. 상세는 audit 참고
 
 **다음**: 구현 ⑥ Cursor 페이지네이션 (또는 ④-c-2b DLQ replay — ADR 선행 대기).
 

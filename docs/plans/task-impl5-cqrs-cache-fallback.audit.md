@@ -81,3 +81,18 @@
 - 변이 검사 2회: (a) `errorHandler()` → 맨 `@Bean` 시 통합 7건 중 6건 FAILED, (b) ssot-lint 주석 제외 후에도 실제 `@Bean MeterRegistryCustomizer` 주입 시 검출됨
 - **관측된 flake 1건 (해소 아님)**: 직전 전체 실행에서 `StockCompensationRefundIntegrationTest:273`(`payment.refunded` listener 배선, Kafka 왕복 20s await)이 1회 실패했고 재실행에서 통과했다. 본 PR 이 손대지 않은 경로이며 이 PR 이전 코드의 실행에서도 전체 빌드가 깨졌다. 원인 규명은 하지 않았다 — 재발 시 ④ 계열 부채로 다룰 것.
 
+
+## 2026-08-30 — diff 리뷰 라운드 3 (Codex 재설치 후 실행)
+
+- 항목: 2건 (P0:0, P1:2, P2:0)
+- 처리: 반영 2건 / 기각 0건
+- **2라운드 수정이 만든 새 결함: 2건 (둘 다 P1)**
+  - **#1 — 2라운드의 allow-list 축소가 핵심 계약을 깼다.** lettuce-core 6.6.0 `DefaultEndpoint` 는 연결이 이미 끊긴 뒤 들어온 명령에 대해 **원인 없는 bare `RedisException`** 을 만든다(`"Connection is closed"` · `"Currently not connected. Commands are rejected."` · `"Connection disconnected"` — 바이트코드로 직접 확인). Spring `LettuceExceptionConverter` 는 이를 `RedisSystemException` 으로 감쌀 뿐 `IOException`/`RedisConnectionException` 을 원인에 붙이지 않는다. 따라서 2라운드의 좁은 허용 목록은 **in-flight 연결 종료를 5xx 로 되돌렸다** — 계획 §1 부정형 #1 위반.
+    - 2라운드 판단의 오류: "`RedisException` 전체를 허용하면 명령 거부·interrupt 가 함께 들어온다"고 봤으나, **deny 를 먼저 검사하는 구조에서는 성립하지 않는다.** 예외 계층 확인 결과 `RedisLoadingException`/`BusyException`/`ReadOnlyException`/`NoScriptException` 은 전부 `RedisCommandExecutionException` 하위라 deny 한 줄로 함께 막힌다.
+    - 조치: `RedisException` 을 허용 목록에 복원(deny 우선 유지). 단위 테스트를 `rethrowsBareRedisException` → `swallowsBareConnectionStateException`(실제 Lettuce 메시지 3종)으로 전환하고, LOADING/BUSY 가 여전히 되던져지는지를 `rethrowsCommandExecutionSubclasses` 로 고정.
+  - **#2 — 2라운드의 lint 주석 제외가 D5-V2 를 우회 가능하게 만들었다.** 줄 시작 문자만 보고 **라인 전체를 버려서**, `/* note */ @Bean MeterFilter f() {...}` 처럼 주석 뒤에 실제 선언이 이어지면 검출되지 않았다(import 도 이미 제외되므로 `non_import` 가 비어 EXIT=0).
+    - 조치: 라인 제외 대신 **주석 토큰만 제거하고 남은 코드**를 검사한다.
+    - 구현 중 자체 결함 1건: sed 구분자를 `:` 로 쓰면 `grep -n` 접두사 캡처 `([0-9]+:)` 안의 `:` 가 s 명령을 끊어 **치환이 통째로 망가진다**(검출 0건). 변이 검사가 즉시 잡았다 — "평범한 선언"조차 검출 실패로 나왔다. 구분자를 `#` 로 교체.
+- 변이 검사 3형태 전부 검출 확인: 평범한 선언 · `/* */` 뒤 같은 줄 선언 · `//` 뒤 같은 줄 선언. javadoc 오탐은 없음(EXIT=0).
+- 회귀: 통합 7/7 · 단위 11/11 · 바인딩 2/2 · S7·기존 캐시 통과
+- raw: `.cache/codex-reviews/diffreview-task-impl5-cqrs-cache-fallback-r3final-*.json`

@@ -7,8 +7,10 @@
 hpx_plan_lint() {
   local task_id="$1"
   hpx_task_id_validate "$task_id" || return 1
-  local path="docs/plans/${task_id}.md"
-  python3 - "$path" <<'PY'
+  # NOTE: zsh 에서 `path` 는 `PATH` 와 연동된 특수 배열이다. `local path=...` 로 두면
+  # PATH 가 계획서 경로로 덮여 바로 다음 줄 python3 가 command not found 로 죽는다.
+  local plan_path="docs/plans/${task_id}.md"
+  python3 - "$plan_path" <<'PY'
 import re
 import sys
 from pathlib import Path

@@ -96,7 +96,7 @@ Phase 4 에서 서비스/매니페스트가 N배로 늘기 *전에* 게이트를
 |---|---|---|---|
 | **L-001/L-002/L-003/L-019** | Security/Obs | **JWT RS256 전환 확정** → Gateway + 시크릿 저장소(KMS/Vault) + DelegatingPasswordEncoder + Reuse Detection(`family_id`) + 인증 실패 관측성을 **한 D- 단위**로 | Phase 4 ③ Gateway |
 | L-004 | Observability | Slack 단일채널 → 운영 알림 채널 재설계(PagerDuty 등) | Phase 4 운영 관측성 |
-| L-006 | Resilience | Redis 조회 캐시 fallback(`CacheErrorHandler`) — Redis 가 서비스간 공유 인프라화 시. L-005(작업4) 선결 | Phase 4 ⑤ CQRS/캐시 |
+| L-006 | Resilience | Redis 조회 캐시 fallback(`CacheErrorHandler`) — Redis 가 서비스간 공유 인프라화 시. L-005(작업4) 선결 | ✅ 구현 ⑤ [#94](https://github.com/Kimgyuilli/PeakCart/pull/94) (`ResilientCacheErrorHandler` — get/put fail-open, evict/clear 는 WARN+`cache_fallback_total`) |
 | L-008 / L-011 | Operations | `outbox_events`/`processed_events` retention(§9-7 코드화) — DB 서비스별 분리 시 N배. 같은 작업 단위. 보존기간=멱등성 창 상한 결정 동반 | Phase 4 ② DB 분리 |
 | L-016(a) | Deploy | gke `images.newTag` digest 고정 — L-015 의 CI 이미지 운반 자동화와 맞물림 | Phase 4 ① 멀티모듈 |
 | **D-016** | Deploy/Release | GHCR → Artifact Registry 복사(`crane copy`) + `kustomize edit set image` + `git restore` 가 수동 절차. 서비스 수가 늘면 image promotion 재현성·감사성이 급격히 낮아짐 | Phase 4 ① 멀티모듈 / 배포 자동화 |

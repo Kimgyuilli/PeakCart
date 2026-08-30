@@ -1174,3 +1174,81 @@ ADR-0012 §Consequences 는 구현 ④ 의 산출물을 **4개**로 규정했다
 즉 ADR-0012 의 4개 산출물은 전부 충족됐고, ④ 의 실제 범위는 그보다 **넓다**. 그 확장분의 근거는 ADR-0012 본문이 아니라 ADR-0018·ADR-0019 에 있다.
 
 **다음**: 구현 ⑤ CQRS 로컬 캐시 (또는 ④-c-2b ADR 선행).
+
+---
+
+## 구현 ⑤ — CQRS 로컬 캐시 (L-006 Redis fallback) — [#94](https://github.com/Kimgyuilli/PeakCart/pull/94)
+
+### 범위 재확정 — ⑤ 의 본체는 구현 ① 안에서 이미 끝나 있었다
+
+착수 전 코드 검증에서 로드맵이 ⑤ 에 귀속시킨 4표면을 전수 대조했다. 구현 ④ 와 같은 패턴이다.
+
+| 표면 | 코드 사실 | 처분 |
+|---|---|---|
+| `product.updated` 발행 | `ProductOutboxEventPublisher:68` — 7 필수필드 + `version`, 파티션키 `productId`, Outbox 경유 | ✅ strangler-2 (#57) |
+| Order 로컬 캐시 구독·갱신 | `ProductPriceCacheConsumer` + `product_price_cache`. 멱등 `processed_events`, stale-skip `source_version` | ✅ strangler-2 (#57) |
+| 동기 호출 제거 | `ProductPort` 소멸. `OrderCommandService`(ORD-007) · `CartCommandService.addItem`(ORD-009) 모두 캐시 경유 | ✅ strangler-4 (#61) |
+| **Redis 캐시 fallback (L-006)** | `CacheErrorHandler` 구현체 **0건** | 🔲 → **본 PR** |
+| 장바구니 조회 상품정보 조합 | `CartItemDto=(id,productId,quantity)` — 조합 없음 | 🔲 별도 task 승격 |
+
+코드 주석이 이미 `"CQRS ⑤, strangler-2"` 로 자기 귀속을 적어둔 상태였다.
+
+### ADR-0012 ⑤ 산출물 대비 실제 범위
+
+ADR-0012 `:124-127` 은 구현 ⑤ 의 산출물을 `"product.updated 발행/소비 + product_cache"` 로 규정했다. **이 목록은 충족됐다** — 다만 실제 테이블명은 `product_price_cache` 이고, Order 는 payload 7필드 중 `price`/`version` 만 적재한다.
+
+어긋난 지점은 `§D2:53` 이다. 7 필수필드가 `"Order product_cache/장바구니 조회 충족"` 이라 적었는데, **장바구니 조합 소비처가 만들어지지 않았다.**
+
+이 차이를 어떻게 닫을지가 계획 리뷰 2·3라운드의 쟁점이었다. 초안은 *"payload 필드 계약에 대한 진술이고 그 계약은 지켜졌으므로 정정할 사실 오류가 없다"* 고 판정했으나, **이 논거는 철회했다** — `:53` 은 소비처를 명시한 문장이 맞고, "필드 계약일 뿐"이라는 축소는 결론(ADR 무변경)에 맞춰 끌어온 재해석이었다.
+
+**처분: `docs/adr/README.md` §원칙의 Update Log 경로.** 바뀐 것은 결정(이벤트로 동기 호출 대체 · 7 필수필드 · 파티션 키)이 아니라 **테이블명과 소비 범위라는 사실 진술**이므로, 새 ADR(`:14` — 트레이드오프 변경·Consequences 재해석)이 아니라 본문 정정 + `## Update Log` + `fix(adr):` 커밋이 맞다. Status·ADR 개수는 변경하지 않았다.
+
+이는 ④ 가 같은 상황을 `PHASE4.md` 기록만으로 닫았던 것과 **다른 선택**이다. ④ 는 ADR 진술 자체에 오류가 없었고(산출물 4개가 전부 충족), ⑤ 는 진술에 오류가 있다.
+
+### 무엇을 만들었나
+
+- **`ResilientCacheErrorHandler`** — get/put 은 조용히 삼키고(→ 캐시 미스 → DB), evict/clear 는 삼키되 **WARN + `cache_fallback_total{cache,operation}`**. evict 실패는 DB 커밋 후 TTL(상세 30m / 목록 10m) 만료까지 stale 창을 열기 때문이다
+- **`CacheConfig implements CachingConfigurer`** — Spring 은 `CacheErrorHandler` 를 `CachingConfigurer` 빈에서만 수집한다(`AbstractCachingConfiguration#setConfigurers`). 맨 `@Bean` 은 조용히 무시된다. `cacheManager()` 는 오버라이드하지 않아 `@ConditionalOnProperty` 2빈 구조와 S7 라벨을 보존
+- **Redis 타임아웃 500ms / connect 300ms** (base 소유, ADR-0007) — 유계 타임아웃이 없으면 무응답 Redis 에서 Lettuce 기본 60s 를 기다린 뒤에야 fallback 이 불려 fail-open 이 무의미하다
+- **runbook** `docs/runbooks/redis-cache-fallback.md` — 복구 = TTL 만료 대기, 즉시 해소는 SCAN + UNLINK(`KEYS` 금지 — 단일 스레드 Redis 를 블록해 게이트웨이·JWT 블랙리스트까지 멈춘다), 배포는 타임아웃+핸들러 원자 배포, 감시 임계 PromQL 고정
+
+### 계획 리뷰가 뒤집은 전제
+
+- **`cacheManager()` 오버라이드와 `@Bean` 이름 혼동** — `cache_manager` 라벨은 `@Bean` 메서드 이름에서 오고 오버라이드는 빈 이름을 바꾸지 않는다. 결론은 유지하되 근거를 교체
+- **put 실패 "무해" 단정** — 캐시가 안 채워져 후속 요청이 전부 DB 를 친다. Redis 장애의 DB 전이이고, 동시 요청에서는 stampede 다
+- **1s 타임아웃 + 2s 상한이 산술적으로 불가** — `@Cacheable` 1요청이 get 실패 → DB → put 실패로 timeout 을 **2회** 소비한다
+- **`hpx_plan_lint` 가 zsh 에서 실행 불가** — `sync.sh` 의 `local path=` 가 zsh 의 `path`↔`PATH` 연동을 건드려 PATH 를 계획서 경로로 덮는다. 선언만 고치면 참조(`$path`)가 남아 더 확실히 깨진다
+
+### 검증
+
+- **Toxiproxy 장애 주입 7종** — 연결 거부(`Proxy#disable()`)와 무응답(downstream `timeout(_,0)` toxic)을 **다른 기구로** 분리했다. 컨테이너 정지는 거부만 재현하고 되돌릴 수 없어 순서 의존을 만든다
+- **V0 이 하네스 자체를 먼저 고정한다** — backend Redis 에 `@ServiceConnection` 을 남기면 앱이 프록시를 우회해 **전 시나리오가 false-green** 이 된다. `@DynamicPropertySource` 로 프록시에 배선하고, 실제 경유를 첫 단언으로 확인
+- **put 실패의 DB 전이 실증** — 장애 중 동일 상품 5회 조회 시 `findById` 5회(스파이), 양성 대조군(정상 캐시)은 1회
+- **변이 검사** — `errorHandler()` 오버라이드를 맨 `@Bean` 으로 바꾸면 **7건 중 6건 FAILED**. 정상 경로인 양성 대조군만 통과했다. 바이트코드로 세운 전제가 런타임에서 확인된 지점
+
+### 리뷰 라운드가 서로를 고쳤다
+
+이 PR 의 리뷰는 3라운드 모두 **직전 라운드 수정이 만든 결함**을 잡았다.
+
+- 1R → 2R: 예외 허용 범위를 좁히려다 Lettuce 최상위 `RedisException` 을 통째로 허용
+- 2R → 3R: 그 축소가 이번엔 **너무 좁아** in-flight 연결 종료를 5xx 로 되돌렸다. lettuce-core 6.6.0 `DefaultEndpoint` 는 연결이 끊긴 뒤 들어온 명령에 **원인 없는 bare `RedisException`** 을 만들고(바이트코드 확인), Spring 은 여기에 `IOException` 을 붙이지 않는다. 2R 의 우려("`RedisException` 을 허용하면 명령 거부·interrupt 가 함께 들어온다")는 **deny 를 먼저 보는 구조에서 성립하지 않았다** — 서버 오류 계열은 전부 `RedisCommandExecutionException` 하위라 deny 한 줄로 막힌다
+- 2R → 3R: lint 의 주석 제외가 라인을 통째로 버려 `/* note */ @Bean MeterFilter ...` 우회를 열었다. 주석 토큰만 제거하도록 고쳤고, 그 과정에서 sed 구분자 `:` 가 `grep -n` 접두사의 `:` 와 충돌해 치환이 통째로 죽는 자체 결함도 변이 검사가 잡았다
+
+교훈은 **"좁히는 수정도 결함을 만든다"** 는 것이다. 넓힌 것만 위험하다고 보고 축소를 안전하다고 취급하면, 2R→3R 같은 회귀를 놓친다.
+
+### diff 리뷰가 잡은 내 버그
+
+`@Configuration` 에 `MeterRegistry` 를 **직접 주입**한 것이 `MeterRegistryCustomizer` 적용 **전에** 레지스트리를 생성시켜, 이후 모든 메트릭에서 `application=product-service` 태그(ADR-0009 S2)가 사라졌다. 기존 `ProductObservabilityMetricsIntegrationTest` 가 이를 잡았다 — 관측성 계약 회귀 테스트가 **다른 작업의 실수를 잡은 첫 사례**다. `ObjectProvider` 지연 해석으로 수정.
+
+### 미충족 (⑤ 종결 시점에 명시)
+
+1. **장바구니 조회 상품정보 조합 미구현** — `product_price_cache` 에 `name`/`status` 추가 + consumer/DTO 확장 + "캐시 미수신 상품의 표시 정책" 결정이 선행돼야 한다. 별도 task
+2. **`cache_fallback_total` alert 발화 미검증** — ADR-0015 가 정적 lint 범위를 규정(④ 미충족 #3 과 동일 게이트). 그 전까지는 runbook §2.1 의 **수동 감시 계약**
+3. **cache stampede / DB pool 포화 완화 기구 없음** — 인지·문서화·감시까지만 했다. bulkhead·`@Cacheable(sync)`·rate limit 은 허용 동시성/SLO 를 먼저 정해야 설계가 결정된다
+4. **무응답 상한(1.5s)은 로컬 Docker 기준 실측** — 클러스터에서의 재측정은 미실시
+5. **`local path` 동일 패턴이 `common.sh:20`·`audit.sh:8`·`state.sh` 에 잔존** — 본 PR 범위 밖이라 손대지 않았다
+6. **`StockCompensationRefundIntegrationTest:273` flake 관측** — 전체 스위트 1회 실행에서 Kafka 왕복 listener 배선 테스트가 실패했고 재실행에서 통과했다(최종 실행은 전 모듈 그린). 본 PR 이 손대지 않은 경로라 원인 규명은 하지 않았다 — 재발 시 ④ 계열로 다룬다
+7. ~~diff 리뷰 라운드 3 미실행~~ → **해소.** Codex 재설치 후 실행했고 P1 2건이 나왔다 — **둘 다 라운드 2 수정이 만든 새 결함**이다. 상세는 audit 참고
+
+**다음**: 구현 ⑥ Cursor 페이지네이션 (또는 ④-c-2b DLQ replay — ADR 선행 대기).
+

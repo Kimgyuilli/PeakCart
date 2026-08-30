@@ -160,9 +160,62 @@ OFFENDERS=()
 for f in "${CANDIDATES[@]:-}"; do
     [[ -z "$f" ]] && continue
     [[ "$f" == "$EXPECTED_OWNER" ]] && continue
-    # import 라인을 제외한 식별자 사용 라인이 1건 이상 있는지 확인 (import-only 제외)
-    non_import=$(grep -nE '\b(MeterFilter|MeterRegistryCustomizer)\b' "$f" \
-                 | grep -vE '^\s*[0-9]+:\s*import\s' || true)
+    # 파일에서 '주석과 문자열' 을 제거한 뒤 남은 코드에 식별자가 있는지 본다.
+    #
+    # 왜 주석을 지우는가: 빈 선언은 주석 안에 있을 수 없다. 반대로 "여기서는
+    # MeterRegistryCustomizer 를 선언하지 않는다" 같은 javadoc 은 정상이며, 이를 위반으로 잡으면
+    # 설계 의도를 주석에 남기는 것 자체가 벌칙이 된다 (구현 ⑤ CacheConfig 에서 실제 오탐).
+    #
+    # 왜 줄 단위 sed 가 아닌가 — 세 가지가 전부 깨진다:
+    #   (1) `*/ @Bean MeterFilter f() {...}`  여러 줄 주석의 종료 줄 → 줄 전체를 버려 우회
+    #   (2) `@Deprecated(since="http://x") @Bean MeterFilter f()`  문자열 안의 `//` 부터 잘려 우회
+    #   (3) `/* MeterRegistryCustomizer` 로 시작하는 여러 줄 주석 → 닫는 토큰을 못 찾아 오탐
+    # 그래서 블록주석/문자열/문자/텍스트블록 상태를 들고 가는 최소 lexer 로 제거한다.
+    non_import=$(python3 - "$f" <<'PYLEX'
+import re, sys
+
+def eat_escape(text, idx):
+    """escape 2글자를 공백으로 지우되 줄바꿈은 보존한다 — 줄 번호가 밀리면 안 된다."""
+    nxt = text[idx + 1] if idx + 1 < len(text) else ""
+    return " \n" if nxt == "\n" else "  "
+
+
+src = open(sys.argv[1], encoding="utf-8").read()
+out, i, n = [], 0, len(src)
+in_block = in_line = in_str = in_char = in_text = False
+
+while i < n:
+    c, nxt2, nxt3 = src[i], src[i:i+2], src[i:i+3]
+    if in_block:
+        if nxt2 == "*/": in_block = False; i += 2; continue
+        out.append("\n" if c == "\n" else " "); i += 1; continue
+    if in_line:
+        if c == "\n": in_line = False; out.append("\n")
+        i += 1; continue
+    if in_text:                       # text block """..."""
+        # escape 를 먼저 소비한다. 이걸 빼면 유효한 \""" 의 첫 따옴표부터를 종료 토큰으로
+        # 오인해 상태가 뒤집히고, 이후 실제 선언이 EOF 까지 문자열로 지워진다(false-green).
+        if c == "\\": out.append(eat_escape(src, i)); i += 2; continue
+        if nxt3 == '"""': in_text = False; i += 3; continue
+        out.append("\n" if c == "\n" else " "); i += 1; continue
+    if in_str or in_char:
+        if c == "\\": out.append(eat_escape(src, i)); i += 2; continue
+        if (in_str and c == '"') or (in_char and c == "'"): in_str = in_char = False
+        out.append(" "); i += 1; continue
+    if nxt3 == '"""': in_text = True; i += 3; continue
+    if nxt2 == "/*":   in_block = True; i += 2; continue
+    if nxt2 == "//":   in_line  = True; i += 2; continue
+    if c == '"':       in_str   = True; out.append(" "); i += 1; continue
+    if c == "'":       in_char  = True; out.append(" "); i += 1; continue
+    out.append(c); i += 1
+
+for lineno, line in enumerate(out and "".join(out).splitlines() or [], start=1):
+    if re.search(r"^\s*import\s", line):          # import-only 는 선언이 아니다
+        continue
+    if re.search(r"\b(MeterFilter|MeterRegistryCustomizer)\b", line):
+        print(f"{lineno}:{line.strip()}")
+PYLEX
+)
     if [[ -n "$non_import" ]]; then
         OFFENDERS+=("$f")
     fi

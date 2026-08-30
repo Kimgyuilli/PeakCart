@@ -70,6 +70,8 @@ dependencies {
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:mysql'
     testImplementation 'org.testcontainers:kafka'
+    // Redis 장애 주입(연결 거부 / 무응답) — L-006 fallback 검증. 테스트 전용, 운영 이미지 미포함
+    testImplementation 'org.testcontainers:toxiproxy'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation 'org.awaitility:awaitility'
 }

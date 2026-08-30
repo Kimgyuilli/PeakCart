@@ -287,7 +287,7 @@ erDiagram
 ### Order DB
 
 > `order_items`의 `product_name`, `unit_price`는 주문 시점 스냅샷으로 저장 (상품 가격 변경 대응)
-`cart_items`는 최신 상품 정보를 반영해야 하므로 스냅샷 컬럼을 포함하지 않습니다. 장바구니 조회 시에는 CQRS 로컬 캐시(섹션 9-13)에서 최신 상품 정보를 조합합니다.
+`cart_items`는 최신 상품 정보를 반영해야 하므로 스냅샷 컬럼을 포함하지 않습니다. 담기 시점의 상품 존재 검증은 Order 로컬 캐시(`product_price_cache`)로 하며, Product 동기 호출은 없습니다(strangler-4). **장바구니 조회 시 상품명·가격을 조합하는 기능은 아직 없습니다** — 현재 응답은 `productId`/`quantity` 만 반환합니다. 로컬 캐시가 단가만 보유하므로(§9-13) 조합에는 캐시 확장이 선행돼야 하며, 별도 task 로 분리돼 있습니다.
 >
 
 ```mermaid

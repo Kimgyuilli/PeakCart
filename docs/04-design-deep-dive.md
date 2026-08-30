@@ -370,7 +370,7 @@ SystemException                 — SYS-XXX, 500 응답 고정
 
 ### 9-13. MSA 동기 호출 시나리오 대응 — CQRS 로컬 캐시
 
-Phase 4 MSA 환경에서 주문 생성 시 상품 가격/재고를 실시간으로 확인해야 합니다. 순수 비동기(Kafka)만으로는 최신 데이터를 즉시 얻을 수 없고, 동기 API 호출은 서비스 간 결합도를 높입니다.
+Phase 4 MSA 환경에서 주문 생성 시 상품 단가를 즉시 확인해야 합니다. 순수 비동기(Kafka)만으로는 최신 데이터를 즉시 얻을 수 없고, 동기 API 호출은 서비스 간 결합도를 높입니다.
 
 ```
 대안 비교:
@@ -380,8 +380,8 @@ Phase 4 MSA 환경에서 주문 생성 시 상품 가격/재고를 실시간으�
 
 채택한 CQRS 로컬 캐시 방식:
   Product Service → product.updated 이벤트 발행 (Outbox 경유)
-  Order Service → product.updated 소비 → 로컬 product_cache 테이블 갱신
-  주문 생성 시 → product_cache에서 가격/재고 정보 조회 (동기 호출 불필요)
+  Order Service → product.updated 소비 → 로컬 product_price_cache 테이블 갱신
+  주문 생성 시 → product_price_cache에서 단가 스냅샷 조회 (동기 호출 불필요)
 
 장점: 기존 이벤트 드리븐 아키텍처와 일관, 서비스 간 직접 호출 없음
 단점: 이벤트 전파 지연 동안 캐시와 원본 간 일시적 불일치 가능
@@ -389,6 +389,16 @@ Phase 4 MSA 환경에서 주문 생성 시 상품 가격/재고를 실시간으�
 ```
 
 > `product.updated` payload 필수 필드(productId/name/price/availableStock/status/categoryId/updatedAt) 및 파티션 키(productId)는 ADR-0012 §D2 에서 확정 (see ADR-0012).
+
+**구현 범위 (구현 ⑤ 종결 시점)**
+
+- 실제 테이블명은 `product_price_cache` 이며 Order 는 payload 중 **`price`/`version` 만 소비**합니다. 나머지 필드는 발행되지만 적재하지 않습니다.
+- **재고는 이 캐시에 없습니다.** 재고 정합성은 캐시가 아니라 재고 예약 Saga(`stock.reservation.result`)가 책임집니다 (see ADR-0012 F2/D3).
+- 멱등은 `processed_events`, 재정렬·replay 방어는 `source_version < version` stale-skip 입니다.
+
+**Redis 조회 캐시의 장애 정책 (L-006)**
+
+Product Service 의 상품 조회 Redis 캐시는 **fail-open** 입니다. `CacheErrorHandler`(`ResilientCacheErrorHandler`)가 조회 실패를 캐시 미스로 흘려 DB 로 우회하므로, Redis 장애가 상품 조회 API 를 5xx 로 만들지 않습니다. 단 `@CacheEvict` 실패는 TTL(상세 30m / 목록 10m) 만료 전까지 stale 을 남기므로 WARN + `cache_fallback_total` 메트릭으로 가시화합니다. Gateway 의 rate limit 이 정반대로 fail-closed 인 이유는 보호 장치와 가속 장치의 차이입니다 (see ADR-0013 D3). 운영 절차: `docs/runbooks/redis-cache-fallback.md`.
 
 ---
 

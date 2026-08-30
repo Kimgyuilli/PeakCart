@@ -160,23 +160,53 @@ OFFENDERS=()
 for f in "${CANDIDATES[@]:-}"; do
     [[ -z "$f" ]] && continue
     [[ "$f" == "$EXPECTED_OWNER" ]] && continue
-    # import 라인을 제외하고, 각 라인에서 '주석 부분만' 지운 뒤 남은 코드에 식별자가 있는지 본다.
+    # 파일에서 '주석과 문자열' 을 제거한 뒤 남은 코드에 식별자가 있는지 본다.
     #
     # 왜 주석을 지우는가: 빈 선언은 주석 안에 있을 수 없다. 반대로 "여기서는
     # MeterRegistryCustomizer 를 선언하지 않는다" 같은 javadoc 은 정상이며, 이를 위반으로 잡으면
     # 설계 의도를 주석에 남기는 것 자체가 벌칙이 된다 (구현 ⑤ CacheConfig 에서 실제 오탐).
     #
-    # 왜 '라인 통째 제외'가 아닌가: `/* note */ @Bean MeterFilter f() {...}` 처럼 주석 뒤에
-    # 실제 선언이 이어지면 그 라인을 버리는 순간 D5-V2 가 우회된다. 주석 토큰만 지우고
-    # 남은 코드를 검사해야 이 우회가 막힌다.
-    #
-    # sed: (1) `/* ... */` 한 줄 블록 제거 (2) `//` 이후 제거 (3) 블록주석 본문 라인(`*` 시작) 제거
-    # 구분자는 `#` 를 쓴다 — `:` 를 쓰면 `grep -n` 접두사 캡처 `([0-9]+:)` 안의 `:` 가
-    # s 명령을 끊어 치환이 통째로 망가진다(검출이 0건이 된다).
-    non_import=$(grep -nE '\b(MeterFilter|MeterRegistryCustomizer)\b' "$f" \
-                 | grep -vE '^\s*[0-9]+:\s*import\s' \
-                 | sed -E 's#/\*[^*]*\*+([^/*][^*]*\*+)*/##g; s#//.*$##; s#^([0-9]+:)[[:space:]]*[*].*$#\1#' \
-                 | grep -E '\b(MeterFilter|MeterRegistryCustomizer)\b' || true)
+    # 왜 줄 단위 sed 가 아닌가 — 세 가지가 전부 깨진다:
+    #   (1) `*/ @Bean MeterFilter f() {...}`  여러 줄 주석의 종료 줄 → 줄 전체를 버려 우회
+    #   (2) `@Deprecated(since="http://x") @Bean MeterFilter f()`  문자열 안의 `//` 부터 잘려 우회
+    #   (3) `/* MeterRegistryCustomizer` 로 시작하는 여러 줄 주석 → 닫는 토큰을 못 찾아 오탐
+    # 그래서 블록주석/문자열/문자/텍스트블록 상태를 들고 가는 최소 lexer 로 제거한다.
+    non_import=$(python3 - "$f" <<'PYLEX'
+import re, sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+out, i, n = [], 0, len(src)
+in_block = in_line = in_str = in_char = in_text = False
+
+while i < n:
+    c, nxt2, nxt3 = src[i], src[i:i+2], src[i:i+3]
+    if in_block:
+        if nxt2 == "*/": in_block = False; i += 2; continue
+        out.append("\n" if c == "\n" else " "); i += 1; continue
+    if in_line:
+        if c == "\n": in_line = False; out.append("\n")
+        i += 1; continue
+    if in_text:                       # text block """..."""
+        if nxt3 == '"""': in_text = False; i += 3; continue
+        out.append("\n" if c == "\n" else " "); i += 1; continue
+    if in_str or in_char:
+        if c == "\\": out.append("  "); i += 2; continue
+        if (in_str and c == '"') or (in_char and c == "'"): in_str = in_char = False
+        out.append(" "); i += 1; continue
+    if nxt3 == '"""': in_text = True; i += 3; continue
+    if nxt2 == "/*":   in_block = True; i += 2; continue
+    if nxt2 == "//":   in_line  = True; i += 2; continue
+    if c == '"':       in_str   = True; out.append(" "); i += 1; continue
+    if c == "'":       in_char  = True; out.append(" "); i += 1; continue
+    out.append(c); i += 1
+
+for lineno, line in enumerate(out and "".join(out).splitlines() or [], start=1):
+    if re.search(r"^\s*import\s", line):          # import-only 는 선언이 아니다
+        continue
+    if re.search(r"\b(MeterFilter|MeterRegistryCustomizer)\b", line):
+        print(f"{lineno}:{line.strip()}")
+PYLEX
+)
     if [[ -n "$non_import" ]]; then
         OFFENDERS+=("$f")
     fi

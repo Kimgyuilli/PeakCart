@@ -2,6 +2,8 @@ package com.peekcart.global.config;
 
 import io.lettuce.core.RedisCommandExecutionException;
 import io.lettuce.core.RedisCommandInterruptedException;
+import io.lettuce.core.RedisCommandTimeoutException;
+import io.lettuce.core.RedisConnectionException;
 import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -82,25 +84,44 @@ public class ResilientCacheErrorHandler implements CacheErrorHandler {
      * 가용성 장애로 인정하는 예외 — 이 계열만 삼킨다.
      * <p>Spring 번역 타입({@code DataAccessResourceFailureException} = 연결 실패,
      * {@code QueryTimeoutException} = 명령 타임아웃)과 번역 전 원인 양쪽을 본다.
-     * <p><b>Lettuce 최상위 {@link RedisException} 을 포함한다.</b> 연결이 이미 끊긴 뒤 들어온 명령은
-     * I/O 를 타지 않으므로 원인이 <b>없는</b> bare {@code RedisException} 으로 온다 —
-     * lettuce-core 6.6.0 {@code DefaultEndpoint} 가 {@code "Connection is closed"},
-     * {@code "Currently not connected. Commands are rejected."}, {@code "Connection disconnected"}
-     * 를 {@code new RedisException(String)} 으로 만든다(바이트코드 확인). Spring 의
-     * {@code LettuceExceptionConverter} 는 이를 {@code RedisSystemException} 으로 감쌀 뿐
-     * {@link IOException} 을 원인에 붙이지 않는다. 이 형태를 되던지면 "Redis 가 죽어도 조회가
-     * 5xx 로 실패하지 않는다"는 계약이 in-flight 연결 종료에서 깨진다.
-     *
-     * <p>{@code RedisException} 하위의 정합성 계열은 {@link #NEVER_SWALLOWED} 가 <b>먼저</b>
-     * 걸러낸다 — {@code RedisLoadingException}/{@code BusyException}/{@code ReadOnlyException}/
-     * {@code NoScriptException} 은 전부 {@link RedisCommandExecutionException} 하위이므로
-     * deny 한 줄로 함께 막힌다.
+     * <p>여기에 {@link RedisException} <b>하위 타입 전체</b>를 넣지 않는다. lettuce-core 6.6.0 의
+     * 계층을 전수 확인한 결과 {@code RedisProtocolException}, {@code cluster.PartitionException},
+     * {@code dynamic.CommandCreationException}, {@code CacheFrontend.ValueRetrievalException} 이
+     * 가용성과 무관한 형제로 존재한다 — 이들까지 삼키면 프로토콜·명령 구성 결함이 캐시 미스로 위장된다.
+     * 원인 없는 연결 종료는 {@link #isBareAvailabilityRedisException(Throwable)} 이 <b>정확히
+     * {@code RedisException} 타입인 경우만</b> 별도로 인정한다.
      */
     private static final List<Class<? extends Throwable>> AVAILABILITY_FAULTS = List.of(
             DataAccessResourceFailureException.class,
             QueryTimeoutException.class,
-            RedisException.class,
+            RedisConnectionException.class,
+            RedisCommandTimeoutException.class,
             IOException.class);
+
+    /**
+     * 원인이 <b>없는</b> bare {@code RedisException} 을 가용성 장애로 볼지.
+     *
+     * <p>연결이 이미 끊긴 뒤 들어온 명령은 I/O 를 타지 않으므로 원인 없는 {@code RedisException}
+     * 으로 온다 — lettuce-core 6.6.0 {@code DefaultEndpoint} 가 {@code "Connection is closed"},
+     * {@code "Currently not connected. Commands are rejected."}, {@code "Connection disconnected"}
+     * 를 {@code new RedisException(String)} 으로 만든다(바이트코드 확인). Spring 의
+     * {@code LettuceExceptionConverter} 는 {@code RedisSystemException} 으로 감쌀 뿐
+     * {@link IOException} 을 원인에 붙이지 않는다. 이 형태를 되던지면 "Redis 가 죽어도 조회가
+     * 5xx 로 실패하지 않는다"는 계약이 <b>in-flight 연결 종료</b>에서 깨진다.
+     *
+     * <p>{@code getClass() == RedisException.class} 로 <b>정확 일치</b>만 본다 — 하위 타입은
+     * 위 문단의 이유로 전부 제외된다.
+     *
+     * <p><b>알려진 한계</b>: bare {@code RedisException} 을 만드는 비가용성 경로도 존재한다
+     * (pub/sub {@code "not allowed while subscribed"}, {@code "Unsupported script output type"},
+     * {@code "Attempting to write duplicate command"}). 셋 다 Spring Cache 의 get/put/evict 경로에는
+     * 나타나지 않는다 — 이 캐시는 pub/sub 도 Lua 스크립트도 쓰지 않는다. 메시지 매칭으로 더 좁히는
+     * 대신 타입 정확 일치에서 멈춘 이유는, 메시지는 Lettuce 버전에 따라 바뀌고 그 경우
+     * <b>조용한 과삼킴이 아니라 in-flight 종료의 5xx 회귀</b>로 나타나 더 위험하기 때문이다.
+     */
+    private static boolean isBareAvailabilityRedisException(Throwable cause) {
+        return cause.getClass() == RedisException.class;
+    }
 
     @Override
     public void handleCacheGetError(RuntimeException exception, Cache cache, Object key) {
@@ -148,7 +169,7 @@ public class ResilientCacheErrorHandler implements CacheErrorHandler {
             if (matchesAny(cause, NEVER_SWALLOWED)) {
                 throw exception;   // deny 가 allow 를 이긴다 — 계층상 형제라 순서가 결과를 바꾼다
             }
-            if (matchesAny(cause, AVAILABILITY_FAULTS)) {
+            if (matchesAny(cause, AVAILABILITY_FAULTS) || isBareAvailabilityRedisException(cause)) {
                 availability = true;
             }
         }

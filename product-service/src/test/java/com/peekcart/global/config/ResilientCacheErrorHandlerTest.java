@@ -7,6 +7,9 @@ import io.lettuce.core.RedisCommandTimeoutException;
 import io.lettuce.core.RedisConnectionException;
 import io.lettuce.core.RedisException;
 import io.lettuce.core.RedisLoadingException;
+import io.lettuce.core.cluster.PartitionSelectorException;
+import io.lettuce.core.cluster.models.partitions.Partitions;
+import io.lettuce.core.protocol.RedisProtocolException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -163,6 +166,25 @@ class ResilientCacheErrorHandlerTest {
                     new RedisSystemException("busy", new RedisBusyException("BUSY"))
             ).forEach(exception ->
                     assertThatThrownBy(() -> handler.handleCacheGetError(exception, CACHE, 1L))
+                            .isSameAs(exception));
+
+            assertThat(fallbackCount("get")).isZero();
+        }
+
+        /**
+         * lettuce-core 6.6.0 계층 전수 확인 결과 {@code RedisException} 아래에는 가용성과 무관한
+         * 형제가 산다. 최상위 타입을 통째로 허용하면 이들이 캐시 미스로 위장된다.
+         */
+        @Test
+        @DisplayName("RedisException 의 비가용성 하위 계열(protocol/cluster/dynamic)은 되던진다")
+        void rethrowsNonAvailabilityRedisExceptionSubclasses() {
+            Stream.<RuntimeException>of(
+                    new RedisSystemException("protocol", new RedisProtocolException("알 수 없는 응답 타입")),
+                    new RedisSystemException("cluster",
+                            new PartitionSelectorException("슬롯 미할당", new Partitions()))
+            ).forEach(exception ->
+                    assertThatThrownBy(() -> handler.handleCacheGetError(exception, CACHE, 1L))
+                            .as("%s 는 가용성 장애가 아니다", exception.getCause().getClass().getSimpleName())
                             .isSameAs(exception));
 
             assertThat(fallbackCount("get")).isZero();

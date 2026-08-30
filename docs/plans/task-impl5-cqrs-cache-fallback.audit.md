@@ -96,3 +96,31 @@
 - 변이 검사 3형태 전부 검출 확인: 평범한 선언 · `/* */` 뒤 같은 줄 선언 · `//` 뒤 같은 줄 선언. javadoc 오탐은 없음(EXIT=0).
 - 회귀: 통합 7/7 · 단위 11/11 · 바인딩 2/2 · S7·기존 캐시 통과
 - raw: `.cache/codex-reviews/diffreview-task-impl5-cqrs-cache-fallback-r3final-*.json`
+
+## 2026-08-30 — diff 리뷰 라운드 4 (상한 초과 · 사용자 승인)
+
+**상한(3회) 초과 사유**: 1R→2R→3R 세 라운드 연속으로 직전 라운드 수정이 새 결함을 만들었다. 3R 수정 자체도 검증되지 않은 새 변경이므로 1회 더 돌리기로 사용자가 결정.
+
+- 항목: 2건 (P0:0, P1:2, P2:0)
+- 처리: 반영 2건 / 기각 0건
+- **3라운드 수정이 만든 새 결함: 2건 (둘 다 P1)** — 4라운드 연속이다.
+  - **#1 — `RedisException` 복원이 이번엔 과했다.** lettuce-core 6.6.0 예외 계층을 `javap` 로 전수 확인한 결과, `NEVER_SWALLOWED` 밖이면서 가용성도 아닌 형제가 실재한다: `protocol.RedisProtocolException`, `cluster.PartitionException`(+`PartitionSelectorException`/`UnknownPartitionException`), `dynamic.CommandCreationException`(+`CommandMethodSyntaxException`), `support.caching.CacheFrontend$ValueRetrievalException`. 최상위 타입 허용은 프로토콜·명령 구성 결함을 캐시 미스로 위장한다.
+    - 조치: 허용 목록에서 `RedisException` 을 빼고 `RedisConnectionException`·`RedisCommandTimeoutException`·`IOException`·Spring 번역 타입만 남긴 뒤, **원인 없는 bare 연결 종료**는 `getClass() == RedisException.class` **정확 일치**로만 별도 인정(`isBareAvailabilityRedisException`). 하위 타입은 전부 자동 제외된다.
+    - 메시지 매칭까지 가지 않은 이유: 메시지는 Lettuce 버전에 따라 바뀌고, 그때 나타나는 것은 조용한 과삼킴이 아니라 **in-flight 종료의 5xx 회귀**라 더 위험하다. 알려진 한계로 javadoc 에 명시.
+    - 회귀 고정: `rethrowsNonAvailabilityRedisExceptionSubclasses`(protocol/cluster/dynamic 3종).
+  - **#2 — 3라운드의 sed 가 세 형태에서 여전히 깨졌다.** (a) 여러 줄 주석 종료 줄 `*/ @Bean MeterFilter f()` → 3번 규칙이 줄을 통째로 버려 **우회**, (b) `@Deprecated(since="http://x")` → 문자열 안 `//` 부터 잘려 **우회**, (c) `/* MeterRegistryCustomizer` 로 시작하는 여러 줄 주석 → 닫는 토큰을 못 찾아 **오탐**.
+    - 조치: 줄 단위 정규식을 버리고 **블록주석/문자열/문자/텍스트블록 상태를 추적하는 lexer**(python3)로 교체.
+    - **self-test 신설**: `scripts/tests/observability-ssot-lint-d5v2-selftest.sh` — 위반 5형태 + 정상 3형태를 fixture 로 고정(8케이스). 3라운드 sed 구현으로 되돌리는 변이에서 **정확히 3건 FAIL**(위 a·c 와 문자열 리터럴 오탐)을 확인해 판별력을 실증했다.
+- 회귀: 통합 7/7 · 단위 12/12 · 바인딩 2/2 · S7·기존 캐시 통과 · bats 55/55 · D5-V2 self-test 8/8
+- raw: `.cache/codex-reviews/diffreview-task-impl5-cqrs-cache-fallback-r4-*.json`
+
+### 이 PR 의 리뷰 패턴 — 4라운드 연속 회귀
+
+| 라운드 | 잡은 것 |
+|---|---|
+| 1R | 원본 결함 3건 (무차별 삼킴 · 누적 메트릭 false-green · ADR 해시) |
+| 2R | **1R 수정이 만든 2건** (`RedisException` 통째 허용 · lint 라인 제외) |
+| 3R | **2R 수정이 만든 2건** (축소가 과해 in-flight 종료 5xx · lint 우회) |
+| 4R | **3R 수정이 만든 2건** (복원이 과해 비가용성 하위 삼킴 · sed 3형태 잔존) |
+
+**교훈**: 이 표면은 "허용 범위" 라는 **연속적인 축**을 다루는데, 매 라운드가 그 축 위에서 한쪽으로 과보정했다. 넓히면 정합성 오류가 새고, 좁히면 가용성 장애가 5xx 가 된다. 수렴은 **경계를 타입 계층 전수 확인으로 고정**(4R #1)하고 **판별 fixture 를 테스트로 못 박은**(4R #2 self-test) 뒤에야 왔다. 다음에 이런 축을 만나면 라운드를 돌리기 전에 먼저 전수 열거부터 할 것.

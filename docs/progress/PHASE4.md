@@ -1177,7 +1177,7 @@ ADR-0012 §Consequences 는 구현 ④ 의 산출물을 **4개**로 규정했다
 
 ---
 
-## 구현 ⑤ — CQRS 로컬 캐시 (L-006 Redis fallback)
+## 구현 ⑤ — CQRS 로컬 캐시 (L-006 Redis fallback) — [#94](https://github.com/Kimgyuilli/PeakCart/pull/94)
 
 ### 범위 재확정 — ⑤ 의 본체는 구현 ① 안에서 이미 끝나 있었다
 

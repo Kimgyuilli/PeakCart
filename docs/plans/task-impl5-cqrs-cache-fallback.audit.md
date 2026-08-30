@@ -140,3 +140,10 @@
   - **재검토 조건**: 이 lint 가 보안 통제로 승격되거나(예: 외부 기여 수용), 유니코드 escape 가 코드베이스에 실제로 등장하면 다시 연다.
 - 회귀: 통합 7/7 · 단위 12/12 · 바인딩 2/2 · S7·기존 캐시 통과 · lint EXIT=0 · D5-V2 self-test **10/10**
 - raw: `.cache/codex-reviews/diffreview-task-impl5-cqrs-cache-fallback-r5-*.json`
+
+## 2026-08-30 — /ship applied (PR #94)
+
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/94 (base `main`, 커밋 11개)
+- Consistency precheck: `ok` (warnings 0, exit 0) → GS-1 자동 통과
+- 갱신: `docs/TASKS.md` ⑤ 행 ✅ + PR 링크 · `phase4-prep-debt-roadmap.md` L-006 ✅ + PR 번호 · `PHASE4.md` 헤더 PR 링크
+- **하네스 불일치 관측**: `/ship` Step 1 은 `docs/plans/<task>.state.json` 을 요구하고 없으면 중단하지만, `/plan`·`/work` 는 2026-08-26 축소에서 state machine 을 제거해 그 파일을 만들지 않는다. state 파일을 지어내지 않고 Step 1/10(state 조작)만 건너뛰고 나머지를 수행했다. `/ship` 스킬 정의를 축소된 계약에 맞추는 정리가 필요하다.

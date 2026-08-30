@@ -80,7 +80,7 @@ class StockReservationLeaseSweepTest {
     }
 
     @Test
-    @DisplayName("만료 예약을 회수하면 재고를 복구하고 운영 알림을 보낸다 (정상 경로면 0건이어야 하므로)")
+    @DisplayName("[SAGA-SWEEPER-LEASE-RECLAIM] 만료 예약을 회수하면 재고를 복구하고 운영 알림을 보낸다 (정상 경로면 0건이어야 하므로)")
     void reclaimsExpiredAndAlerts() {
         StockReservation expired = StockReservation.reserved(ORDER_ID, ITEMS_JSON, "evt-1", TTL);
         given(reservationRepository.findExpiredReserved(any(LocalDateTime.class), anyInt()))
@@ -96,7 +96,7 @@ class StockReservationLeaseSweepTest {
     }
 
     @Test
-    @DisplayName("CAS 가 지면(동시 release 선점) 회수하지 않고 재고도 건드리지 않는다 — 이중 복구 차단")
+    @DisplayName("[SAGA-SWEEPER-CAS-LOSS] CAS 가 지면(동시 release 선점) 회수하지 않고 재고도 건드리지 않는다 — 이중 복구 차단")
     void casLoses_noRestore_noAlert() {
         StockReservation expired = StockReservation.reserved(ORDER_ID, ITEMS_JSON, "evt-1", TTL);
         given(reservationRepository.findExpiredReserved(any(LocalDateTime.class), anyInt()))

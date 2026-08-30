@@ -169,7 +169,7 @@ class RefundLedgerIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("crash (a/b): lease 만료 CLAIMED 는 dispatcher 가 아니라 reconciliation 후보다 (조회 선행 보장)")
+    @DisplayName("[SAGA-REFUND-CRASH-A] crash (a/b): lease 만료 CLAIMED 는 dispatcher 가 아니라 reconciliation 후보다 (조회 선행 보장)")
     void staleClaim_goesToReconciliationNotDispatcher() {
         Payment payment = seedApprovedPayment(1006L);
         refundService.requestRefund(payment, "PAID_BUT_CANCELLED");

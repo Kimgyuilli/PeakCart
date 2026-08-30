@@ -96,7 +96,7 @@ Redis는 JWT 블랙리스트 용도로만 사용합니다. 캐싱과 분산 락�
 
 ### Phase 4 — MSA
 
-> 5개 서비스 경계·이벤트 토폴로지·Saga 골격의 정본은 ADR-0010 (see ADR-0010). 재고 예약 모델 도입으로 토픽이 확장되고, Order↔Payment 동기 결합 제거(ADR-0012 §D4 refine)로 `payment.requested` 가 추가되어 **총 7개**(`order.created`·`order.cancelled`·`payment.completed`·`payment.failed`·`payment.requested`·`product.updated`·`stock.reservation.result`)다. Product 가 `order.created`/`payment.completed`/`payment.failed` 도 소비한다(`payment.requested` 는 Order 만 소비) — 토픽×producer×consumer×group 매트릭스 정본은 ADR-0012 §D4 (see ADR-0012). **토픽 생성은 producer-owns-topic** — 각 발행 서비스가 자기 토픽(+`.dlq`)의 `NewTopic` 을 소유한다(order=`order.*`, payment=`payment.*`, product=`product.updated`/`stock.reservation.result`; Order/Payment peel 로 root 단독 생성 모델 폐기). 아래 다이어그램은 ADR-0010 시점의 4토픽 골격.
+> 5개 서비스 경계·이벤트 토폴로지·Saga 골격의 정본은 ADR-0010 (see ADR-0010). 재고 예약 모델 도입으로 토픽이 확장되고, Order↔Payment 동기 결합 제거(ADR-0012 §D4 refine)로 `payment.requested` 가 추가되어 **총 10개**다 — 위 7개(`order.created`·`order.cancelled`·`payment.completed`·`payment.failed`·`payment.requested`·`product.updated`·`stock.reservation.result`)에 보상/환불 3개(`stock.compensation.requested`·`order.compensation.requested`·`payment.refunded`, ADR-0018 D1)가 더해진다. Product 가 `order.created`/`payment.completed`/`payment.failed` 도 소비한다(`payment.requested` 는 Order 만 소비) — 토픽×producer×consumer×group 매트릭스 정본은 ADR-0012 §D4 (see ADR-0012). **토픽 생성은 producer-owns-topic** — 각 발행 서비스가 자기 토픽(+`.dlq`)의 `NewTopic` 을 소유한다(order=`order.*`, payment=`payment.*`, product=`product.updated`/`stock.reservation.result`; Order/Payment peel 로 root 단독 생성 모델 폐기). 아래 다이어그램은 ADR-0010 시점의 4토픽 골격.
 
 ```mermaid
 graph TD

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.outbox.OutboxEvent;
 import com.peekcart.global.outbox.OutboxEventRepository;
+import com.peekcart.global.outbox.OutboxPollingScheduler;
 import com.peekcart.global.outbox.dto.KafkaEventEnvelope;
 import com.peekcart.order.domain.model.CompensationReason;
 import com.peekcart.order.domain.model.CompensationStatus;
@@ -23,6 +24,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -93,6 +95,21 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
 
     @MockitoSpyBean OutboxEventRepository outboxEventRepository;
 
+    /**
+     * Outbox poller 를 무력화한다 — 두 가지를 동시에 막는다.
+     *
+     * <p>① {@code OutboxEventRepository} 를 context-wide spy 로 바꾸면 **5초마다 도는**
+     * {@link OutboxPollingScheduler} 가 그 spy 를 호출한다. Mockito 의
+     * {@code willThrow(...).given(spy)...} 는 두 단계라 그 사이에 다른 스레드가 spy 를 건드리면
+     * {@code UnfinishedStubbingException} 이 난다 — 코드가 아니라 <b>주사위</b>가 결정하는 실패다.
+     *
+     * <p>② 실제 poller 가 돌면 {@code PENDING} 행을 집어 {@code PUBLISHED} 로 바꾼다. 이 클래스의
+     * backfill 검증은 상태 카운트를 단언하므로 그 자체로 경합이다.
+     *
+     * <p>발행 경로가 필요한 검사는 {@code kafkaTemplate.send} 로 직접 넣으므로 poller 는 쓰이지 않는다.
+     */
+    @MockitoBean OutboxPollingScheduler outboxPollingScheduler;
+
     @BeforeEach
     void setUp() {
         cleanDatabase();
@@ -156,7 +173,7 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     // ---------------- P12: 회신 소비 종결 ----------------
 
     @Test
-    @DisplayName("payment.refunded(SUCCEEDED) → RESOLVED (④-a R-2 가 닫히는 경로)")
+    @DisplayName("[SAGA-REFUND-RESULT-ORDER-SUCCEEDED] payment.refunded(SUCCEEDED) → RESOLVED (④-a R-2 가 닫히는 경로)")
     void refundSucceeded_resolvesLedger() {
         Long orderId = seedOpenCompensation();
         LocalDateTime resolvedAt = LocalDateTime.now().withNano(0);
@@ -170,7 +187,7 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("payment.refunded(FAILED) → REFUND_FAILED + failure_code — '해결됨'이 아니다")
+    @DisplayName("[SAGA-REFUND-RESULT-ORDER-FAILED] payment.refunded(FAILED) → REFUND_FAILED + failure_code — '해결됨'이 아니다")
     void refundFailed_closesAsUnresolvedTerminal() {
         Long orderId = seedOpenCompensation();
 
@@ -183,7 +200,7 @@ class OrderCompensationRefundIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("payment.refunded(UNRESOLVED) → 전이하지 않는다 (OPEN 유지)")
+    @DisplayName("[SAGA-REFUND-RESULT-ORDER-UNRESOLVED] payment.refunded(UNRESOLVED) → 전이하지 않는다 (OPEN 유지)")
     void refundUnresolved_doesNotTransition() {
         Long orderId = seedOpenCompensation();
 

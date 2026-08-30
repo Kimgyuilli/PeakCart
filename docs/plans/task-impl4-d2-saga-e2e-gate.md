@@ -91,7 +91,8 @@
 
 - [x] **P2.** **로컬 PG stub (R1 #1 · R2 #8 · R3 #12).** `POST /payments/{key}/cancel` 과 `GET /payments/{paymentKey}` **둘 다** 구현한다 — `ALREADY_CANCELED` 분기와 reconciliation 이 **항상 조회를 먼저** 부르기 때문에(V18) 조회가 없으면 그 경로가 도달 불가다.
   응답은 전역 모드가 아니라 **paymentKey 별 불변 script**. 지원: 취소 성공 · 4xx 거절 · transient 반복 · `ALREADY_CANCELED_PAYMENT` × 조회 3분기(전액 취소 성공 · `cancels[].cancelAmount` 금액 불일치 · 조회 실패) · 타임아웃.
-  **script 별 예상 ledger 를 순서까지 열거한다**: 성공 `POST×1` / transient 소진 `POST×3`(`RefundExecutor:35-54` 의 `maxAttempts`) / `ALREADY` `POST×1 → GET×1` / reconciliation 성공 `GET×1, POST×0`. 각 단언의 **관측 시간창과 reconciliation 실행 여부**도 고정한다. 승인(`confirm`)은 **미구현 500**.
+  **script 별 예상 ledger 를 순서까지 열거한다**: 성공 `POST×1` / transient 소진 `POST×3`(`RefundExecutor:35-54` 의 `maxAttempts`) / `ALREADY` `POST×1 → GET×1` / reconciliation 성공 `GET×1, POST×0`. 각 단언의 **관측 시간창과 reconciliation 실행 여부**도 고정한다.
+  **[구현 중 정정 — #92 후속 리뷰 #2]** 초안은 승인(`confirm`)을 "미구현 500" 으로 뒀는데, **P6 이 `POST /api/v1/payments/confirm` 을 실제 HTTP 진입점으로 요구**하므로 성립하지 않는다 — confirm 이 항상 500 이면 시나리오 A 의 `PAY-005`(PG 실패)와 가드 거부를 구분할 수 없고, 승인 성공을 HTTP 로 만들 길도 사라진다(P8 잔여분이 `payments` SQL seed 에 영구히 묶인다). → confirm 도 **paymentKey 접두사 script** 를 따른다(`e2e-ok-*`→200 · `e2e-cfail-*`→500). 초안이 지키려던 "미구현 표면이 조용히 통과하지 않는다" 는 **`STUB_UNSCRIPTED_KEY` 500** 이 담당한다 — 표면이 아니라 **키** 단위로 막는 쪽이 오타까지 잡는다.
 
 ### E2E 하네스
 
@@ -115,31 +116,31 @@
   **[④-d-2a 실제 범위 — diff 리뷰 #1]** 이 PR 이 실증한 구간은 **요청 2경로 → fence 1행 → dispatcher → stub → `SUCCEEDED` → `payments=REFUNDED` → `payment.refunded` outbox `PUBLISHED`** 까지다. **회신 소비 3곳의 종결**(Order `RESOLVED` · Product 종결 컬럼 3개 · Notification `PAYMENT_REFUNDED`)과 **결과 3종 분기**는 Order/Product 의 선행 원장 seed 가 필요해 ④-d-2b 로 넘긴다(§9-11). 지금 상태로는 그 세 소비자가 전부 no-op 이어도 시나리오 C 가 통과한다.
 - [x] **P9.** **시나리오 D — DLQ intake (V15).** 역직렬화 불가 레코드 주입 → `.dlq` 경유 → `dead_letter_records` 1행 + 식별자 6컬럼 non-null.
   **중복 판정은 재발행으로 만들 수 없다**(offset 이 달라져 다른 좌표다). **DLQ consumer group 의 offset 을 명시적으로 rewind** 해 같은 DLT 레코드를 재소비시키고, 동일 6컬럼 키에서 새 행 없이 **`attempt_count=2`** 를 본다.
-- [ ] **P10.** **시나리오 격리 (R2 #3 · R3 #5 · N13).** 모든 시나리오에 `scenario_id` 기반 **고유 `orderId`/`eventId`/`paymentKey`** 를 부여하고 **모든 DB 단언을 그 키 + 정확한 consumer group 에 결부**한다.
+- [x] **P10.** **시나리오 격리 (R2 #3 · R3 #5 · N13).** 모든 시나리오에 `scenario_id` 기반 **고유 `orderId`/`eventId`/`paymentKey`** 를 부여하고 **모든 DB 단언을 그 키 + 정확한 consumer group 에 결부**한다.
   **"배경 스케줄러 간섭 0" 은 단언하지 않는다** (R3 #5) — `UNRESOLVED` 는 reconciliation 의 **명시적 후보**라(`PaymentRefundService:196-199`) 다음 시나리오 동안 generation·last_error·stub ledger 가 바뀌는 게 **정상 동작**이다. 대신 ① **terminal 시나리오를 먼저, `UNRESOLVED` 시나리오를 마지막에 실행하고 즉시 teardown** 하는 순서를 계약으로 고정 ② 판정은 "다른 시나리오 행이 현재 시나리오의 단언을 만족시키지 못한다" 는 **키 기반 검증**으로 한정한다.
 
 ### 계약 게이트 (부모 P14)
 
-- [ ] **P11.** **매트릭스 정본** `docs/plans/fixtures/saga-contract-matrix.tsv` — 열: `id` · `evidence_type(jvm|e2e)` · `path` · `fault` · `expected` · `evidence_key`. 필수 행: refund result 3종 × 소비자 3곳 · crash matrix 4칸 · `payment.failed` 수렴 · 예약 실패 · timeout 3종 · sweeper · DLQ intake · 스케줄러 배선(P17).
+- [x] **P11.** **매트릭스 정본** `docs/plans/fixtures/saga-contract-matrix.tsv` — 열: `id` · `evidence_type(jvm|e2e)` · `path` · `fault` · `expected` · `evidence_key`. 필수 행: refund result 3종 × 소비자 3곳 · crash matrix 4칸 · `payment.failed` 수렴 · 예약 실패 · timeout 3종 · sweeper · DLQ intake · 스케줄러 배선(P17).
   **`expected` 문법을 기계적으로 고정한다**(N14): **canonical JSON object** — key 사전순 · 숫자/문자열 타입 구분 · `null` 명시 · 배열은 **각 원소의 canonical JSON 문자열로 정렬** 후 비교. 자유 문장 금지. 매트릭스 자체를 JSON Schema 로 검증한다.
-- [ ] **P12.** **`scripts/saga-contract-matrix-lint.sh` 신설.** 3분기 — `--structure` · `--jvm-evidence` · `--e2e-evidence`. `--structure` 는 열 유효성·중복 id 에 더해 **`path` 가 실제 존재하는 파일/클래스를 가리키는지**, `fault` 가 비어 있지 않은지, **`expected` 가 P11 문법을 만족하는지**, `evidence_key` 유일성을 검사한다. **required-ID 정본은 lint 안에** 둔다(N4).
-- [ ] **P13.** **JVM 증적 키 (V8 · R1 #6).** 키 = **`testcase@classname`** + `testcase@name` 안의 안정 contract ID `[SAGA-xxx]`. **`testsuite@name` 은 클래스 `@DisplayName` 이라 키로 쓸 수 없다.** self-test 에 클래스 `@DisplayName` 유무 · 중첩 `Outer$Inner` · 동일 ID 중복 fixture 를 넣는다.
-- [ ] **P14.** **E2E manifest 대조 구조 (R2 #10 · R3 #7).** manifest 에 **`evidence: {<evidence_key>: {actual: <canonical JSON>}}`** 구조를 두고 매트릭스의 각 `evidence_key` 와 **정확히 1:1** 대조한다 — 한 시나리오에 여러 evidence_key 가 있으므로 시나리오 단위 top-level 비교는 성립하지 않고, `run_id`/`started_at` 같은 메타필드 때문에 전체 객체 동등 비교도 항상 실패한다.
+- [x] **P12.** **`scripts/saga-contract-matrix-lint.sh` 신설.** 3분기 — `--structure` · `--jvm-evidence` · `--e2e-evidence`. `--structure` 는 열 유효성·중복 id 에 더해 **`path` 가 실제 존재하는 파일/클래스를 가리키는지**, `fault` 가 비어 있지 않은지, **`expected` 가 P11 문법을 만족하는지**, `evidence_key` 유일성을 검사한다. **required-ID 정본은 lint 안에** 둔다(N4).
+- [x] **P13.** **JVM 증적 키 (V8 · R1 #6).** 키 = **`testcase@classname`** + `testcase@name` 안의 안정 contract ID `[SAGA-xxx]`. **`testsuite@name` 은 클래스 `@DisplayName` 이라 키로 쓸 수 없다.** self-test 에 클래스 `@DisplayName` 유무 · 중첩 `Outer$Inner` · 동일 ID 중복 fixture 를 넣는다.
+- [x] **P14.** **E2E manifest 대조 구조 (R2 #10 · R3 #7).** manifest 에 **`evidence: {<evidence_key>: {actual: <canonical JSON>}}`** 구조를 두고 매트릭스의 각 `evidence_key` 와 **정확히 1:1** 대조한다 — 한 시나리오에 여러 evidence_key 가 있으므로 시나리오 단위 top-level 비교는 성립하지 않고, `run_id`/`started_at` 같은 메타필드 때문에 전체 객체 동등 비교도 항상 실패한다.
   **exact equality 로 고정**(subset 아님)하고, 메타필드는 `evidence` 밖에 둔다. 배열 정렬 규칙은 P11 과 동일.
-- [ ] **P15.** **파서 self-test.** fixture 로 `missing`·`failure`·`error`·`skipped`·`duplicate`·`stale`(다른 commit sha) 각각 **non-zero** + 구조 훼손 6종 + P13 의 3종 + **같은 의미의 다른 표현(키 순서·공백)은 통과 / 타입 불일치(`"3"` vs `3`)는 non-zero**.
-- [ ] **P16.** **음성 대조군 상시 실행 (R1 #8 · R2 #2 · R3 #10 · N11·N17).** `scripts/saga-e2e-smoke.sh --negative-control` 로 매 CI 실행. 최소 집합:
+- [x] **P15.** **파서 self-test.** fixture 로 `missing`·`failure`·`error`·`skipped`·`duplicate`·`stale`(다른 commit sha) 각각 **non-zero** + 구조 훼손 6종 + P13 의 3종 + **같은 의미의 다른 표현(키 순서·공백)은 통과 / 타입 불일치(`"3"` vs `3`)는 non-zero**.
+- [x] **P16.** **음성 대조군 상시 실행 (R1 #8 · R2 #2 · R3 #10 · N11·N17).** `scripts/saga-e2e-smoke.sh --negative-control` 로 매 CI 실행. 최소 집합:
   ① **poller 정지 → 시나리오 A 실패**(시작 이벤트가 실제 poller 를 지나는지 검출하는 **유일한** 대조군) ② product-service 정지 → A 실패 ③ 재고 충분 → B 실패 ④ required group 1개 제거 → readiness 실패 ⑤ compose project 2개 동시 기동 성공 ⑥ **egress 차단 양·음 대조** — CI 러너에 임시 TCP 서버를 띄우고 **비격리 control 컨테이너에서는 연결 성공**, internal-only payment 컨테이너에서는 **실패**함을 한 테스트로 묶는다(실패만 보면 canary 가 죽어도 통과한다).
-- [ ] **P17.** **스케줄러 배선 계약 (V20 · R2 #9 · R3 #11 · N12).** timeout 3종·sweeper 의 현재 테스트는 `@InjectMocks` 객체를 직접 호출해 **`@Scheduled` 를 지워도 통과**한다. 주기를 **Order/Product 각각 base 소유의 타입 안전한 scheduler properties** 로 빼고(ADR-0007 — 동작 정책), 운영 기본 주기·lock 불변식을 테스트로 고정한 뒤 **실제 Spring scheduling 발화 후 DB 상태를 기다리는 통합 테스트**를 추가한다.
+- [x] **P17.** **스케줄러 배선 계약 (V20 · R2 #9 · R3 #11 · N12).** timeout 3종·sweeper 의 현재 테스트는 `@InjectMocks` 객체를 직접 호출해 **`@Scheduled` 를 지워도 통과**한다. 주기를 **Order/Product 각각 base 소유의 타입 안전한 scheduler properties** 로 빼고(ADR-0007 — 동작 정책), 운영 기본 주기·lock 불변식을 테스트로 고정한 뒤 **실제 Spring scheduling 발화 후 DB 상태를 기다리는 통합 테스트**를 추가한다.
   **V20 대응은 결정적이어야 한다**(R3 #11): `lockAtLeastFor=PT30S` 라 기동 직후 빈 작업 선발화가 30초를 잡는다 → seed 를 컨텍스트 기동 **전**에 끝내는 initializer 로 고정하고, **seed-after-start fixture 는 latch 로 "첫 발화가 빈 작업으로 lock 을 잡은 뒤 다음 발화가 timeout" 을 강제**해 타이밍 의존을 제거한다.
 
 ### CI 배선
 
-- [ ] **P18.** **CI (V6·V7 · R1 #4·#5 · R3 #6).** ① `images` matrix 는 **연속 6개 그대로 유지**한다 — 4개로 줄이면 `image-contract-lint.sh:44-48,74-90` 의 canonical 대조가 실패한다(파서가 연속 `- item` 행만 읽는다). `Save`/`Upload` 조건을 **`github.event_name == 'push' || contains(saga4, matrix.service)` 단일 조건식**으로 교체 + `if-no-files-found: error` ② `e2e` 잡 신설 — `needs: images`, **saga 4개 artifact 정확히** download + `docker load`(개수 검증) + `docker compose -f docker-compose.e2e.yml -p e2e-${{ github.run_id }} up -d --wait` + 시나리오 4종 + P16 + manifest ③ `if: always()` 로 compose logs + manifest + duration 업로드 후 `down -v --remove-orphans` ④ build 잡 = `--structure`+`--jvm-evidence`, e2e 잡 = `--structure`+`--e2e-evidence` ⑤ test artifact glob 을 `*/build/test-results/**`·`*/build/reports/**` 로 확대 ⑥ 매트릭스 게이트는 `./gradlew build` **뒤**.
-- [ ] **P19.** **실행 예산 (R2 #11).** 앱별 **heap/컨테이너 메모리 상한**, readiness·시나리오·음성 대조군 각각의 **절대 timeout**, e2e 잡 **전체 시간 예산**을 명시한다. **재시도는 인프라 기동에만** 허용하고 상태 단언 실패는 재시도하지 않는다. 구간별 duration 을 artifact 에 남긴다.
+- [x] **P18.** **CI (V6·V7 · R1 #4·#5 · R3 #6).** ① `images` matrix 는 **연속 6개 그대로 유지**한다 — 4개로 줄이면 `image-contract-lint.sh:44-48,74-90` 의 canonical 대조가 실패한다(파서가 연속 `- item` 행만 읽는다). `Save`/`Upload` 조건을 **`github.event_name == 'push' || contains(saga4, matrix.service)` 단일 조건식**으로 교체 + `if-no-files-found: error` ② `e2e` 잡 신설 — `needs: images`, **saga 4개 artifact 정확히** download + `docker load`(개수 검증) + `docker compose -f docker-compose.e2e.yml -p e2e-${{ github.run_id }} up -d --wait` + 시나리오 4종 + P16 + manifest ③ `if: always()` 로 compose logs + manifest + duration 업로드 후 `down -v --remove-orphans` ④ build 잡 = `--structure`+`--jvm-evidence`, e2e 잡 = `--structure`+`--e2e-evidence` ⑤ test artifact glob 을 `*/build/test-results/**`·`*/build/reports/**` 로 확대 ⑥ 매트릭스 게이트는 `./gradlew build` **뒤**.
+- [x] **P19.** **실행 예산 (R2 #11).** 앱별 **heap/컨테이너 메모리 상한**, readiness·시나리오·음성 대조군 각각의 **절대 timeout**, e2e 잡 **전체 시간 예산**을 명시한다. **재시도는 인프라 기동에만** 허용하고 상태 단언 실패는 재시도하지 않는다. 구간별 duration 을 artifact 에 남긴다.
 
 ### 문서 (부모 P15)
 
-- [ ] **P20.** **문서 동기화 + ④ 종결 (R1 #13).** `TASKS.md` ④ ✅ + L-013 처분 + **D-020 신규 등재** · `PHASE4.md` 이력 · Layer 1(`02`/`03`/`04`) saga 흐름·토픽 10종·payload 정정 · ADR-0012 ④ 산출물 대비 실제 범위 차이 · §9 미충족 전량 명시.
+- [x] **P20.** **문서 동기화 + ④ 종결 (R1 #13).** `TASKS.md` ④ ✅ + L-013 처분 + **D-020 신규 등재** · `PHASE4.md` 이력 · Layer 1(`02`/`03`/`04`) saga 흐름·토픽 10종·payload 정정 · ADR-0012 ④ 산출물 대비 실제 범위 차이 · §9 미충족 전량 명시.
   **`task-impl4-d2-saga-e2e-gate.audit.md` 생성/갱신을 이 항목이 소유한다** — §5 각 실패 주입의 **명령·exit code·증적 artifact 링크**를 기록한다. audit 파일 부재를 완료 조건이 실패시킨다.
 
 ---
@@ -180,7 +181,8 @@
 | P1 | `k8s` 프로파일에서 `TOSS_BASE_URL` 미주입 / 주입 | **실 PG endpoint 로 해석**(배포가 주입을 기다리지 않는다) / env 값이 이김 |
 | P1 | `docker-health-smoke.sh payment-service` | k8s 프로파일 부팅 성공 — 필수 env 추가가 배포 경로를 깨지 않았음 |
 | P1 | 앰비언트 `TOSS_BASE_URL`·`TOSS_PAYMENTS_BASE_URL`·`SPRING_PROFILES_ACTIVE` 를 띄운 채 실행 | 결과가 **바뀌지 않는다**(환경 격리). CI 는 `SPRING_PROFILES_ACTIVE=test` 로 빌드한다 |
-| P2 | stub 에 `confirm` 요청 | **500** — 미구현 표면이 조용히 통과하지 않는다 |
+| P2 | stub 에 `confirm` 요청 | script 를 따른다 — `e2e-ok-*`→200 · `e2e-cfail-*`→500 |
+| P2 | stub 에 **미등록 키** 로 confirm/cancel/조회 | **500 `STUB_UNSCRIPTED_KEY`** — 오타 난 키가 조용히 성공하지 않는다 |
 | P2 | `ALREADY_CANCELED` script | `GET /payments/{key}` 가 실제 호출됨을 ledger 로 단언. 조회 3분기가 서로 다른 종착 |
 | P2 | script 별 ledger 대조 | 성공 `POST×1` / transient 소진 `POST×3` / `ALREADY` `POST×1→GET×1` / reconcile `GET×1,POST×0` — **순서까지** |
 | P3 | 같은 compose 를 project 2개로 동시 기동 | 둘 다 정상. 하나 down 해도 다른 쪽 생존 |

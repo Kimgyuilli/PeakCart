@@ -36,7 +36,7 @@ class OrderTimeoutSchedulerTest {
     @Mock OrderSagaMetrics sagaMetrics;
 
     @Test
-    @DisplayName("만료 주문이 있으면 건별로 cancelExpiredOrder를 호출한다")
+    @DisplayName("[SAGA-TIMEOUT-PAYMENT-PENDING] 만료 주문이 있으면 건별로 cancelExpiredOrder를 호출한다")
     void cancelExpiredOrders_withExpiredOrders() {
         Order order1 = OrderFixture.paymentRequestedOrderWithId();
         Order order2 = OrderFixture.paymentRequestedOrderWithId();
@@ -101,7 +101,7 @@ class OrderTimeoutSchedulerTest {
     }
 
     @Test
-    @DisplayName("낙관 락 충돌은 재시도하지 않고 포기한다 — 결제 완료가 이긴 경우다 (계획 P2 충돌 정책)")
+    @DisplayName("[SAGA-TIMEOUT-OPTIMISTIC-LOSS] 낙관 락 충돌은 재시도하지 않고 포기한다 — 결제 완료가 이긴 경우다 (계획 P2 충돌 정책)")
     void cancelExpiredOrders_optimisticLockConflictGivesUp() {
         Order order1 = OrderFixture.paymentRequestedOrderWithId();
         Order order2 = OrderFixture.paymentRequestedOrderWithId();
@@ -120,7 +120,7 @@ class OrderTimeoutSchedulerTest {
     }
 
     @Test
-    @DisplayName("예약 미확정 잡: 취소 건수를 unconfirmed_reservation 사유로만 센다")
+    @DisplayName("[SAGA-TIMEOUT-UNCONFIRMED-RESERVATION] 예약 미확정 잡: 취소 건수를 unconfirmed_reservation 사유로만 센다")
     void cancelUnconfirmedReservations_countsOwnReason() {
         Order order1 = OrderFixture.orderWithId();
         given(orderRepository.findUnconfirmedReservationBefore(any(LocalDateTime.class)))
@@ -138,7 +138,7 @@ class OrderTimeoutSchedulerTest {
     }
 
     @Test
-    @DisplayName("lease 만료 잡: 만료된 예약 주문을 건별로 취소한다 (계획 P3)")
+    @DisplayName("[SAGA-TIMEOUT-LEASE-EXPIRED] lease 만료 잡: 만료된 예약 주문을 건별로 취소한다 (계획 P3)")
     void cancelExpiredReservationLeases_cancelsEach() {
         Order order1 = OrderFixture.orderWithId();
         Order order2 = OrderFixture.orderWithId();

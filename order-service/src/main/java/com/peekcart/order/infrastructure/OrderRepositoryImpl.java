@@ -3,7 +3,6 @@ package com.peekcart.order.infrastructure;
 import com.peekcart.order.domain.model.Order;
 import com.peekcart.order.domain.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
@@ -36,8 +35,13 @@ public class OrderRepositoryImpl implements OrderRepository {
     }
 
     @Override
-    public Page<Order> findByUserId(Long userId, Pageable pageable) {
-        return orderJpaRepository.findByUserId(userId, pageable);
+    public List<Order> findFirstPage(Long userId, Pageable limit) {
+        return orderJpaRepository.findFirstPageByUserId(userId, limit);
+    }
+
+    @Override
+    public List<Order> findPageAfterCursor(Long userId, LocalDateTime orderedAt, Long id, Pageable limit) {
+        return orderJpaRepository.findPageByUserIdAfterCursor(userId, orderedAt, id, limit);
     }
 
     @Override

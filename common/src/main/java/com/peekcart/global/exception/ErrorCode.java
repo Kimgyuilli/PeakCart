@@ -35,6 +35,9 @@ public enum ErrorCode {
     ORD_007(HttpStatus.CONFLICT, "ORD-007", "상품 가격 정보를 아직 사용할 수 없습니다. 잠시 후 다시 시도해주세요."),
     ORD_008(HttpStatus.CONFLICT, "ORD-008", "재고 예약이 아직 확정되지 않았습니다. 잠시 후 다시 시도해주세요."),
     ORD_009(HttpStatus.CONFLICT, "ORD-009", "상품 정보를 아직 사용할 수 없습니다. 잠시 후 다시 시도해주세요."),
+    ORD_010(HttpStatus.BAD_REQUEST, "ORD-010", "유효하지 않은 커서입니다."),
+    ORD_011(HttpStatus.BAD_REQUEST, "ORD-011", "size 파라미터가 올바르지 않습니다."),
+    ORD_012(HttpStatus.BAD_REQUEST, "ORD-012", "지원하지 않는 페이지네이션 파라미터입니다."),
 
     // Payment
     PAY_001(HttpStatus.BAD_REQUEST, "PAY-001", "결제 금액이 일치하지 않습니다."),

@@ -1,7 +1,6 @@
 package com.peekcart.order.infrastructure;
 
 import com.peekcart.order.domain.model.Order;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -13,7 +12,17 @@ import java.util.Optional;
 
 public interface OrderJpaRepository extends JpaRepository<Order, Long> {
     Optional<Order> findByIdAndUserId(Long id, Long userId);
-    Page<Order> findByUserId(Long userId, Pageable pageable);
+
+    @Query("SELECT o FROM Order o WHERE o.userId = :userId ORDER BY o.orderedAt DESC, o.id DESC")
+    List<Order> findFirstPageByUserId(@Param("userId") Long userId, Pageable limit);
+
+    @Query("SELECT o FROM Order o WHERE o.userId = :userId "
+            + "AND (o.orderedAt < :orderedAt OR (o.orderedAt = :orderedAt AND o.id < :id)) "
+            + "ORDER BY o.orderedAt DESC, o.id DESC")
+    List<Order> findPageByUserIdAfterCursor(@Param("userId") Long userId,
+                                            @Param("orderedAt") LocalDateTime orderedAt,
+                                            @Param("id") Long id,
+                                            Pageable limit);
 
     @Query("SELECT o FROM Order o JOIN FETCH o.orderItems "
             + "WHERE o.status = com.peekcart.order.domain.model.OrderStatus.PAYMENT_REQUESTED "

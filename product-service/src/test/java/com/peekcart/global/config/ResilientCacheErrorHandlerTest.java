@@ -1,6 +1,7 @@
 package com.peekcart.global.config;
 
 import io.lettuce.core.RedisCommandExecutionException;
+import io.lettuce.core.RedisCommandInterruptedException;
 import io.lettuce.core.RedisCommandTimeoutException;
 import io.lettuce.core.RedisConnectionException;
 import io.lettuce.core.RedisException;
@@ -132,6 +133,31 @@ class ResilientCacheErrorHandlerTest {
         }
 
         @Test
+        @DisplayName("Lettuce 최상위 RedisException 만으로는 삼키지 않는다 — 가용성 근거가 없다")
+        void rethrowsBareRedisException() {
+            RuntimeException bare = new RedisSystemException("근거 없음", new RedisException("무엇인지 모름"));
+
+            assertThatThrownBy(() -> handler.handleCacheGetError(bare, CACHE, 1L))
+                    .as("RedisException 전체를 허용하면 명령 거부·interrupt 까지 함께 들어온다")
+                    .isSameAs(bare);
+
+            assertThat(fallbackCount("get")).isZero();
+        }
+
+        @Test
+        @DisplayName("스레드 interrupt 로 중단된 명령은 되던진다 — Redis 상태와 무관하다")
+        void rethrowsCommandInterrupted() {
+            RuntimeException interrupted = new RedisSystemException("중단됨",
+                    new RedisCommandInterruptedException(new InterruptedException("취소")));
+
+            assertThatThrownBy(() -> handler.handleCacheGetError(interrupted, CACHE, 1L))
+                    .as("삼키면 이미 취소된 요청이 DB 조회를 계속한다")
+                    .isSameAs(interrupted);
+
+            assertThat(fallbackCount("get")).isZero();
+        }
+
+        @Test
         @DisplayName("자기참조 원인 체인에서 무한 루프하지 않는다")
         void terminatesOnSelfReferencingCause() {
             RuntimeException selfReferencing = new IllegalStateException("순환") {
@@ -143,6 +169,27 @@ class ResilientCacheErrorHandlerTest {
 
             assertThatThrownBy(() -> handler.handleCacheGetError(selfReferencing, CACHE, 1L))
                     .isSameAs(selfReferencing);
+        }
+
+        @Test
+        @DisplayName("A→B→A 다중 노드 순환에서도 종료한다 (자기참조 방어만으로는 못 막는다)")
+        void terminatesOnMultiNodeCycle() {
+            Throwable[] holder = new Throwable[1];
+            RuntimeException a = new IllegalStateException("A") {
+                @Override
+                public synchronized Throwable getCause() {
+                    return holder[0];
+                }
+            };
+            holder[0] = new IllegalStateException("B") {
+                @Override
+                public synchronized Throwable getCause() {
+                    return a;
+                }
+            };
+
+            assertThatThrownBy(() -> handler.handleCacheGetError(a, CACHE, 1L))
+                    .isSameAs(a);
         }
     }
 

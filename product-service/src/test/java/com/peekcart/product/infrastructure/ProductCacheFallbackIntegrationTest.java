@@ -87,6 +87,8 @@ import static org.mockito.Mockito.verify;
 class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
 
     private static final PageRequest DEFAULT_PAGE = PageRequest.of(0, 10);
+    private static final String DETAIL_CACHE = "product";
+    private static final String LIST_CACHE = "products";
     private static final int REDIS_PORT = 6379;
     private static final int PROXY_LISTEN_PORT = 8666;
     private static final String TIMEOUT_TOXIC = "redis-no-response";
@@ -198,8 +200,8 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
                 .as("프록시 차단 후에도 조회는 성공해야 한다(fail-open)")
                 .isNotNull();
 
-        assertThat(before.deltaOf("get"))
-                .as("프록시를 끊었는데 get fallback 이 늘지 않으면 앱이 프록시를 우회하고 있다")
+        assertThat(before.deltaOf(DETAIL_CACHE, "get"))
+                .as("프록시를 끊었는데 product 캐시의 get fallback 이 늘지 않으면 앱이 프록시를 우회하고 있다")
                 .isEqualTo(1.0);
         verify(productRepository, times(1))
                 .findById(productId);   // 캐시가 살아 있었다면 0회였다
@@ -223,9 +225,12 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         assertThat(prometheusBody())
                 .as("cache_fallback_total{operation=\"get\"} 가 노출돼야 한다")
                 .containsPattern("cache_fallback_total\\{[^}]*operation=\"get\"[^}]*\\}");
-        assertThat(before.deltaOf("get"))
-                .as("상세 1회 + 목록 1회 = get fallback 2회")
-                .isEqualTo(2.0);
+        assertThat(before.deltaOf(DETAIL_CACHE, "get"))
+                .as("상세 조회 1회는 product 캐시로 집계돼야 한다")
+                .isEqualTo(1.0);
+        assertThat(before.deltaOf(LIST_CACHE, "get"))
+                .as("목록 조회 1회는 products 캐시로 집계돼야 한다 — 라벨이 뭉개지면 여기서 걸린다")
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -263,8 +268,8 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
 
             // 한 요청이 get·put 두 경로 '모두에서' 타임아웃을 맞았음을 증가분으로 고정한다.
             // 누적값 단언이면 put 경로가 아예 안 타도 앞선 테스트 잔여로 통과한다(diff 리뷰 #2).
-            assertThat(before.deltaOf("get")).isEqualTo(1.0);
-            assertThat(before.deltaOf("put")).isEqualTo(1.0);
+            assertThat(before.deltaOf(DETAIL_CACHE, "get")).isEqualTo(1.0);
+            assertThat(before.deltaOf(DETAIL_CACHE, "put")).isEqualTo(1.0);
         } finally {
             toxic.remove();
         }
@@ -300,10 +305,10 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         // update 는 상세를 키 단위로(@CacheEvict key), 목록을 통째로(allEntries=true) 무효화한다.
         // allEntries 는 Spring 이 handleCacheEvictError 가 아니라 handleCacheClearError 로 보낸다 —
         // 두 콜백을 한 값으로 뭉개면 어느 캐시가 stale 인지 구분되지 않는다.
-        assertThat(before.deltaOf("evict"))
+        assertThat(before.deltaOf(DETAIL_CACHE, "evict"))
                 .as("상세 캐시(product) 키 단위 무효화 1회")
                 .isEqualTo(1.0);
-        assertThat(before.deltaOf("clear"))
+        assertThat(before.deltaOf(LIST_CACHE, "clear"))
                 .as("목록 캐시(products) allEntries 무효화 1회 — clear 콜백으로 온다")
                 .isEqualTo(1.0);
     }
@@ -325,8 +330,8 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         // 상세 조회의 재고 조회(InventoryRepository)는 캐시와 무관하게 매 요청 발생하므로
         // 부하 증거에서 제외하고, 캐시가 살아 있었다면 1회로 줄었을 findById 만 센다.
         verify(productRepository, times(repeats)).findById(productId);
-        assertThat(before.deltaOf("get")).isEqualTo((double) repeats);
-        assertThat(before.deltaOf("put")).isEqualTo((double) repeats);
+        assertThat(before.deltaOf(DETAIL_CACHE, "get")).isEqualTo((double) repeats);
+        assertThat(before.deltaOf(DETAIL_CACHE, "put")).isEqualTo((double) repeats);
     }
 
     @Test
@@ -359,13 +364,23 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         private final java.util.Map<String, Double> baseline = new java.util.HashMap<>();
 
         private FallbackSnapshot() {
-            for (String operation : List.of("get", "put", "evict", "clear")) {
-                baseline.put(operation, fallbackCount(operation));
+            for (String cache : List.of(DETAIL_CACHE, LIST_CACHE, "unknown")) {
+                for (String operation : List.of("get", "put", "evict", "clear")) {
+                    baseline.put(key(cache, operation), fallbackCount(cache, operation));
+                }
             }
         }
 
-        double deltaOf(String operation) {
-            return fallbackCount(operation) - baseline.getOrDefault(operation, 0.0);
+        /**
+         * {@code cache} 라벨까지 함께 본다 — operation 만 보면 핸들러가 모든 이벤트를
+         * {@code cache="unknown"} 으로 기록해도 단언이 통과해 P3 의 라벨 계약이 무너진다.
+         */
+        double deltaOf(String cache, String operation) {
+            return fallbackCount(cache, operation) - baseline.getOrDefault(key(cache, operation), 0.0);
+        }
+
+        private static String key(String cache, String operation) {
+            return cache + "/" + operation;
         }
     }
 
@@ -373,10 +388,11 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         return new FallbackSnapshot();
     }
 
-    /** {@code cache_fallback_total} 중 해당 operation 시계열 값의 합. 없으면 0. */
-    private double fallbackCount(String operation) {
+    /** {@code cache_fallback_total} 중 (cache, operation) 시계열 값. 없으면 0. */
+    private double fallbackCount(String cache, String operation) {
         return prometheusBody().lines()
                 .filter(line -> line.startsWith("cache_fallback_total{"))
+                .filter(line -> line.contains("cache=\"" + cache + "\""))
                 .filter(line -> line.contains("operation=\"" + operation + "\""))
                 .mapToDouble(line -> Double.parseDouble(line.substring(line.lastIndexOf(' ') + 1)))
                 .sum();

@@ -160,9 +160,14 @@ OFFENDERS=()
 for f in "${CANDIDATES[@]:-}"; do
     [[ -z "$f" ]] && continue
     [[ "$f" == "$EXPECTED_OWNER" ]] && continue
-    # import 라인을 제외한 식별자 사용 라인이 1건 이상 있는지 확인 (import-only 제외)
+    # import 라인과 주석 라인을 제외한 식별자 사용 라인이 1건 이상 있는지 확인.
+    # 주석 제외 이유: 빈 선언은 주석 안에 있을 수 없다. 반대로 "여기서는 MeterRegistryCustomizer 를
+    # 선언하지 않는다" 처럼 식별자를 언급하는 javadoc 은 정상이며, 이를 위반으로 잡으면
+    # 설계 의도를 주석에 남기는 것 자체가 벌칙이 된다 (구현 ⑤ CacheConfig 에서 실제 오탐).
+    # `*` / `//` / `/*` 로 시작하는 라인만 제외하므로 실제 선언은 그대로 검출된다.
     non_import=$(grep -nE '\b(MeterFilter|MeterRegistryCustomizer)\b' "$f" \
-                 | grep -vE '^\s*[0-9]+:\s*import\s' || true)
+                 | grep -vE '^\s*[0-9]+:\s*import\s' \
+                 | grep -vE '^\s*[0-9]+:\s*(\*|//|/\*)' || true)
     if [[ -n "$non_import" ]]; then
         OFFENDERS+=("$f")
     fi

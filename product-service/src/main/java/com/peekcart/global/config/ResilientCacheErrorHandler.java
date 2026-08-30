@@ -1,7 +1,9 @@
 package com.peekcart.global.config;
 
 import io.lettuce.core.RedisCommandExecutionException;
-import io.lettuce.core.RedisException;
+import io.lettuce.core.RedisCommandInterruptedException;
+import io.lettuce.core.RedisCommandTimeoutException;
+import io.lettuce.core.RedisConnectionException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +15,10 @@ import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.serializer.SerializationException;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Redis 장애 시 캐시 경로를 fail-open 으로 흘리는 {@link CacheErrorHandler} (L-006, 구현 ⑤).
@@ -65,23 +70,29 @@ public class ResilientCacheErrorHandler implements CacheErrorHandler {
      * <p>{@link RedisCommandExecutionException} 은 서버가 명령을 <b>받아서 거부</b>한 경우다
      * (문법 오류·ACL {@code NOPERM}·{@code OOM}). 연결은 멀쩡하므로 fail-open 대상이 아니다.
      * {@link SerializationException} 은 캐시 값의 타입 불일치 — 배포 사고이지 인프라 장애가 아니다.
-     * 둘 다 {@link RedisException} 하위라 순서를 뒤집으면 허용 목록에 잡아먹힌다.
+     * {@link RedisCommandInterruptedException} 은 스레드 interrupt 로 명령이 중단된 것이라
+     * Redis 상태와 무관하다 — 삼키면 취소된 요청이 DB 조회를 계속한다.
+     * 이들은 Lettuce 예외 계층에서 가용성 예외와 형제라 <b>allow 보다 먼저</b> 봐야 한다.
      */
     private static final List<Class<? extends Throwable>> NEVER_SWALLOWED = List.of(
             RedisCommandExecutionException.class,
+            RedisCommandInterruptedException.class,
             SerializationException.class);
 
     /**
      * 가용성 장애로 인정하는 예외 — 이 계열만 삼킨다.
      * <p>Spring 번역 타입({@code DataAccessResourceFailureException} = 연결 실패,
      * {@code QueryTimeoutException} = 명령 타임아웃)과 번역 전 원인 양쪽을 본다.
-     * 연결 거부/리셋은 실측 결과 {@code RedisSystemException ← RedisException ← SocketException}
-     * 으로 오므로 Lettuce 기반 타입과 {@link IOException} 을 함께 포함한다.
+     * <p>Lettuce 최상위 {@code RedisException} 을 통째로 허용하지 <b>않는다</b> — 그 아래에는
+     * 명령 거부·interrupt 처럼 가용성과 무관한 예외가 함께 산다. 실측된 연결 거부 체인
+     * {@code RedisSystemException ← RedisException ← SocketException} 은 안쪽
+     * {@link IOException} 으로 이미 판별되므로 최상위 타입이 필요 없다.
      */
     private static final List<Class<? extends Throwable>> AVAILABILITY_FAULTS = List.of(
             DataAccessResourceFailureException.class,
             QueryTimeoutException.class,
-            RedisException.class,
+            RedisConnectionException.class,
+            RedisCommandTimeoutException.class,
             IOException.class);
 
     @Override
@@ -121,17 +132,17 @@ public class ResilientCacheErrorHandler implements CacheErrorHandler {
      * 원인 체인 전체를 훑는 이유는 Spring 이 Lettuce 예외를 여러 겹으로 감싸기 때문이다.
      */
     private static void rethrowIfNotAvailabilityFault(RuntimeException exception) {
+        // A→B→A 같은 다중 노드 순환도 있으므로 identity 기준 방문 집합으로 끊는다.
+        // 자기참조(cause == this)만 막으면 2노드 순환에서 이 스레드가 영원히 돈다.
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         boolean availability = false;
 
-        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+        for (Throwable cause = exception; cause != null && visited.add(cause); cause = cause.getCause()) {
             if (matchesAny(cause, NEVER_SWALLOWED)) {
-                throw exception;   // deny 가 allow 를 이긴다 — 둘 다 RedisException 하위다
+                throw exception;   // deny 가 allow 를 이긴다 — 계층상 형제라 순서가 결과를 바꾼다
             }
             if (matchesAny(cause, AVAILABILITY_FAULTS)) {
                 availability = true;
-            }
-            if (cause.getCause() == cause) {
-                break;  // 자기참조 체인 방어
             }
         }
 

@@ -145,4 +145,4 @@ choreography 단계:
 **바뀌지 않은 것**: 7 필수필드는 실제로 전량 발행된다(`ProductUpdatedPayload`). 소비 측이 일부만 적재할 뿐이므로 payload 계약 자체는 유효하다. 장바구니 상품정보 조합은 별도 task 로 분리됐다(진행 이력은 `docs/progress/PHASE4.md`).
 
 **커밋**: `9f74bd6` — `fix(adr): ADR-0012 §D2·구현⑤ 산출물의 사실 정정 + Update Log (P11)`
-(해시는 자기 자신을 참조할 수 없어 직후 커밋에서 채웠다 — diff 리뷰 #3)
+(해시는 자기 자신을 참조할 수 없어 후속 커밋 `7a7b719` 에서 채웠다 — diff 리뷰 1R #3)

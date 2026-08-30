@@ -39,3 +39,37 @@
 - 분류 근거: 틀린 것은 **테이블명·컬럼 범위·소비처 구현 상태**라는 사실 진술(README 예시의 "파일명·Phase 귀속·수치" 계열)이다. 결정 자체(이벤트로 동기 호출 대체, 7필드 계약)는 유효 → `:14`(트레이드오프 변경·Consequences 재해석 → 새 ADR)에 해당하지 않는다.
 - 조치: **P11 신설** — ADR-0012 본문 정정 + `## Update Log` 절 + `fix(adr):` 분리 커밋. Status·ADR 개수 무변경. V9 grep 계약과 완료 조건 12 에 반영.
 - 수렴 판정: 3라운드 P1 3건 중 2건은 코드 사실 확인 후 즉시 반영, 나머지 1건이 본 처분으로 종결 → **P1 = 0, 새 계약 표면은 P11(ADR Update Log) 하나이며 이는 리뷰 지적의 직접 수용이라 신규 리스크 표면이 아님.**
+
+## 2026-08-30 — diff 리뷰 라운드 1
+
+- 항목: 3건 (P0:0, P1:2, P2:1)
+- 처리: 반영 3건 / 기각 0건
+- 주요 지적:
+  - **P1 #1** `ResilientCacheErrorHandler` 가 예외 종류를 보지 않고 전부 삼켰다 — 직렬화 불일치·ACL `NOPERM`·명령 문법 오류처럼 **연결은 멀쩡한 정합성 오류**까지 정상 fallback 으로 위장돼, 배포 후 모든 요청이 조용히 DB 로 가는 상태의 원인을 추적할 수 없다. → deny/allow 분리 + 단위 테스트 신설.
+  - **P1 #2 (false-green)** V0/V3/V5 가 컨텍스트 **누적** `cache_fallback_total` 을 단언해 앞선 테스트 잔여로 통과 가능. 실제 실행 순서도 V1→V3→V0→V5 라 V0 진입 시 이미 양수였다. → `FallbackSnapshot` 증가분 단언.
+  - **P2 #3** Update Log 의 커밋 해시가 자리표시자.
+- 부수 확인: `@CacheEvict(allEntries=true)` 는 `handleCacheEvictError` 가 아니라 `handleCacheClearError` 로 온다. V4 를 evict 1 · clear 1 로 분리.
+- 검증: 통합 7/7 · 단위 7/7 · 변이 검사 재실행(맨 `@Bean` → 6/7 FAILED)
+- raw: `.cache/codex-reviews/diffreview-task-impl5-cqrs-cache-fallback-r1-*.json`
+
+## 2026-08-30 — diff 리뷰 라운드 2
+
+- 항목: 4건 (P0:0, P1:1, P2:3)
+- 처리: 반영 4건 / 기각 0건
+- **라운드1 수정이 만든 새 결함: 2건**
+  - **P1 #1** 1라운드에서 허용 목록을 Lettuce **최상위 `RedisException`** 으로 넓힌 탓에 명령 거부·interrupt 까지 다시 삼킬 수 있게 됐다. 실측 체인 `RedisSystemException ← RedisException ← SocketException` 은 안쪽 `IOException` 으로 이미 판별되므로 최상위 타입이 불필요했다. → `RedisConnectionException`·`RedisCommandTimeoutException`·`IOException` 으로 재축소 + `RedisCommandInterruptedException` deny 추가.
+  - **P2 #4** 1라운드가 ADR 에 새로 넣은 "직후 커밋에서 채웠다" 서술이 실제 이력과 불일치(직후는 `016f1ea`, 실제는 `7a7b719`).
+- 그 외:
+  - **P2 #2** 원인 체인 순회가 자기참조만 끊어 A→B→A 2노드 순환에서 무한 루프 → `IdentityHashMap` 방문 집합.
+  - **P2 #3 (false-green)** `FallbackSnapshot` 이 `operation` 만 보고 `cache` 라벨을 합산 — 핸들러가 전부 `cache="unknown"` 으로 기록해도 통과했다. P3 의 `{cache,operation}` 계약이 미검증 → (cache, operation) 키로 교체.
+- 부수: `observability-ssot-lint` D5-V2 가 `CacheConfig` 의 **javadoc 주석**("여기서는 `MeterRegistryCustomizer` 를 선언하지 않는다")을 S1 중복 선언으로 오탐 → 주석 라인 제외. 실제 `@Bean MeterRegistryCustomizer` 주입 시 여전히 검출됨을 변이로 확인.
+- raw: `.cache/codex-reviews/diffreview-task-impl5-cqrs-cache-fallback-r2-*.json`
+
+## 2026-08-30 — diff 리뷰 라운드 3 (실행 불가)
+
+- **Codex CLI 를 실행할 수 없어 라운드 3 을 돌리지 못했다.** 세션 중(11:14) `codex` 심볼릭 링크가 `.codex-Sn17FtFx` 로 리네임되고 네이티브 의존성이 사라졌다:
+  `Error: Missing optional dependency @openai/codex-darwin-arm64. Reinstall Codex: npm install -g @openai/codex@latest`
+  첫 시도는 `codex-code-mode-host` 바이너리 부재로 리뷰어가 파일을 못 읽어 0건을 반환했고, 재시도는 `command not found`, `node` 직접 호출은 위 오류였다.
+- **따라서 "2라운드 수정이 새 결함을 만들지 않았다"는 미검증이다.** 2라운드에서 P1 1건을 수정했으므로 수렴 조건상 1회 더 돌리는 것이 맞다.
+- 남은 검증은 자동 게이트로 대체: 통합 7/7 · 단위 9/9 · 바인딩 2/2 · 회귀(S7·기존 캐시) 통과 · 변이 검사 6/7 FAILED · `ssot-lint` EXIT=0 · bats 55/55.
+- 조치: Codex 재설치 후 `/work` 재실행으로 라운드 3 을 돌릴 것. 미충족으로 명시한다.

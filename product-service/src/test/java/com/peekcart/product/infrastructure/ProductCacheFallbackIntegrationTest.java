@@ -46,6 +46,7 @@ import org.testcontainers.kafka.KafkaContainer;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -186,12 +187,22 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
                 .as("정상 경로에서 Redis 에 캐시 키가 실제로 적재돼야 한다 — 아니면 이후 장애 주입이 무의미하다")
                 .isPositive();
 
-        // 프록시를 끊으면 같은 연결이 실패해야 한다 = 앱이 프록시를 통과한다는 증거
+        // 프록시를 끊으면 같은 연결이 실패해야 한다 = 앱이 프록시를 통과한다는 증거.
+        // 누적값이 아니라 '이 호출이 만든 증가분'을 본다 — 앞선 테스트의 잔여로 통과하면
+        // 프록시 우회를 못 잡는다(diff 리뷰 #2).
+        FallbackSnapshot before = captureFallback();
+        clearInvocations(productRepository);
         redisProxy.disable();
+
         assertThat(queryService.getProduct(productId))
                 .as("프록시 차단 후에도 조회는 성공해야 한다(fail-open)")
                 .isNotNull();
-        assertThat(fallbackCount("get")).isPositive();
+
+        assertThat(before.deltaOf("get"))
+                .as("프록시를 끊었는데 get fallback 이 늘지 않으면 앱이 프록시를 우회하고 있다")
+                .isEqualTo(1.0);
+        verify(productRepository, times(1))
+                .findById(productId);   // 캐시가 살아 있었다면 0회였다
     }
 
     // ---------- V1 · V2: 연결 거부 ----------
@@ -199,6 +210,7 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("V1 — 연결 거부 상태에서 상세·목록 조회가 DB 값을 반환하고 get fallback 메트릭이 노출된다")
     void connectionRefused_readsFallBackToDatabase() throws IOException {
+        FallbackSnapshot before = captureFallback();
         redisProxy.disable();
 
         ProductDetailDto detail = queryService.getProduct(productId);
@@ -211,6 +223,9 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         assertThat(prometheusBody())
                 .as("cache_fallback_total{operation=\"get\"} 가 노출돼야 한다")
                 .containsPattern("cache_fallback_total\\{[^}]*operation=\"get\"[^}]*\\}");
+        assertThat(before.deltaOf("get"))
+                .as("상세 1회 + 목록 1회 = get fallback 2회")
+                .isEqualTo(2.0);
     }
 
     @Test
@@ -234,6 +249,7 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         // 타임아웃 상한 측정에 섞이면 무엇을 재는지 알 수 없게 된다.
         queryService.getProduct(productId);
 
+        FallbackSnapshot before = captureFallback();
         Timeout toxic = redisProxy.toxics().timeout(TIMEOUT_TOXIC, ToxicDirection.DOWNSTREAM, 0);
         try {
             long startedAt = System.nanoTime();
@@ -245,9 +261,10 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
                     .as("get 500ms + put 500ms + DB/오버헤드. 상한이 깨지면 timeout 설정이 지워진 것이다")
                     .isLessThan(Duration.ofMillis(1500));
 
-            // 한 요청이 get·put 두 경로 모두에서 타임아웃을 맞았음을 고정한다
-            assertThat(fallbackCount("get")).isPositive();
-            assertThat(fallbackCount("put")).isPositive();
+            // 한 요청이 get·put 두 경로 '모두에서' 타임아웃을 맞았음을 증가분으로 고정한다.
+            // 누적값 단언이면 put 경로가 아예 안 타도 앞선 테스트 잔여로 통과한다(diff 리뷰 #2).
+            assertThat(before.deltaOf("get")).isEqualTo(1.0);
+            assertThat(before.deltaOf("put")).isEqualTo(1.0);
         } finally {
             toxic.remove();
         }
@@ -258,6 +275,7 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
     @Test
     @DisplayName("V4 — 연결 거부 상태에서 상품 수정은 DB 에 커밋되고 evict fallback 이 기록된다")
     void connectionRefused_evictFailureIsVisibleButCommitSucceeds() throws IOException {
+        FallbackSnapshot before = captureFallback();
         redisProxy.disable();
 
         commandService.update(productId,
@@ -277,7 +295,17 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
 
         assertThat(prometheusBody())
                 .as("evict 실패는 조용히 넘기지 않는다 — stale 창이 열렸다는 신호다")
-                .containsPattern("cache_fallback_total\\{[^}]*operation=\"evict\"[^}]*\\}");
+                .containsPattern("cache_fallback_total\\{[^}]*operation=\"evict\"[^}]*\\}")
+                .containsPattern("cache_fallback_total\\{[^}]*operation=\"clear\"[^}]*\\}");
+        // update 는 상세를 키 단위로(@CacheEvict key), 목록을 통째로(allEntries=true) 무효화한다.
+        // allEntries 는 Spring 이 handleCacheEvictError 가 아니라 handleCacheClearError 로 보낸다 —
+        // 두 콜백을 한 값으로 뭉개면 어느 캐시가 stale 인지 구분되지 않는다.
+        assertThat(before.deltaOf("evict"))
+                .as("상세 캐시(product) 키 단위 무효화 1회")
+                .isEqualTo(1.0);
+        assertThat(before.deltaOf("clear"))
+                .as("목록 캐시(products) allEntries 무효화 1회 — clear 콜백으로 온다")
+                .isEqualTo(1.0);
     }
 
     // ---------- V5: put 실패의 DB 부하 전이 ----------
@@ -286,6 +314,7 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("V5 — 캐시가 죽어 있으면 동일 상품 N회 조회가 DB 를 N회 친다 (put 실패는 무해하지 않다)")
     void cacheOutage_transfersLoadToDatabase() throws IOException {
         int repeats = 5;
+        FallbackSnapshot before = captureFallback();
         redisProxy.disable();
         clearInvocations(productRepository);
 
@@ -296,8 +325,8 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         // 상세 조회의 재고 조회(InventoryRepository)는 캐시와 무관하게 매 요청 발생하므로
         // 부하 증거에서 제외하고, 캐시가 살아 있었다면 1회로 줄었을 findById 만 센다.
         verify(productRepository, times(repeats)).findById(productId);
-        assertThat(fallbackCount("get")).isGreaterThanOrEqualTo(repeats);
-        assertThat(fallbackCount("put")).isGreaterThanOrEqualTo(repeats);
+        assertThat(before.deltaOf("get")).isEqualTo((double) repeats);
+        assertThat(before.deltaOf("put")).isEqualTo((double) repeats);
     }
 
     @Test
@@ -319,6 +348,29 @@ class ProductCacheFallbackIntegrationTest extends AbstractIntegrationTest {
         ResponseEntity<String> response = restTemplate.getForEntity("/actuator/prometheus", String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         return Optional.ofNullable(response.getBody()).orElse("");
+    }
+
+    /**
+     * 장애 주입 직전의 {@code cache_fallback_total} 기준값.
+     * <p>메트릭은 Spring 컨텍스트 수명 동안 누적되고 테스트 실행 순서는 고정이 아니므로,
+     * 누적값을 단언하면 앞선 테스트의 잔여로 통과해버린다. 각 시나리오는 <b>자기 증가분</b>만 본다.
+     */
+    private final class FallbackSnapshot {
+        private final java.util.Map<String, Double> baseline = new java.util.HashMap<>();
+
+        private FallbackSnapshot() {
+            for (String operation : List.of("get", "put", "evict", "clear")) {
+                baseline.put(operation, fallbackCount(operation));
+            }
+        }
+
+        double deltaOf(String operation) {
+            return fallbackCount(operation) - baseline.getOrDefault(operation, 0.0);
+        }
+    }
+
+    private FallbackSnapshot captureFallback() {
+        return new FallbackSnapshot();
     }
 
     /** {@code cache_fallback_total} 중 해당 operation 시계열 값의 합. 없으면 0. */

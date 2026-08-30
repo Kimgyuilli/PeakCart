@@ -1,11 +1,19 @@
 package com.peekcart.global.config;
 
+import io.lettuce.core.RedisCommandExecutionException;
+import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cache.Cache;
 import org.springframework.cache.interceptor.CacheErrorHandler;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.serializer.SerializationException;
+
+import java.io.IOException;
+import java.util.List;
 
 /**
  * Redis 장애 시 캐시 경로를 fail-open 으로 흘리는 {@link CacheErrorHandler} (L-006, 구현 ⑤).
@@ -31,6 +39,12 @@ import org.springframework.cache.interceptor.CacheErrorHandler;
  *       최대 30분 노출될 수 있다. 조용히 넘기면 아무도 모르므로 <b>WARN + 메트릭</b>으로 남긴다.
  * </ul>
  *
+ * <p><b>무엇이든 삼키지는 않는다</b>: fail-open 은 <i>가용성</i> 장애에 대한 정책이다. 직렬화 불일치,
+ * 잘못된 명령/ACL, 캐시 구현 결함 같은 <i>정합성</i> 오류까지 삼키면 "Redis 가 죽었다"와
+ * "캐시가 고장 났다"가 같은 신호로 뭉개져, 배포 후 모든 요청이 조용히 DB 로 가는 상태를
+ * 아무도 원인 규명하지 못한다. 연결 실패·명령 타임아웃 계열만 허용하고 나머지는
+ * 기본 {@code SimpleCacheErrorHandler} 처럼 <b>되던진다</b>.
+ *
  * <p>복구 방침(TTL 만료 대기)과 수동 키 삭제 절차는 {@code docs/runbooks/redis-cache-fallback.md}.
  */
 @Slf4j
@@ -46,21 +60,48 @@ public class ResilientCacheErrorHandler implements CacheErrorHandler {
         this.meterRegistryProvider = meterRegistryProvider;
     }
 
+    /**
+     * <b>가용성 장애가 아님이 확실한</b> 예외 — 허용 목록보다 먼저 본다.
+     * <p>{@link RedisCommandExecutionException} 은 서버가 명령을 <b>받아서 거부</b>한 경우다
+     * (문법 오류·ACL {@code NOPERM}·{@code OOM}). 연결은 멀쩡하므로 fail-open 대상이 아니다.
+     * {@link SerializationException} 은 캐시 값의 타입 불일치 — 배포 사고이지 인프라 장애가 아니다.
+     * 둘 다 {@link RedisException} 하위라 순서를 뒤집으면 허용 목록에 잡아먹힌다.
+     */
+    private static final List<Class<? extends Throwable>> NEVER_SWALLOWED = List.of(
+            RedisCommandExecutionException.class,
+            SerializationException.class);
+
+    /**
+     * 가용성 장애로 인정하는 예외 — 이 계열만 삼킨다.
+     * <p>Spring 번역 타입({@code DataAccessResourceFailureException} = 연결 실패,
+     * {@code QueryTimeoutException} = 명령 타임아웃)과 번역 전 원인 양쪽을 본다.
+     * 연결 거부/리셋은 실측 결과 {@code RedisSystemException ← RedisException ← SocketException}
+     * 으로 오므로 Lettuce 기반 타입과 {@link IOException} 을 함께 포함한다.
+     */
+    private static final List<Class<? extends Throwable>> AVAILABILITY_FAULTS = List.of(
+            DataAccessResourceFailureException.class,
+            QueryTimeoutException.class,
+            RedisException.class,
+            IOException.class);
+
     @Override
     public void handleCacheGetError(RuntimeException exception, Cache cache, Object key) {
-        // 조용히 삼킨다 — 미스로 취급돼 타깃 메서드(DB)가 실행된다. 흔적은 메트릭에 남는다.
+        rethrowIfNotAvailabilityFault(exception);
+        // 삼킨다 — 미스로 취급돼 타깃 메서드(DB)가 실행된다. 흔적은 메트릭에 남는다.
         count(cache, "get");
         log.debug("캐시 조회 실패 — DB 로 우회. cache={}, key={}", cacheName(cache), key, exception);
     }
 
     @Override
     public void handleCachePutError(RuntimeException exception, Cache cache, Object key, Object value) {
+        rethrowIfNotAvailabilityFault(exception);
         count(cache, "put");
         log.debug("캐시 적재 실패 — 후속 요청이 DB 를 친다. cache={}, key={}", cacheName(cache), key, exception);
     }
 
     @Override
     public void handleCacheEvictError(RuntimeException exception, Cache cache, Object key) {
+        rethrowIfNotAvailabilityFault(exception);
         count(cache, "evict");
         // stale 창이 열렸다. TTL 만료 전까지 낡은 값이 서빙된다 — WARN 으로 올린다.
         log.warn("캐시 무효화 실패 — TTL 만료까지 stale 값이 서빙될 수 있다. cache={}, key={}",
@@ -69,9 +110,38 @@ public class ResilientCacheErrorHandler implements CacheErrorHandler {
 
     @Override
     public void handleCacheClearError(RuntimeException exception, Cache cache) {
+        rethrowIfNotAvailabilityFault(exception);
         count(cache, "clear");
         log.warn("캐시 전체 무효화 실패 — TTL 만료까지 stale 값이 서빙될 수 있다. cache={}",
                 cacheName(cache), exception);
+    }
+
+    /**
+     * 가용성 장애가 아니면 그대로 되던진다 — 캐시 <b>고장</b>을 캐시 <b>부재</b>로 위장하지 않는다.
+     * 원인 체인 전체를 훑는 이유는 Spring 이 Lettuce 예외를 여러 겹으로 감싸기 때문이다.
+     */
+    private static void rethrowIfNotAvailabilityFault(RuntimeException exception) {
+        boolean availability = false;
+
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (matchesAny(cause, NEVER_SWALLOWED)) {
+                throw exception;   // deny 가 allow 를 이긴다 — 둘 다 RedisException 하위다
+            }
+            if (matchesAny(cause, AVAILABILITY_FAULTS)) {
+                availability = true;
+            }
+            if (cause.getCause() == cause) {
+                break;  // 자기참조 체인 방어
+            }
+        }
+
+        if (!availability) {
+            throw exception;
+        }
+    }
+
+    private static boolean matchesAny(Throwable cause, List<Class<? extends Throwable>> types) {
+        return types.stream().anyMatch(type -> type.isInstance(cause));
     }
 
     private void count(Cache cache, String operation) {

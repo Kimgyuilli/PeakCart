@@ -52,7 +52,7 @@ ADR-0010(서비스 경계·토픽 4개·Saga 골격)·ADR-0011(모듈 구조·�
 
 - **envelope 버저닝**: `KafkaEventEnvelope` 에 `schemaVersion`(int) 추가. 호환성 규칙 = **하위호환 필드 추가만 허용**, 필드 삭제·의미 변경 금지(필요 시 새 eventType/major version)
 - **파티션 키 = aggregate id**(순서 보장 단위): `order.*` → `orderId`, `payment.*` → `orderId`(주문 단위 순서), `product.updated` → `productId`, `stock.reservation.result`(D3) → `orderId`
-- **`product.updated` payload (필수 필드)**: `productId, name, price, availableStock, status(ACTIVE/INACTIVE/SOLD_OUT), categoryId, updatedAt` — Order `product_cache`/장바구니 조회(`05 §249-250`) 충족. 삭제/품절은 status 로 표현
+- **`product.updated` payload (필수 필드)**: `productId, name, price, availableStock, status(ACTIVE/INACTIVE/SOLD_OUT), categoryId, updatedAt` — Order 로컬 캐시(실제 테이블명 `product_price_cache`)와 장바구니 조회(`05 §249-250`)를 **모두 담을 수 있도록** 필드를 정한다. 삭제/품절은 status 로 표현. *(구현 ⑤ 시점 실제: Order 는 `price`/`version` 만 적재하며 장바구니 상품정보 조합은 미구현 — Update Log 참고)*
 - **`OrderCancelledPayload` 보강**: 복구 대상 `items[](productId, quantity)` 추가(현 부재 갭 해소)
 - **`stock.reservation.result` payload (신규, 필수 필드)**: `orderId`, `reserved`(bool), `items[](productId, quantity)`, `reason`(예약 실패 사유 — `OUT_OF_STOCK`/`PARTIAL`/`TIMEOUT` 등, 성공 시 null), `decidedAt`. 파티션 키 `orderId`(D4)
 - 스키마 필드 DDL/코드 확정은 구현 ②/④/⑤, 본 ADR 은 필드 계약 확정
@@ -124,9 +124,24 @@ choreography 단계:
 ### 후속 결정에 미치는 영향
 - **구현 ②**: Flyway 서비스별 분리, Product outbox/processed + inventories 예약 컬럼, 교차 FK 제거
 - **구현 ④**: 예약/확정/복구 consumer + `stock.reservation.result` + `OrderCancelledPayload` 보강 + 타임아웃 스케줄러
-- **구현 ⑤**: `product.updated` 발행/소비 + `product_cache`
+- **구현 ⑤**: `product.updated` 발행/소비 + 로컬 캐시(`product_price_cache`)
 
 ## References
 - ADR-0008(Outbox trace context), ADR-0009(Kafka lag surface), ADR-0010(경계·토폴로지·F2/F3), ADR-0011(이벤트 DTO common 소유)
 - `docs/05-data-design.md §11`(Phase 4 ERD), `docs/04-design-deep-dive.md`(§9-3 재고차감, §9-7 멱등성, §64-70 DLQ, §16 CQRS), `docs/03-requirements.md §7-2`
 - 코드: `global.outbox.dto.*`, `KafkaConfig`, `src/main/resources/db/migration/V1~V4`
+
+## Update Log
+
+### 2026-08-30 — 구현 ⑤ 종결 시점 사실 정정 (`fix(adr):`)
+
+**변경 사유**: 구현 ⑤ 착수 전 코드 검증에서 본 ADR 의 두 사실 진술이 실제 구현과 어긋난 것이 확인됐다. 결정 내용(이벤트로 동기 호출을 대체한다 · `product.updated` 7 필수필드 · 파티션 키)은 바뀌지 않았고, 어긋난 것은 **테이블명과 소비 범위 서술**이다 — README §원칙의 "사실 오류(파일명·Phase 귀속·수치) 정정" 경로를 사용한다. 트레이드오프·Consequences 는 손대지 않았다.
+
+| 위치 | 기존 | 정정 |
+|---|---|---|
+| §D2 `product.updated` payload | "Order `product_cache`/장바구니 조회 충족" | 테이블명을 실제(`product_price_cache`)로 고치고, 필드 집합이 두 용도를 **담을 수 있게** 정해졌다는 취지임을 명시. 구현 ⑤ 시점의 실제 소비 범위(`price`/`version` 만 적재, 장바구니 조합 미구현)를 괄호로 병기 |
+| §후속 결정에 미치는 영향 · 구현 ⑤ | "`product_cache`" | "로컬 캐시(`product_price_cache`)" |
+
+**바뀌지 않은 것**: 7 필수필드는 실제로 전량 발행된다(`ProductUpdatedPayload`). 소비 측이 일부만 적재할 뿐이므로 payload 계약 자체는 유효하다. 장바구니 상품정보 조합은 별도 task 로 분리됐다(진행 이력은 `docs/progress/PHASE4.md`).
+
+**커밋**: 본 절을 추가한 커밋 (`fix(adr):` 접두사)

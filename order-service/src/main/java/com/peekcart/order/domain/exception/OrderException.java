@@ -10,4 +10,12 @@ public class OrderException extends BusinessException {
     public OrderException(ErrorCode errorCode) {
         super(errorCode);
     }
+
+    /**
+     * 어떤 입력이 문제였는지 호출자에게 알려야 할 때 사용한다
+     * (예: 폐기된 페이지네이션 파라미터 이름).
+     */
+    public OrderException(ErrorCode errorCode, String message) {
+        super(errorCode, message);
+    }
 }

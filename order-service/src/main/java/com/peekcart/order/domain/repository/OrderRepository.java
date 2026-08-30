@@ -1,7 +1,6 @@
 package com.peekcart.order.domain.repository;
 
 import com.peekcart.order.domain.model.Order;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDateTime;
@@ -15,7 +14,18 @@ public interface OrderRepository {
     Order save(Order order);
     Optional<Order> findById(Long id);
     Optional<Order> findByIdAndUserId(Long id, Long userId);
-    Page<Order> findByUserId(Long userId, Pageable pageable);
+    /**
+     * 사용자의 주문 목록 첫 페이지를 {@code (orderedAt, id)} 내림차순으로 조회한다.
+     * {@code limit} 은 {@code size + 1} 이며, 초과분 1건이 다음 페이지 존재 여부의 근거다.
+     */
+    List<Order> findFirstPage(Long userId, Pageable limit);
+
+    /**
+     * 커서 위치보다 뒤(더 과거)의 주문을 같은 정렬로 조회한다.
+     * {@code orderedAt} 이 유니크하지 않으므로 동률에서는 {@code id} 로 끊는다 —
+     * 이 tie-break 가 없으면 동일 시각 주문이 페이지 경계에서 누락되거나 중복된다.
+     */
+    List<Order> findPageAfterCursor(Long userId, LocalDateTime orderedAt, Long id, Pageable limit);
 
     /**
      * 결제 요청 후 마감 시각을 넘긴 PAYMENT_REQUESTED 주문을 조회한다 (결제 타임아웃 수렴용).

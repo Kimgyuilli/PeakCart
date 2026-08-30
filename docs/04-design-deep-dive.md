@@ -449,18 +449,31 @@ Gateway 통과 후 내부 서비스 호출 시:
 
 ### 10-3. 페이지네이션 전략 — Offset 방식의 한계
 
-현재 주문 내역 조회는 Offset 기반 페이지네이션으로 구현합니다.
+주문 내역 조회는 **Cursor 기반 페이지네이션**입니다 (구현 ⑥에서 Offset 에서 전환).
 
 ```
 Offset 방식의 문제:
   - 대용량 데이터에서 OFFSET N이 클수록 풀 스캔에 가까워져 성능 저하
   - 예: LIMIT 20 OFFSET 10000 → 10020개 행을 읽고 앞 10000개 버림
+  - 전환 전 실제 상태: 정렬이 지정돼 있지 않아 offset 페이징으로서의
+    결과 정합성조차 보장되지 않았다 (@PageableDefault 에 sort 없음)
 
-개선 방향 (Phase 4에서 전환 검토):
-  - Cursor 기반 페이지네이션으로 전환
-  - 마지막으로 조회한 order_id를 커서로 사용 → WHERE id < :cursor LIMIT 20
-  - 인덱스 범위 스캔만 수행해 일정한 응답시간 보장
+전환 결과:
+  - 정렬 키 (ordered_at DESC, id DESC), 인덱스 idx_orders_user_id_ordered_at
+  - WHERE user_id = ? AND (ordered_at < ? OR (ordered_at = ? AND id < ?))
+    ORDER BY ordered_at DESC, id DESC LIMIT size + 1
+  - size + 1 조회분으로 hasNext 판정 → COUNT 쿼리 없음
+  - 커서는 base64url 불투명 문자열 — 내부 정렬 키를 노출하면 그것이 계약이 된다
 ```
+
+**커서 키를 `id` 단독이 아니라 `(ordered_at, id)` 복합으로 정정**했습니다. `ordered_at` 은
+`DATETIME(6)` 이고 유니크 제약이 없어 동률이 가능하므로 tie-break 없이는 페이지 경계에서
+행이 누락되거나 중복됩니다. `id` 단독은 "최신순"이 아니라 "생성 PK 역순"이라 정렬 의도와도
+어긋납니다.
+
+**포기한 것** — 총 건수(`totalElements`)·총 페이지 수·임의 페이지 점프. 커서 방식의 본질적
+대가이며, 주문 내역의 소비 패턴(최신순 스크롤)에서는 수용 가능하다고 판단했습니다. 총 건수가
+필요해지면 별도 count 엔드포인트로 분리합니다.
 
 ### 10-4. Choreography Saga — DLQ 이후 재고 불일치 감지
 

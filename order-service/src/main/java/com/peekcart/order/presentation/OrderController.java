@@ -6,17 +6,21 @@ import com.peekcart.global.response.ApiResponse;
 import com.peekcart.order.application.OrderCommandService;
 import com.peekcart.order.application.OrderQueryService;
 import com.peekcart.order.application.dto.CreateOrderCommand;
+import com.peekcart.order.application.dto.CursorSlice;
+import com.peekcart.order.application.dto.OrderSummaryDto;
 import com.peekcart.order.presentation.dto.request.CreateOrderRequest;
+import com.peekcart.order.presentation.dto.request.OrderPageQuery;
+import com.peekcart.order.presentation.dto.response.CursorPageResponse;
 import com.peekcart.order.presentation.dto.response.OrderDetailResponse;
 import com.peekcart.order.presentation.dto.response.OrderResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springdoc.core.annotations.ParameterObject;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -45,15 +49,33 @@ public class OrderController {
                 .body(ApiResponse.of(OrderDetailResponse.from(orderCommandService.createOrder(loginUser.userId(), command))));
     }
 
-    @Operation(summary = "주문 목록 조회")
+    /**
+     * 파라미터를 {@link HttpServletRequest} 에서 읽으므로 springdoc 이 자동 생성할 대상이 없다.
+     * 이름과 위치를 직접 선언해야 문서가 만들어진다.
+     */
+    @Operation(summary = "주문 목록 조회",
+            description = "최신순(ordered_at, id) 커서 페이지네이션. 총 건수와 페이지 번호는 제공하지 않는다. "
+                    + "nextCursor 는 불투명 문자열이며 형식에 의존하지 말 것.",
+            parameters = {
+                    @Parameter(name = "cursor", in = ParameterIn.QUERY, required = false,
+                            description = "이전 응답의 nextCursor. 생략하면 첫 페이지",
+                            schema = @Schema(type = "string")),
+                    @Parameter(name = "size", in = ParameterIn.QUERY, required = false,
+                            schema = @Schema(type = "integer", format = "int32",
+                                    defaultValue = "20", minimum = "1", maximum = "100"))
+            })
     @GetMapping
-    public ResponseEntity<ApiResponse<Page<OrderResponse>>> getOrders(
+    public ResponseEntity<ApiResponse<CursorPageResponse<OrderResponse>>> getOrders(
             @CurrentUser LoginUser loginUser,
-            @ParameterObject @PageableDefault(size = 20) Pageable pageable
+            HttpServletRequest request
     ) {
-        Page<OrderResponse> page = orderQueryService.getOrders(loginUser.userId(), pageable)
-                .map(OrderResponse::from);
-        return ResponseEntity.ok(ApiResponse.of(page));
+        OrderPageQuery query = OrderPageQuery.of(request);
+        CursorSlice<OrderSummaryDto> slice =
+                orderQueryService.getOrders(loginUser.userId(), query.cursor(), query.size());
+        return ResponseEntity.ok(ApiResponse.of(new CursorPageResponse<>(
+                slice.content().stream().map(OrderResponse::from).toList(),
+                slice.nextCursor(),
+                slice.hasNext())));
     }
 
     @Operation(summary = "주문 상세 조회")

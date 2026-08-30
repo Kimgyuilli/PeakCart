@@ -98,3 +98,11 @@
 - **D3 (InnoDB 세컨더리 인덱스의 PK 암묵 부착) 확인** — 인덱스는 `(user_id, ordered_at)` 2컬럼인데 커서 질의의 `used_key_parts` 가 `[user_id, ordered_at, id]` **3개**. 계획이 뒀던 "반증 시 `(user_id, ordered_at, id)` 로 정정" 조건은 발생하지 않았다
 - **성능**: cursor examined rows `[20, 20, 20]` (평탄) vs offset `[40, 420, 920]` (선형). 깊이 900 에서 46배
 - **실패 주입**: 커서 predicate 제거 시 실행계획 테스트 4건 중 2건 FAILED
+
+## 2026-08-30 — /ship
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/96
+- precheck: `ok` (warnings 0)
+- 커밋 3개: `feat(order)` / `test(order)` / `docs(⑥)`
+- 갱신: `docs/TASKS.md` 구현 ⑥ → ✅ + PR 링크 · `docs/progress/PHASE4.md` 작업 이력
+- **미충족(머지 전 확인 필요)**: 전 모듈 스위트 로컬 미완주 → CI 이관. `ContainerLaunchException`(자원, 코드 아님). **CI 그린 전 머지 금지**
+- ADR 신설 없음 — 외부 의존성·아키텍처 경계·인프라 변경 없음. 설계문서 §10-3 은 What 정정이라 Layer 1 직접 수정

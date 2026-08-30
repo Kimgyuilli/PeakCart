@@ -73,3 +73,11 @@
 - **따라서 "2라운드 수정이 새 결함을 만들지 않았다"는 미검증이다.** 2라운드에서 P1 1건을 수정했으므로 수렴 조건상 1회 더 돌리는 것이 맞다.
 - 남은 검증은 자동 게이트로 대체: 통합 7/7 · 단위 9/9 · 바인딩 2/2 · 회귀(S7·기존 캐시) 통과 · 변이 검사 6/7 FAILED · `ssot-lint` EXIT=0 · bats 55/55.
 - 조치: Codex 재설치 후 `/work` 재실행으로 라운드 3 을 돌릴 것. 미충족으로 명시한다.
+
+## 2026-08-30 — 최종 검증
+
+- `./gradlew test` **BUILD SUCCESSFUL (10m 59s) · 실패 0건** (전 모듈)
+- 게이트: 통합 `ProductCacheFallbackIntegrationTest` 7/7 · 단위 `ResilientCacheErrorHandlerTest` 9/9 · `RedisPropertiesBindingTest` 2/2 · S7 관측성·기존 캐시 회귀 통과 · `observability-ssot-lint.sh` EXIT=0 · bats 55/55
+- 변이 검사 2회: (a) `errorHandler()` → 맨 `@Bean` 시 통합 7건 중 6건 FAILED, (b) ssot-lint 주석 제외 후에도 실제 `@Bean MeterRegistryCustomizer` 주입 시 검출됨
+- **관측된 flake 1건 (해소 아님)**: 직전 전체 실행에서 `StockCompensationRefundIntegrationTest:273`(`payment.refunded` listener 배선, Kafka 왕복 20s await)이 1회 실패했고 재실행에서 통과했다. 본 PR 이 손대지 않은 경로이며 이 PR 이전 코드의 실행에서도 전체 빌드가 깨졌다. 원인 규명은 하지 않았다 — 재발 시 ④ 계열 부채로 다룰 것.
+

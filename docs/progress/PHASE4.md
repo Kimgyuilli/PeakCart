@@ -1237,7 +1237,8 @@ ADR-0012 `:124-127` 은 구현 ⑤ 의 산출물을 `"product.updated 발행/소
 3. **cache stampede / DB pool 포화 완화 기구 없음** — 인지·문서화·감시까지만 했다. bulkhead·`@Cacheable(sync)`·rate limit 은 허용 동시성/SLO 를 먼저 정해야 설계가 결정된다
 4. **무응답 상한(1.5s)은 로컬 Docker 기준 실측** — 클러스터에서의 재측정은 미실시
 5. **`local path` 동일 패턴이 `common.sh:20`·`audit.sh:8`·`state.sh` 에 잔존** — 본 PR 범위 밖이라 손대지 않았다
-6. **diff 리뷰 라운드 3 미실행** — 세션 중 Codex CLI 설치가 깨져(`Missing optional dependency @openai/codex-darwin-arm64`) 돌리지 못했다. 라운드 2 에서 P1 1건을 수정했으므로 수렴 조건상 1회 더 필요하다. 그 사이의 검증은 자동 게이트(통합 7/7 · 단위 9/9 · 변이 6/7 FAILED · lint · bats 55/55)로만 뒷받침된다
+6. **`StockCompensationRefundIntegrationTest:273` flake 관측** — 전체 스위트 1회 실행에서 Kafka 왕복 listener 배선 테스트가 실패했고 재실행에서 통과했다(최종 실행은 전 모듈 그린). 본 PR 이 손대지 않은 경로라 원인 규명은 하지 않았다 — 재발 시 ④ 계열로 다룬다
+7. **diff 리뷰 라운드 3 미실행** — 세션 중 Codex CLI 설치가 깨져(`Missing optional dependency @openai/codex-darwin-arm64`) 돌리지 못했다. 라운드 2 에서 P1 1건을 수정했으므로 수렴 조건상 1회 더 필요하다. 그 사이의 검증은 자동 게이트(통합 7/7 · 단위 9/9 · 변이 6/7 FAILED · lint · bats 55/55)로만 뒷받침된다
 
 **다음**: 구현 ⑥ Cursor 페이지네이션 (또는 ④-c-2b DLQ replay — ADR 선행 대기).
 

@@ -64,7 +64,7 @@
 | PUT | `/api/v1/cart/items/{id}` | 장바구니 수량 수정 | O |
 | DELETE | `/api/v1/cart/items/{id}` | 장바구니 항목 삭제 | O |
 | POST | `/api/v1/orders` | 주문 생성 | O |
-| GET | `/api/v1/orders` | 주문 내역 조회 | O |
+| GET | `/api/v1/orders` | 주문 내역 조회 (**커서 페이지네이션** — `cursor`(불투명 문자열, 생략 시 첫 페이지) · `size`(1~100, 기본 20). 응답 `{content, nextCursor, hasNext}`. **breaking change (구현 ⑥)**: `page`/`sort`/`offset` 은 400 `ORD-012`, `totalElements`/`totalPages` 미제공) | O |
 | GET | `/api/v1/orders/{id}` | 주문 상세 조회 | O |
 | POST | `/api/v1/orders/{id}/cancel` | 주문 취소 | O |
 | POST | `/api/v1/payments/confirm` | 결제 승인 | O |

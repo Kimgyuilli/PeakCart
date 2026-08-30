@@ -261,3 +261,23 @@
 - Layer 1: `02` 토픽 수 **7 → 10** 정정(ADR-0018 보상/환불 3종 누락) · `06` 에 cross-service saga E2E·음성 대조군·계약 게이트 계층 등재
 - **ADR**: 신규/상태 전환 없음 — 이 PR 은 새 아키텍처 결정을 만들지 않았다. properties 소유는 ADR-0007 적용, 게이트 설계는 ADR-0015/0019 의 연장이다
 - 커밋 11개 (`3f03922`..`4dbec88`)
+
+## 2026-08-30 — CI 실패 수정 (#93, `4a7d9ae`)
+- **실패**: `:order-service:test` — `OrderCancelledEventContractIntegrationTest > Outbox 저장 실패 주입 …` (219 중 1건) · `org.mockito.exceptions.misusing.UnfinishedStubbingException at :113`
+- **원인**: context-wide `@MockitoSpyBean OutboxEventRepository` 를 **5초마다 도는** `OutboxPollingScheduler` 가 함께 호출한다(`OutboxPollingService:71` 의 `findPendingEvents`). Mockito 의 `willThrow(...).given(spy).save(...)` 는 **두 단계**라, 그 사이에 poller 스레드가 spy 를 건드리면 예외가 난다. **코드가 아니라 주사위가 결정하는 실패**다.
+- **이 PR 의 변경과 무관하다** — diff 에 이 테스트도 poller 도 없고, 로컬 `SPRING_PROFILES_ACTIVE=test ./gradlew build` 는 그린이었으며 main CI 도 그린이었다. ④-b(#85)가 이 테스트를 만든 이래 잠복해 있던 경합이다.
+- **게이트 실패 11건은 부수 증상**이었다 — build 가 order-service 에서 멈춰 product/payment 테스트가 실행되지 않았고, 매트릭스 게이트는 `if: always()` 라 그 상태에서 돌아 "증적 없음" 을 신고했다. **게이트는 오작동한 게 아니라 "이 계약을 증명할 테스트가 돌지 않았다" 를 정확히 잡은 것**이다. 다만 로그 맨 아래라 원인처럼 보였다.
+- **수정**: 같은 패턴이 **3개 클래스**에 있어 전부 `@MockitoBean OutboxPollingScheduler` 로 닫았다 — 하나만 고치면 나머지가 계속 주사위를 굴린다. 뒤 두 개(`OrderCompensationRefund`·`StockCompensationRefund`)에는 **두 번째 경합**도 있었다: backfill 검사가 `countByStatus("PENDING")` 을 단언하는데 실제 poller 가 그 행을 집어 `PUBLISHED` 로 바꿀 수 있다. 발행이 필요한 검사는 `kafkaTemplate.send` 로 직접 넣으므로 poller 에 의존하지 않는다.
+- **검증**: 세 클래스 실행 통과 · `SPRING_PROFILES_ACTIVE=test ./gradlew build` **BUILD SUCCESSFUL (19m 37s)** · 매트릭스 게이트 `--structure`/`--jvm-evidence` OK
+
+## 2026-08-30 — CI 전체 그린 ([run 33260424768](https://github.com/Kimgyuilli/PeekCart/actions/runs/33260424768))
+- `build` · `images` 6종 · **`e2e`** 전부 success
+- **`e2e` 잡이 GitHub 러너에서 처음 완주했다** — 계획 §6 조건 3 및 PR 미충족 1번 해소:
+  - artifact 4개 download → `loaded 4 images`
+  - `토픽 20종 — 생성 성공 20 · 대조 실패 0`
+  - 시나리오 a/b/c/d 전부 통과 (`cancel_reason=PAYMENT_FAILED`/`RESERVATION_FAILED` 확인)
+  - **음성 대조군 전량 통과** (별도 run_id `gh-…-nc` 로 project·증적 분리)
+  - `OK — --structure · 26행` · `OK — --e2e-evidence · 26행`
+- **조건 4 실측**: `--jvm-evidence` 는 build 잡, `--e2e-evidence` 는 e2e 잡에서 **각각 자기 evidence type 만** 검사
+- **구간별 소요** (예산 대비 여유): infra-up 26s · topic-precreate 65s · app-up 18s×4 · readiness 2s · scenario a/b/c/d **18/14/8/38s** · e2e 잡 전체 **15분 41초**(상한 45분)
+- **`scenario:b` 14초** — 로컬에서 162~189초로 실패하던 시나리오다. 토픽 사전 생성 수정이 CI 에서도 유효함이 확인됐다

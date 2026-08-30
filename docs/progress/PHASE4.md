@@ -1155,7 +1155,7 @@ scenario:b  162~189초(실패/경계) → 21s → 10s → 14s
 
 ### 미충족 (④ 종결 시점에 명시)
 
-1. **`--jvm-evidence`/`--e2e-evidence` 는 CI 에서 처음 함께 돈다** — 로컬에서 각 분기를 개별 검증했으나, `e2e` 잡 전체가 GitHub 러너에서 실행된 적은 없다
+1. ~~`e2e` 잡이 GitHub 러너에서 실행된 적 없다~~ → **해소** ([run 33260424768](https://github.com/Kimgyuilli/PeekCart/actions/runs/33260424768)) — 시나리오 4종·음성 대조군 전량 통과, `--jvm-evidence`(build)와 `--e2e-evidence`(e2e)가 각각 자기 단계에서 실행됨. 잡 소요 15분 41초. **`scenario:b` 14초** — 로컬에서 162~189초로 실패하던 시나리오다
 2. **replay 경로 미구현** — ④-c-2b 는 여전히 ADR 선행 대기(D1~D7)
 3. **alert 발화 미검증** — ADR-0015 가 정적 lint 범위를 규정한다(④-d-1 승계)
 4. **gateway 서명 토큰/`SIGNED_ONLY` 미검증** — E2E 는 `DUAL_ACCEPT` 평문 헤더를 쓴다(구현 ③ GKE smoke 소관)

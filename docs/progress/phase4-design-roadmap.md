@@ -48,7 +48,7 @@
 | ② | 서비스별 DB 분리 (Flyway 독립, 스냅샷 저장 패턴) | A3 | L-008/L-011 |
 | ③ | Spring Cloud Gateway (라우팅·JWT·Rate Limit) | A4 | 보안 묶음 |
 | ④ | Choreography Saga (payment.failed → 주문취소 → 재고복구) | A3 | — |
-| ⑤ | CQRS 로컬 캐시 (Product 변경 이벤트 구독, Order 내 캐시) | A3 | L-006 Redis fallback (L-005 선결 완료) |
+| ⑤ | CQRS 로컬 캐시 — **본체는 구현 ① strangler-2/4 에서 선완료**, ⑤ 의 실질 범위는 L-006 Redis fallback (상세: TASKS ⑤ 행) | A3 | L-006 ✅ (L-005 선결 완료) |
 | ⑥ | Cursor 페이지네이션 (주문 조회 전환 검토) | — | — |
 | — | D-002 격리 재측정 (2차 병목 MySQL풀/Redis락 분리) | — | D-002 (Order Service 분리 후) |
 

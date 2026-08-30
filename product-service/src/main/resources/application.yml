@@ -24,6 +24,14 @@ spring:
     listener:
       ack-mode: record
   data:
+    # Redis 타임아웃은 '동작 규약'이므로 base 소유 (ADR-0007). host/port 는 프로파일 소유.
+    # 유계 타임아웃이 없으면 fail-open 이 무의미하다 — Redis 가 죽지 않고 '매달리면'
+    # Lettuce 기본 60s 를 다 기다린 뒤에야 CacheErrorHandler 가 불린다 (L-006, 구현 ⑤).
+    # 500ms 인 이유: @Cacheable 한 요청이 get 실패 → DB → put 실패로 timeout 을 2회 소비한다.
+    # 1s 로 두면 무응답 시 요청당 최소 2s 다.
+    redis:
+      timeout: 500ms
+      connect-timeout: 300ms
     web:
       pageable:
         default-page-size: 20

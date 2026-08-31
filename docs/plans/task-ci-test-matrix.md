@@ -58,7 +58,7 @@
 | **D3. shard→모듈 매핑의 단일 정본** | `strategy.matrix.include[]` 의 **`modules`(공백 구분 문자열)** 하나. Gradle 명령과 **P6 lint** 가 같은 필드를 소비한다 | 3R #6 — 정본을 안 정하면 lint 가 자기 복사본만 검증하는 false-green 이 된다. 실행식과 검증식이 갈리면 안 된다 |
 | **D4. 태스크** | shard 는 `modules` 를 `:M:build` 로 펼쳐 **한 번의 Gradle 호출**. `guards` 는 루트 **`:build`** | `build = assemble + check`. 루트 `:build` 가 루트 `:check` → **가드 5종**(V5) |
 | **D5. 실패 신호 — rc 배관 없음** | Gradle 스텝을 **그대로 실패시킨다**. staging·upload 는 `if: ${{ !cancelled() }}`. job 의 red 자체가 "이 shard 가 깨졌다" 는 신호다 | **3R #2·#3 을 설계로 소멸**시킨다. 셸 지역변수 `rc` 를 스텝 간에 넘길 수단(`$GITHUB_OUTPUT`)도, 단일 Gradle 호출에서 **존재하지도 않는 모듈별 rc** 도 필요 없어진다 |
-| **D6. 증적 전달** | staging 디렉터리에 `<module>/build/{test-results,reports}` 배치를 만들어 **고정 이름** `shard-results-<shard>` 로 업로드(**`overwrite: true`**). gate 는 `pattern: shard-results-*` · `merge-multiple: true` · `path: .` 로 루트 복원 | 1R #2 는 유효(LCA 동작 때문에 staging 필요). **`run_attempt` 를 이름에 넣지 않는다**(3R #1) — "Re-run failed jobs" 는 실패 job 만 재실행하므로 성공 shard 는 옛 이름으로 남아 attempt 한정 pattern 이 **반드시 1개만 찾는다**. `overwrite` 가 v4 의 immutable 충돌을 푼다 |
+| **D6. 증적 전달** | staging 디렉터리에 `<module>/build/{test-results,reports}` 배치를 만들어 **고정 이름** `shard-results-<shard>` 로 업로드(**`overwrite: true`**). gate 는 **`merge-multiple` 을 쓰지 않고** artifact 별로 받아(`_artifacts/<name>/`) **충돌을 먼저 검출한 뒤 직접 병합**한다(`--merge-artifacts`) | 1R #2 는 유효(LCA 동작 때문에 staging 필요). **`run_attempt` 를 이름에 넣지 않는다**(3R #1) — "Re-run failed jobs" 는 실패 job 만 재실행하므로 성공 shard 는 옛 이름으로 남아 attempt 한정 pattern 이 **반드시 1개만 찾는다**. `overwrite` 가 v4 의 immutable 충돌을 푼다 |
 | **D7. gate 의 배치 검증** | 기대 모듈 목록을 **관측이 아니라 D3 매핑(정적)** 에서 얻는다. `peekcart-common-observability`·`internal-token-contract` **2개만** 산출물 부재 허용, **나머지 8개는 XML ≥ 1 요구** | 3R #4 — manifest 가 관측값 0을 기록하면 "정상 무테스트" 와 "테스트 소실" 이 같아진다. **기대값은 정적이어야** 그 둘이 갈린다. V14 로 2개 모듈의 부재가 정상임은 확인됐다 |
 | **D8. reports 보존** | shard artifact 에 `build/reports/**` 포함 · `guards` 가 루트 `build/reports/**` 를 `root-reports` 로 업로드 · gate 가 **세 트리**를 `test-reports` 로 통합 | V11(ADR-0011 §D4) · V15 |
 | **D9. 병렬성 설정** | `gradle.properties` 신설은 **범위 밖** | V6/V7 — `maxParallelForks` 는 컨테이너 동시 기동을 늘려 러너 OOM 위험. 컨테이너 재사용(§5-1)과 함께 설계 |
@@ -87,7 +87,7 @@
 
 ### P4. `gate` job — saga 계약 매트릭스
 - `needs: [test, guards]`(D1), `if: ${{ !cancelled() }}`. **모든 스텝에도 `if: ${{ !cancelled() }}` 를 명시**(2R #4 — 기본 `success()` 면 4-a 실패 시 후속이 전부 skip 되어 현행 `if: always()` 보다 진단이 퇴행한다)
-- **4-a 배치 검증**: `download-artifact`(`pattern: shard-results-*` · `merge-multiple: true` · `path: .`) 후 **D7 의 정적 기대**와 대조 — 산출물 필수 8모듈에 `build/test-results/test/*.xml` 이 **1개 이상** 있는가. 어긋나면 **"배치/증적 유실"**(증적 없음과 **다른 메시지**)
+- **4-a 병합·배치 검증**: `download-artifact`(`pattern: shard-results-*` · `path: _artifacts`, **merge 없음**) → `--merge-artifacts` 가 **상대 경로 충돌 0** 을 확인하고 루트로 병합 → 그 다음 **D7 의 정적 기대**와 대조 — 산출물 필수 8모듈에 `build/test-results/test/*.xml` 이 **1개 이상** 있는가. 어긋나면 **"배치/증적 유실"**(증적 없음과 **다른 메시지**)
 - **4-b jvm 증적 대조**: `--jvm-evidence`. **4-a 통과 AND `needs.test.result == 'success'`** 일 때만 전체 대조하고, 실패했으면 **결측 22행을 대량 출력하지 않고 4-a 의 결론만** 보고한다
 - `--structure` · `--self-test` · `saga-e2e-smoke --self-test` · `e2e-network-contract-lint --self-test` · `kafka-subscription-contract-lint --self-test` 는 shard 결과와 무관하므로 **항상** 실행
 - **통합 report**: `root-reports`(guards 의 `guards.log` + 있으면 루트 `reports`) 도 내려받아 모듈 두 트리와 함께 `test-reports` 로 재업로드(D8, `overwrite: true`)
@@ -113,7 +113,7 @@
 |---|---|---|---|
 | **T1** (N2) | 루트 가드가 실제로 도는가 | ① 서비스 간 의존 금지 위반(`order-service` → `payment-service`) ② **가드 성공 출력 한 줄을 지운다** ③ **`guards.log` 파일을 없앤다** | ①은 `guards` **FAILED**. ②③은 **확인 스텝이 FAILED** — 체커 자신이 red 가 되는지 본다(3R #9). 이게 없으면 "가드가 도는 것처럼 보이는" 상태를 못 잡는다 |
 | **T2** (N3) | jvm 증적 대조가 살아있는가 | `saga-contract-matrix.tsv` 의 jvm 행 하나의 `evidence_key` 를 없는 FQCN 으로 변조 | `gate` **4-b** 가 "증적 없음" FAILED |
-| **T3** (N3, D7) | 배치 검증이 증적 유실을 구분하는가 | ① 한 shard 의 업로드를 막는다 ② 산출물 필수 모듈의 XML 을 지운다 ③ **무테스트 2모듈이 든 정상 platform shard** ④ **서로 다른 두 shard 가 같은 상대 경로를 올린다**(P6 입력은 정상인 채로) | ①②④ 는 **4-a "배치/증적 유실"** — **T2 와 다른 메시지**. ③ 은 **통과**(V14). ④ 가 P6 의 정적 검사와 **다른 층**임을 확인한다(3R #7 — **P6 은 설정 중복**을, **4-a 는 업로드 이후의 충돌·변조**를 잡는다) |
+| **T3** (N3, D7) | 배치 검증이 증적 유실을 구분하는가 | ① 한 shard 의 업로드를 막는다 ② 산출물 필수 모듈의 XML 을 지운다 ③ **무테스트 2모듈이 든 정상 platform shard** ④ **서로 다른 두 shard 가 같은 상대 경로를 올린다**(P6 입력은 정상인 채로) | ①②④ 는 **4-a "배치/증적 유실"** — **T2 와 다른 메시지**. ③ 은 **통과**(V14). ④ 는 `--merge-artifacts` 가 잡는다 — P6 의 정적 검사와 **다른 층**이다(3R #7 · diff 3R #2: **P6 은 설정 중복**을, **병합 단계는 업로드 이후의 충돌·변조**를 잡는다) |
 | **T3b** (D5, 2R #1/#4) | 실패 경로에서 진단 증적이 남는가 | ① shard 의 Gradle 을 강제 실패 ② gate 의 4-a 를 강제 실패 | ①에서 shard 가 FAILED 되면서도 **staging artifact 가 업로드**된다. ②에서도 **self-test 와 통합 `test-reports` 업로드가 실행**된다. 하나라도 skip 되면 현행 `if: always()` 대비 퇴행이므로 FAILED |
 | **T4** (N5, P6) | shard 커버리지 | ① 더미 모듈 include 후 매핑 미추가 ② 유령 모듈 ③ 한 모듈을 두 shard 에 배치 ④ 빈 `modules` ⑤ shard 이름 중복 | 전부 `ci-test-matrix-lint` **FAILED** |
 | **T5** (N4) | 분해로 사라진 태스크 | **1회성 실측으로 확정**(V13) — `./gradlew build --dry-run` vs `:build` + 10모듈 `:module:build`. 결과 **154 == 154, 차이 0** | 계획서에 기록. CI 상시 검사는 두지 않는다 — 모듈 집합이 바뀌는 순간은 **T4 가** 잡는다. 새 태스크가 `check`/`build` 에 붙으면 Gradle 의존 그래프가 양쪽 모두에 자동 반영한다(3R 확인) |
@@ -143,7 +143,7 @@
 - [x] P3 `guards` job — 루트 `:build` + `tee` 로그 + 가드 5표식 확인 + 루트 report 업로드
 - [x] P4 `gate` job — `needs: [test, guards]` · 배치검증 → 증적대조 2단 · 스텝별 `!cancelled()`
 - [x] P5 게이트 순서 재배선 (`images: needs: [lint, gate]`)
-- [x] P6 `ci-test-matrix-lint.sh` + `--verify-layout` + `--verify-guards` + `--self-test` **16종**(coverage 8 + layout 2 + zero-drift 3 + guards 3)
+- [x] P6 `ci-test-matrix-lint.sh` — `--merge-artifacts` · `--verify-layout` · `--verify-guards` · `--self-test` **22종**(coverage 8 + layout 2 + zero-drift 3 + guards 3 + merge 3 + guard-list 3)
 - [ ] P7 실측 기록 — **CI 실행 후**
 
 
@@ -152,7 +152,7 @@
 - [ ] T1~T9 그린, **T1·T2·T3·T3b·T4·T6·T9 는 실패 주입으로 빨개지는 것까지 확인**
 - [ ] P7 실측 표가 `docs/progress/evidence/` 에 존재 — 벽시계 임계 경로 · job/shard 별 소요 · 합산 runner-minutes(**과금 아닌 자원 지표로 명시**) · 중복 컴파일 비용
 - [ ] 임계 경로가 baseline 32m23s **미만**이고, 서비스 shard 최대/최소 비가 기록됨 (2.0 초과 시 §5-7 판단 문서화)
-- [ ] `ci-test-matrix-lint` 신설 + `--self-test` **16종**(coverage 8 + layout 2 + zero-drift 3 + guards 3) + `lint` job 배선 (`ci-task-parity-lint` 는 V13 으로 **폐기**)
+- [ ] `ci-test-matrix-lint` 신설 + `--self-test` **22종** + `lint` job 배선 (`ci-task-parity-lint` 는 V13 으로 **폐기**)
 - [ ] `test-reports` artifact 에 **세 트리** 보존 (ADR-0011 §D4 · V15)
 - [ ] Codex diff 리뷰 수렴(새 계약 표면 무추가 + P1 = 0)
 

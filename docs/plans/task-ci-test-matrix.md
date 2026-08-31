@@ -144,7 +144,7 @@
 - [x] P4 `gate` job — `needs: [test, guards]` · 배치검증 → 증적대조 2단 · 스텝별 `!cancelled()`
 - [x] P5 게이트 순서 재배선 (`images: needs: [lint, gate]`)
 - [x] P6 `ci-test-matrix-lint.sh` — `--merge-artifacts` · `--verify-layout` · `--verify-guards` · `--self-test` **22종**(coverage 8 + layout 2 + zero-drift 3 + guards 3 + merge 3 + guard-list 3)
-- [ ] P7 실측 기록 — **CI 실행 후**
+- [ ] P7 실측 기록 — **CI 실행 후**(벽시계 임계경로 · shard 별 소요 · 합산 runner-minutes)
 
 
 

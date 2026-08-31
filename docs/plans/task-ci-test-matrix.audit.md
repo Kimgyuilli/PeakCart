@@ -39,3 +39,35 @@
 - 범위 변화: 작업 항목 8 → **7**, manifest 스키마·rc 프로토콜 2개 소멸
 - **수렴 미달** — P1 = 6. 라운드 상한 3 도달
 - raw: `.cache/codex-reviews/plan-task-ci-test-matrix-1788104199.json`
+
+---
+
+## 2026-09-01 — diff 리뷰 라운드 1
+- 항목: 4건 (P0:0, P1:2, P2:2) / 반영 4건 · 기각 0건
+- **치명 2건**:
+  - gate 가 선행 실패를 결과에 반영하지 않아 **테스트가 red 인데 gate 가 green** → `images(needs:[lint,gate])` 가 실행되고 e2e·publish 까지 감. 계획 T6 과 정면 충돌 → "Propagate upstream failure" 스텝 신설
+  - 가드 표식 grep `^${g}: OK` 가 `build.gradle:96` 의 `assertNoServiceProjectDeps: [모듈목록] OK (...)` 를 **절대 매치 못 함** → 정상 빌드에서도 guards 실패. lint 로 위임하고 self-test 에 실제 5종 포맷 고정
+- 그 외: root-reports 의 `continue-on-error` 가 부재를 성공으로 바꿈 · `ZERO_TEST_MODULES` 드리프트 미검사
+- raw: `.cache/codex-reviews/diff-task-ci-test-matrix-1788104843.json`
+
+## 2026-09-01 — diff 리뷰 라운드 2
+- 항목: 3건 (P0:0, P1:1, P2:2) / 반영 3건 · 기각 0건
+- **라운드1 수정이 만든 새 결함 1건**: root-reports 필수화(`if-no-files-found: error`)가 **false-red** 위험을 만듦 — 루트는 소스 없는 aggregator 라 `build/reports` 생성이 보장되지 않는다 → 항상 생기는 `guards.log` 로 artifact 존재만 보장
+- 리뷰가 확인해준 것: Propagate 스텝이 앞 스텝 실패 시에도 `!cancelled()` 로 평가되고 이중 안전 · `fail-fast:false` 매트릭스에서 일부 실패 시 `needs.test.result` 는 failure
+- raw: `.cache/codex-reviews/diff-task-ci-test-matrix-r2.json`
+
+## 2026-09-01 — diff 리뷰 라운드 3 (상한)
+- 항목: 3건 (P0:0, P1:2, P2:1) / 반영 3건 · 기각 0건
+- **라운드2 수정이 만든 새 결함 1건**: `root-staging/reports` 가 **`build/` 경로 성분을 제거**해 ADR-0011 §D4 의 `**/build/reports/` 계약 위반 → `root-staging/build/reports` 로 정정
+- T3④(업로드 이후 충돌 검출) 이 구현에 없었음 → `--merge-artifacts` 신설(merge-multiple 폐기, artifact 별 수신 후 상대경로 충돌 검출 뒤 직접 병합)
+- 가드 목록 하드코딩 드리프트 → `build.gradle` 의 `check` dependsOn 에서 읽도록 변경
+- raw: `.cache/codex-reviews/diff-task-ci-test-matrix-r3.json`
+
+## 로컬 검증 (2026-09-01)
+- `ci-test-matrix-lint --self-test` **22종** 통과 (coverage 8 · layout 2 · zero-drift 3 · guards 3 · merge 3 · guard-list 3)
+- 실패 주입 3종(빈 modules · 모듈 중복 배치 · 모듈 추가 미반영) 전부 red
+- **T1 실측**: `./gradlew :build` → 가드 5종 실행 확인, `--verify-guards` 가 실제 출력 5종 매치
+- **platform shard 실측**: `:common:build … :gateway:build` BUILD SUCCESSFUL, staging 에 3모듈만 생성(무테스트 2모듈 부재 = D7 계약대로)
+- **gate 병합 실측**: 실제 산출물 2 artifact 206파일 → 충돌 0, `<module>/build/test-results/test` 배치 복원
+- lint 15종 전부 PASS
+- **미검증**: 벽시계 성능(P7·T7) · T6(게이트 순서) · T9(재실행) — **CI 실행이 곧 검증**이다

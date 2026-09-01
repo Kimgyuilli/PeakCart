@@ -71,3 +71,11 @@
 - **gate 병합 실측**: 실제 산출물 2 artifact 206파일 → 충돌 0, `<module>/build/test-results/test` 배치 복원
 - lint 15종 전부 PASS
 - **미검증**: 벽시계 성능(P7·T7) · T6(게이트 순서) · T9(재실행) — **CI 실행이 곧 검증**이다
+
+## 2026-09-01 — /ship
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/97
+- precheck: `ok` (warnings 0)
+- 커밋 4개: `ci:` / `docs(ci):` ×3
+- 갱신: `docs/TASKS.md` 에 행 추가(🔄 — CI 실측 후 ✅)
+- ADR 신설 없음 — 외부 의존성·아키텍처 경계·인프라 변경 없음. ADR-0011 §D4(report artifact path)는 **준수 대상**이지 변경 대상이 아니다
+- **머지 전 필수**: 이 PR 의 CI 실행으로 P7(실측) · T6(게이트 순서) · T9(재실행)를 채운다. 그 전에는 ✅ 로 올리지 않는다

@@ -1401,3 +1401,64 @@ ADR 상대링크 무결성 PASS · consistency precheck ok(warnings 0).
    이력 재작성 대신 사실대로 남겼다
 
 **다음**: ④-c-2b-0 (P4 브로커 retention 코드) → ④-c-2b (replay 구현). 또는 ③ PR3d-b-2(GKE 세션) + PR4 관측성 S9.
+
+---
+
+## ④-c-2b-0 — 브로커 retention 계약 실설정 — 2026-09-01 — [#99](https://github.com/Kimgyuilli/PeakCart/pull/99)
+
+> ADR-0020 §D4 가 확정한 값을 코드로 옮긴다. **④-c-2b(replay 구현)의 마지막 착수 조건**이었다.
+
+### "설정돼 있지 않다" 는 절반만 참이었다
+
+원 계획(`task-impl4-c2b-dlq-replay.md` §2 D4)은 브로커 retention 이 어디에도 설정돼 있지 않다고 적었다.
+**선언 기준으로는 참, 실효 기준으로는 거짓**이다 — `log.retention.hours=168`(7일)이 이미 실효값이었다.
+그래서 이 작업은 *동작을 바꾸는 게 아니라 계약을 명문화하는 것*이고, 그 구분을 흐리면 "설정했다" 가
+아무 것도 안 바뀐 채 성공처럼 보인다. **config 마다 동작 변경 여부를 나눠 기록**했다 —
+`retention.ms`·`cleanup.policy`·`message.timestamp.type` 은 실효 불변, `retention.bytes`·`segment.*`·
+`before.max.ms` 는 동작 변경이다. 전자는 V-P4-1 기준선 테스트가 **런타임 관측으로 승격**시켰다.
+
+### segment.bytes 를 빠뜨렸으면 계산이 무의미했다
+
+`retention.bytes` 만 선언하는 것으로 파티션 점유를 정했다고 생각했는데, Kafka 는 **닫힌 세그먼트만**
+지우고 active segment 는 그 위에 얹힌다. 이미지 기본 `log.segment.bytes` 가 **1 GiB** 라
+(`/opt/kafka/config/kraft/server.properties:128` 직접 확인) 선언하지 않으면 파티션 하나가 PVC 전체를
+넘길 수 있었다. 실질 점유식을 `retention.bytes + segment.bytes` 로 바꾸고 `segment.bytes`·`segment.ms` 를
+계약에 넣었다.
+
+### 등호가 여유를 다 먹고 있었다
+
+기존 `retention >= floor.max()` 는 등호를 허용해서 `retention 7d` 와 `dlq-replay-window 7d` 가 둘 다
+통과했다. 그 상태에서는 시계 오차와 정리 잡 지연만큼 창 끝이 먼저 잘려 **광고한 replay 창이 실제로
+보장되지 않는다**. `retention >= dlqReplayWindow + clockSkew + cleanupSafety` 로 바꾸고 4서비스를 9d 로
+올렸다. 리뷰가 잡아준 것 — **budget 이 0이면 required 가 dlqReplayWindow 로 내려가** 제거하려던
+7d == 7d 가 그대로 다시 부팅된다. 양수 검증을 추가했다.
+
+### 리뷰가 잡은 내 자기대조
+
+`KafkaTopicConfigsTest` 가 **SUT 의 상수를 그대로 기대값으로 읽고** 있었다. 업무 8/4 → 10/2 MiB 로
+바꿔도 합이 같아 "절반 관계" 도 "총 420 MiB" 도 유지되어 green 이었다. ADR 본문 값을 테스트에
+리터럴로 다시 적어 독립 정본을 만들었고 변이로 red 를 확인했다. **계획 리뷰 때 P4-4 를 "관측해서
+사실대로 적으면 통과" 로 설계했던 것과 같은 결의 실수**다 — 이 세션에서 두 번 나왔다.
+
+### 검증
+
+**764 테스트 0 실패**(common 73 · order 297 · product 186 · payment 168 · notification 40, 35분 33초).
+변이 4종 전부 의도대로 red → 복원 후 green: 토픽 하나의 `.configs(...)` 제거 · 안전여유 등호 복귀 ·
+YAML `modify-topic-configs` 제거 · 8/4→10/2 MiB.
+
+### 미충족
+
+1. **diff 리뷰 2R 미실행** — P1 을 실제로 고쳤으므로 재리뷰 대상인데 돌리지 않았다. 이 세션의 다른
+   리뷰들이 매번 "직전 라운드 수정이 만든 새 결함" 을 잡아왔으므로 **한 라운드가 비어 있다**.
+   변이 4종 red 확인이 부분적 대체다
+2. **PVC 1 GiB 안전성 여전히 미증명** — 도메인 토픽만 정상상태 약 420 MiB 로 억제된다.
+   `__consumer_offsets`(기본 50파티션)·KRaft metadata 는 bound 밖이고, 420 MiB 자체도 hard bound 가
+   아니다(retention 검사 주기·`file.delete.delay.ms`·index/timeindex·대형 batch 미포함)
+3. **운영 클러스터 미적용** — 로컬 Testcontainers 로만 검증했다. `ALTER_CONFIGS` 권한·기존 dynamic
+   override·배포 순서는 미증명. V-P4-8(권한 실패 주입)과 실적용은 **③ PR3d-b-2 GKE 세션**에 합류
+4. **`retention.bytes` 유한값은 동작 변경** — 트래픽이 산정치를 넘으면 7일 이내에도 좌표가 사라질 수
+   있다. 그래서 replay 는 발행 직전 좌표 검증(ADR §D5-1)을 필수로 거친다
+5. **`offsets.topic.num.partitions` 축소·PVC 증설 미수행** — 기존 클러스터에 소급되지 않아 재생성 필요.
+   별도 인프라 결정
+
+**다음**: **④-c-2b (replay 구현)** — 착수 조건이 전부 닫혔다. 또는 ③ PR3d-b-2(GKE 세션) + PR4 관측성 S9.

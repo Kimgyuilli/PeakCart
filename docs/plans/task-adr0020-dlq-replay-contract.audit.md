@@ -148,3 +148,15 @@
 - 계획 이탈 1건(구현 전 계획·ADR 을 먼저 수정): `message.timestamp.before.max.ms` 를 리터럴 8d 가
   아니라 **`app.idempotency.retention` 에서 유도**. 두 곳에 적으면 floor 변경 시 갈라진다.
 - raw: .cache/codex-reviews/diff-adr0020-p4-r1.json
+
+## 2026-09-01 — /ship (P4 · PR ④-c-2b-0)
+- PR: https://github.com/Kimgyuilli/PeekCart/pull/99 (신규, base=main)
+- #98 머지 후 origin/main 에 리베이스 — 스택 해소
+- consistency precheck: **ok** (warnings 0)
+- 커밋: 3개 — `feat(kafka)` / `test(kafka)` / `docs(adr0020)`. **분류 분리 지켰다**
+  (직전 /ship 의 미충족 7번 "커밋 분류 혼재" 재발 방지 — push 전에 re-split 했다)
+- 검증: **764 테스트 0 실패**(5모듈) · `hpx_plan_lint` OK · 변이 4종 red 실측
+- 계획서 체크박스: **P1~P8 전부 [x]**
+- 갱신: `docs/TASKS.md` ④ 행 ④-c-2b-0 항목 · `docs/progress/PHASE4.md` 신규 절
+- 미충족: diff 리뷰 2R 미실행 · PVC 안전성 미증명 · 운영 클러스터 미적용
+- 머지하지 않았다

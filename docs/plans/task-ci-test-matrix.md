@@ -144,17 +144,17 @@
 - [x] P4 `gate` job — `needs: [test, guards]` · 배치검증 → 증적대조 2단 · 스텝별 `!cancelled()`
 - [x] P5 게이트 순서 재배선 (`images: needs: [lint, gate]`)
 - [x] P6 `ci-test-matrix-lint.sh` — `--merge-artifacts` · `--verify-layout` · `--verify-guards` · `--self-test` **22종**(coverage 8 + layout 2 + zero-drift 3 + guards 3 + merge 3 + guard-list 3)
-- [ ] P7 실측 기록 — **CI 실행 후**(벽시계 임계경로 · shard 별 소요 · 합산 runner-minutes)
+- [~] P7 실측 기록 — **CI 실행 후**. 이 PR 이 CI 자체를 바꾸므로 **첫 실행이 곧 측정**이다
 
 
 
-- [ ] N1~N7 전부 불성립
-- [ ] T1~T9 그린, **T1·T2·T3·T3b·T4·T6·T9 는 실패 주입으로 빨개지는 것까지 확인**
+- [~] N1~N7 — **N2·N3·N4·N5 불성립 확인**(가드 실행 실측 · 병합 실측 · 154==154 태스크 동등 · shard 커버리지 lint). **N1·N6·N7 은 CI 실행이 판정**(임계경로 · 게이트 순서 · 러너 시간)
+- [~] **T1·T4·T5 그린 + 실패 주입 확인**(가드 5종 실측 · lint 실패주입 3종 · 태스크 집합 154==154) · **T3 병합 실측**(206파일 2artifact 충돌 0). **T2·T3b·T6·T7·T8·T9 는 CI 실행이 판정**
 - [ ] P7 실측 표가 `docs/progress/evidence/` 에 존재 — 벽시계 임계 경로 · job/shard 별 소요 · 합산 runner-minutes(**과금 아닌 자원 지표로 명시**) · 중복 컴파일 비용
 - [ ] 임계 경로가 baseline 32m23s **미만**이고, 서비스 shard 최대/최소 비가 기록됨 (2.0 초과 시 §5-7 판단 문서화)
-- [ ] `ci-test-matrix-lint` 신설 + `--self-test` **22종** + `lint` job 배선 (`ci-task-parity-lint` 는 V13 으로 **폐기**)
+- [x] `ci-test-matrix-lint` 신설 + `--self-test` **22종** + `lint` job 배선 (`ci-task-parity-lint` 는 V13 으로 **폐기**)
 - [ ] `test-reports` artifact 에 **세 트리** 보존 (ADR-0011 §D4 · V15)
-- [ ] Codex diff 리뷰 수렴(새 계약 표면 무추가 + P1 = 0)
+- [~] Codex diff 리뷰 — 3라운드(4건 P1:2 → 3건 P1:1 → 3건 P1:2), **상한 도달로 수렴 미달**. 3R 지적 3건은 전량 반영했고 재리뷰는 돌리지 않았다. 남은 검증은 CI 실행
 
 ---
 

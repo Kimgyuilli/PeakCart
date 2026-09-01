@@ -1,9 +1,16 @@
 # ADR-0018: 보상/환불 트리거 계약 — 감지 3지점 → Payment 환불 실행 → 원장 종결
 
-- **Status**: Accepted
+- **Status**: Partially Superseded by [ADR-0020](./0020-dlq-replay-contract.md)
 - **Date**: 2026-08-15
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: Phase 4 (MSA 분리) — 구현 ④ Choreography Saga
+
+> **무효화 범위 (ADR-0020, DLQ replay 계약)**: 본 ADR 의 **`1 topic = 1 producer` 규약 유지** 결정(§Decision)이 **DLQ replay 에 한해** 무효화된다.
+> - replay 는 **원장 소유 서비스가 남이 발행한 토픽에 write** 한다 — 소비 경로 원장의 `origin_topic` 은 정의상 남의 토픽이라 규약을 그대로 적용하면 replay 가능 집합이 공집합이 된다(ADR-0020 §D8-2).
+> - **무효화되는 것은 write 권한의 배타성뿐**이다. **새 도메인 이벤트의 발행 주체를 1개로 두는 결정은 유효**하며, 본 ADR 의 환불 트리거 토픽 설계(Alternative A 기각 포함)는 전부 그대로다.
+> - replay 예외의 fence(주체·목적지 토픽/파티션·`key`/`payload`/`eventId` 동일·payload 변경 금지)는 ADR-0020 §D8-3 이 정한다.
+> 그 외 본 ADR 의 결정(감지 3지점·환불 상태머신·멱등/crash 경계·종결 표면·재시도·관측)은 유효하다.
+
 
 ## Context
 

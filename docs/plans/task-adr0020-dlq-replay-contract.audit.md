@@ -59,3 +59,55 @@
   root 전파처럼 **답 자체가 ADR 사안**인 표면이며, 계획서 역할은 그것을 결정 대상으로 등록하는 데까지다(§8-7).
 - 관찰: 3R 지적의 무게중심이 계획서 구조에서 **내가 스케치한 잠정 답**으로 옮겨갔다. 계획서에 답을
   스케치할수록 리뷰가 그 스케치를 때리는 구조였다.
+
+---
+
+## 2026-09-01 — diff 리뷰 라운드 1
+- 항목: 7건 (P0:0, P1:6, P2:1) · 처리: 반영 7건 / 기각 0건
+- **자기 판정기준 불일치 1건**: ADR-0020 §D8-4 는 "규칙에 예외를 내는 것은 부분 무효화" 라고 판정해놓고
+  ADR-0018 만 refine/Status 불변으로 뒀다. 근거로 "0018 의 규약은 새 도메인 이벤트 한정" 이라 적었으나
+  **원문 `0018:49` 에 그런 한정이 없고**, 0018 Alternative A 의 기각 사유가 "규약 예외는 재논쟁을 부른다"
+  인데 본 ADR 이 정확히 그 예외를 낸다 → ADR-0018 을 `Partially Superseded by ADR-0020` 으로 변경
+- 그 외: `original_timestamp` NULL fallback 이 D1 보장 파괴 → replay 금지 · root 종결 후 늦은 자식 race
+  → D6-2b 두 축 곱 전이표 + root 재개방 · "byte-for-byte" 범위 모순 → key/payload/eventId/timestamp 로 축소
+  · `record_kind` nullable↔DEFAULT 충돌 → NULL=DOMAIN 해석 · "동작을 바꾸지 않는다" 거짓(retention.bytes -1→유한은
+  동작 변경) + 구체값 확정 · runbook 의 "7일 넘기면 불가" 시간 단정 정정
+- raw: .cache/codex-reviews/diff-task-adr0020-dlq-replay-contract-r1.json
+
+## 2026-09-01 — diff 리뷰 라운드 2
+- 항목: 6건 (P0:0, P1:5, P2:1) · 처리: 반영 6건 / 기각 0건
+- **1R 수정이 만든 새 결함 (전부)**:
+  - NULL 을 금지로 바꾸면서 **바로 앞 문장의 `occurred_at` fallback 을 남겨** 정반대 두 규칙이 공존.
+    "5개 축" 표기와 6행 표 불일치 → 구조 검증이 축 누락을 못 잡는 상태
+  - **용량 산정이 불건전**했다 — `retention.bytes` 는 닫힌 세그먼트만 지우는데 파티션 상한처럼 썼다.
+    이미지 기본 `log.segment.bytes=1GiB`(`/opt/kafka/config/kraft/server.properties:128` 직접 확인),
+    `offsets.topic.num.partitions` 미설정(기본 50) → 560MiB 산정 무효
+  - `source_record_timestamp` 를 싣는 것만으로 보존 미보장(`LogAppendTime` 덮어쓰기·`before.max.ms` 거부)
+  - root 재개방 + 자식 OPEN → incident 당 미결 2행. "누적되지 않는다" 가 거짓
+  - 평문 상관 헤더 + owner/group 일치 검사로는 위조 방지 안 됨
+  - contract 의 `NOT NULL DEFAULT 'DOMAIN'` 이 명시적 kind 계약을 다시 약화
+- raw: .cache/codex-reviews/diff-task-adr0020-dlq-replay-contract-r2.json
+
+## 2026-09-01 — diff 리뷰 라운드 3 (상한)
+- 항목: 7건 (P0:0, P1:5, P2:2) · 처리: 반영 7건 / 기각 0건
+- **2R 수정이 만든 새 결함 — 반대 방향 false-green 포함**:
+  - **자식 과다집계를 고치다 기존 미결을 0으로 만들 뻔했다.** `root_record_id` 는 additive 라
+    ④-c-2a 가 적재한 기존 행이 전부 NULL 인데 `root_record_id = id` 를 바로 걸면 **기존 미결이 전량 탈락**
+    → expand(`IS NULL OR = id`) → backfill → 무결성 검증 → contract 순서 + 배포 전후 건수 동일 회귀 테스트
+  - "420 MiB 로 bound" 가 여전히 과대주장 — retention 검사 주기·`file.delete.delay.ms`·index/timeindex·
+    대형 batch 미포함 → **hard bound 주장 철회, 정상상태 목표치로 하향**
+  - 상관 대조의 정본을 outbox 로 뒀는데 **수명 경쟁에서 진다**(PUBLISHED 는 7d 후 삭제, 미결 root 는 무기한)
+    → 정본을 원장(`last_replay_attempt_id`)으로 이동
+  - D3 컬럼 목록에 `replay_root_record_id`·`target_consumer_group` 이 없어 **대조할 정본이 부재**.
+    실제 DLT group 대조 없이는 group 바꿔치기가 통과
+  - 미래 timestamp 무조건 거부 ↔ `clockSkewBudget=5m` 모순 → `now + skew` 까지 허용하고 `now` 로 clamp
+  - P4 기준선이 3개 config 만 검증 → `segment.*`·`message.timestamp.*` 미적용이 green 통과 → 7개 전부 + 개별 mutation
+  - 축 6(NULL 금지)의 실제 영향 미측정 → NULL 비율 증적을 2b 산출물로 요구
+- raw: .cache/codex-reviews/diff-task-adr0020-dlq-replay-contract-r3.json
+
+## diff 리뷰 종료 판정 — 미수렴 (상한 도달)
+- 라운드별: 7 → 6 → 7 (P1: 6 → 5 → 5). **매 라운드가 직전 라운드 수정이 만든 새 결함을 잡았다.**
+- 스킬 상한 3회에 도달해 종료했다. 수렴 조건(새 표면 무추가 + P1=0)은 채우지 못했다.
+- 잔여의 성격: 3R 지적은 전부 **ADR 문구·계약 정밀도** 였고 코드 산출물이 아니다. 실제 구현(④-c-2b)이
+  이 계약들을 코드로 옮길 때 다시 검증된다 — 특히 `root_record_id` 전환 계약과 상관 대조 트랜잭션 경계.
+- **이 PR 은 문서 전용(10파일 전부 .md)이라 런타임 회귀 위험이 없다**는 점이 상한 종료를 감당 가능하게 한다.

@@ -21,7 +21,7 @@
 - **N3.** replay 발행이 **원본 토픽의 producer 가 아닌 서비스**에서 일어나는데, **ADR-0012 D4 매트릭스의 producer 컬럼**(= `1 topic = 1 producer` 의 실제 SSOT, §2.2-6)과의 관계를 처분하지 않았다.
 - **N4.** replay 가 **공유 토픽의 모든 consumer group 에 재전달**된다는 사실과 그 무해성의 근거·한계(§2.2-4·§2.2-9)를 계약으로 정의하지 않았다.
 - **N5.** 브로커 `retention.ms`·`cleanup.policy`·`retention.bytes` 가 선언되지 않은 채 남아 있거나, 선언은 했는데 **기존 토픽에 실제로 적용되는 경로**가 없다.
-- **N6.** replay **금지 축이 독립 조건으로 분리되지 않았다** — `event_id` 부재 · `failed_consumer_group='__unknown__'` · `origin_kind='DLQ_ORIGIN'` · 좌표 무효 · 정책 금지. (`payloadTruncated` 를 금지 사유로 쓰면 위반이다.)
+- **N6.** replay **금지 축이 독립 조건으로 분리되지 않았다** — `event_id` 부재 · `failed_consumer_group='__unknown__'` · `origin_kind='DLQ_ORIGIN'` · 좌표 무효 · 정책 금지 · **`original_timestamp` 부재**(6개). (`payloadTruncated` 를 금지 사유로 쓰면 위반이다.)
 - **N7.** ADR-0012 D1/D4/D5 를 바꾸는데 그 처분이 Status 에 반영되지 않았거나, **기존 superseder(ADR-0016)를 덮어써서 무효화 이력이 소실**된다(§2.2-8).
 - **N8.** **실행 표면**(코드·설정·운영 주장)의 검증 행 중 **변이를 가하지 않고 판정되는 것**이 남아 있다. — *문서 결정 항목은 실패 주입 대상이 아니라 **구조 검토** 대상이다. 판정 유형은 §6 머리말이 정의하며, **모든 행이 정확히 하나의 유형을 달아야 한다**(3R #7).*
 - **N9.** **broker ack 만으로 사건이 종결**된다. — *상태명을 바꾸는 것으로는 회피되지 않는다. ack 상태를 terminal 로 삼거나 unresolved 집계에서 빼면 같은 조기 종결이다.*
@@ -105,49 +105,50 @@
 
 > 각 항목의 산출물은 **ADR-0020 의 해당 절**이다. 결론만 적지 않고 **선택지 · 채택 · 기각 사유 · Consequences** 를 쓴다(N1).
 
-- [ ] **P1.** **D1 — 재발행 보장 수준.**
+- [x] **P1.** **D1 — 재발행 보장 수준.**
   - **비교축을 두 종류로 가른다**: *구조 변경 대안*(crash window 를 실제로 줄이는가) = ① 현행 폴링 outbox + at-least-once / ② **CDC(log-based outbox, Debezium)** — poller 의 별도 save 를 제거하나 새 인프라 의존. *비해결 대조군* = **Kafka 트랜잭션** — 단일 레코드 outbox 에서 이 창을 **줄이지 않는다**(소비자 가시성 제어일 뿐). "축소 수단" 목록에 넣지 않고 왜 답이 아닌지를 기록한다
   - 비용은 코드 사실대로(§2.1-v·x): `isolation.level` 전파는 **order·product·payment·notification 4서비스**(User 는 Kafka 미사용) · poller 는 **기존 3개 + P2 채택 시 1개** 조건부
   - **최종 보장 문구는 publication at-least-once 로 고정**하고 "중복 발행 0" 을 삭제한다(N2)
 
-- [ ] **P2.** **D2 — notification-service 의 outbox.**
+- [x] **P2.** **D2 — notification-service 의 outbox.**
   - ① *notification 에 `outbox_events` 신설 → ADR-0012 D1 개정* / ② *replay 지휘 위임 → DB 간 durable command 채널*
   - ②의 범위를 축소 기술하지 않는다 — §2.2-3 아래에서 이는 **4서비스 전부에 걸린 채널** 신설이다
   - 채택안이 D1 을 실제로 바꾸는지 판정해 P8 로 넘긴다(§2.2-11)
 
-- [ ] **P3.** **D8(신규) — replay 발행 주체와 `1 topic = 1 producer`.**
+- [x] **P3.** **D8(신규) — replay 발행 주체와 `1 topic = 1 producer`.**
   - 대상 ADR 을 정확히 지목한다 — **ADR-0012 D4 producer 컬럼 + ADR-0018**. ADR-0011 D2 는 프로비저닝 소유라 Status 불변(§2.1-t)
   - **프로비저닝 소유 ≠ 발행 권한** 을 용어로 분리하되, **ADR-0018 이 그 둘을 결합해 논증했고 replay 가 그 결합을 끊는 첫 사례**임을 명시한다(§2.2-14). 결합을 끊는 것이 결정 내용이지 용어 정리가 아니다
   - ① *발행 권한 규약의 **명시적 예외**(원장 소유 서비스가 자기 행에 대해서만)* / ② *producer 서비스 위임*
   - **예외의 fence 를 목적지까지 못박는다 (N14, §2.2-16)**: `destination_topic == origin_topic` · `destination_partition == 검증된 origin_partition` · `key`/`payload`/`eventId` 는 원본 레코드와 **byte-for-byte 동일** · `record_kind=REPLAY` 표식 · 소유 위반·목적지 변경 시 **발행 거부**
 
 - [ ] **P4.** **D4-a — 브로커 retention 계약을 실제로 고정** (*유일한 코드 변경*).
-  - **현재 실효값을 런타임 관측으로 확정**한다 — `AdminClient.describeConfigs` 로 값과 `ConfigSource` 를 증적에 남긴다
-  - 업무·`.dlq` 토픽 전부의 `NewTopic` 에 `.config(RETENTION_MS/CLEANUP_POLICY/RETENTION_BYTES)` 선언. 값은 `app.idempotency.floor.kafka-topic-retention` 과 **같은 출처에서 유도**
+  - **현재 실효값을 런타임 관측으로 확정**한다 — `AdminClient.describeConfigs` 로 **ADR-0020 §D4-1 이 계약화한 7개 config 전부**의 값과 `ConfigSource` 를 증적에 남긴다: `retention.ms` · `cleanup.policy` · `retention.bytes` · `segment.bytes` · `segment.ms` · `message.timestamp.type` · `message.timestamp.before.max.ms`
+  - 업무·`.dlq` 토픽 전부의 `NewTopic` 에 `.config(RETENTION_MS/CLEANUP_POLICY/RETENTION_BYTES)` 선언. **값은 ADR-0020 §D4-1 이 확정했다** — `retention.ms=7d`(업무·`.dlq` 동일) · `cleanup.policy=delete` · `retention.bytes` 업무 **8 MiB** · `.dlq` **4 MiB**/파티션 · `segment.bytes` **4/2 MiB** · `segment.ms` **1d** · `message.timestamp.type=CreateTime` · `message.timestamp.before.max.ms` **≥ 7d+5m → 선언값 8d** (도메인 토픽 정상상태 약 **420 MiB**, hard bound 아님; PVC 안전성 **미증명**). `retention.ms` 는 `app.idempotency.floor.kafka-topic-retention` 과 **같은 출처에서 유도**한다
+  - **동작 변경 여부를 나눠 보고한다** — `retention.ms`/`cleanup.policy` 명문화는 **실효 불변**(이미 Apache 기본값), **`retention.bytes` 유한값은 동작 변경**(현재 `-1`)
   - **기존 토픽 반영 경로** — `spring.kafka.admin.modify-topic-configs=true`. ADR-0007 상 동작 규약이므로 **base 또는 Java Config**(프로파일 금지)
   - **미선언 config 의 처분**을 관측하고 acceptance 로 고정한다(§6 P4-4)
   - **용량 트레이드오프 — 두 하한을 각각 증명한다**(§2.1-s·z): ① 파티션별 = 토픽·파티션별 최악 유입 × 7일 ≤ `retention.bytes` ② 디스크 = ①을 **모든 파티션 × 복제수**로 합산 + segment/인덱스 여유 ≤ PVC usable. ①을 만족해도 ②가 깨지면 브로커가 죽는다. **"유한 `retention.bytes` + 디스크 경보" 는 보장 수단이 아니다**(경보는 용량을 늘리지 않는다 — 운영 보조). 결론은 PVC 증설 또는 **best-effort 강등** 중 하나
-  - **안전 여유를 설정으로 강제한다 (N15, §2.2-17)**: `retention ≥ dlqReplayWindow + clockSkewBudget + cleanupSafetyBudget` 을 fail-fast 규칙으로 만들고 **4서비스 설정을 함께 조정**한다. 현재 등호(7d==7d)는 이 규칙에서 red 다
+  - **안전 여유를 설정으로 강제한다 (N15, §2.2-17)**: `retention ≥ dlqReplayWindow + clockSkewBudget + cleanupSafetyBudget` fail-fast. **값은 ADR-0020 §D4-3 확정** — `clockSkewBudget=5m` · `cleanupSafetyBudget=1d` · **`retention` 7d → 9d**(4서비스 전부). 현재 등호(7d==7d)는 이 규칙에서 red 다
   - **배포 게이트**: 로컬 성공은 운영 Kafka 의 `ALTER_CONFIGS` 권한·기존 dynamic override·서비스별 배포를 증명하지 않는다. 서비스 배포 순서 · 권한 실패 시 중단 조건 · 이전 dynamic config 복구 명령 · 롤백 검증을 적는다
-  - `.dlq` retention 이 원본과 같아야 하는지 결정
+  - ~~`.dlq` retention 이 원본과 같아야 하는지 결정~~ → **ADR-0020 §D4-1 이 확정**(`retention.ms` 동일 7d · `retention.bytes` 는 절반 — `.dlq` 는 예외 경로라 유입이 적다)
 
-- [ ] **P5.** **D4-b + D5 — 좌표 유효성 · 금지 정책 · 재적용 의미론.**
+- [x] **P5.** **D4-b + D5 — 좌표 유효성 · 금지 정책 · 재적용 의미론.**
   - **좌표 검증**: replay 전 `AdminClient` 로 `cleanup.policy`·`retention.ms`·beginning/end offset 조회 → 범위 밖이면 종결. 읽은 뒤 **반환 offset == 요청 offset** 검증(compaction hole 에서 seek 은 다음 레코드를 준다)
-  - **금지 축 5개 독립 조건 (N6)**: ① `event_id IS NULL` ② `failed_consumer_group='__unknown__'` ③ `origin_kind='DLQ_ORIGIN'`(좌표가 `.dlq` 자신 → **replay 하면 `.dlq` 내용이 원본 토픽에 주입된다**) ④ 좌표 무효 ⑤ 토픽/eventType 별 `replayPolicy`(`payloadTruncated` 와 **독립 컬럼**). 조합별 처분도 표로
+  - **금지 축 6개 독립 조건 (N6)**: ① `event_id IS NULL` ② `failed_consumer_group='__unknown__'` ③ `origin_kind='DLQ_ORIGIN'`(좌표가 `.dlq` 자신 → **replay 하면 `.dlq` 내용이 원본 토픽에 주입된다**) ④ 좌표 무효 ⑤ 토픽/eventType 별 `replayPolicy`(`payloadTruncated` 와 **독립 컬럼**). 조합별 처분도 표로
   - **멱등 안전창과 기준시각 (N12, §2.2-13)**: 보수적 계산식 · 신뢰할 timestamp 출처와 순위 · `originalTimestamp` nullable 처분 · 미래값 거부 · clock skew 여유. **`replay_deadline` 은 루트 사건에서 1회 계산해 모든 자식 행·attempt 가 상속하고, 재계산을 금지한다**(§2.1-bb — 안 하면 실패할 때마다 창이 연장된다). 대안으로 replay outbox 에 `source_record_timestamp` 를 두어 원본 timestamp 를 보존
   - **모든 group 재전달 불변식 (N4)**: 무해성의 근거는 오직 `processed_events (event_id, consumer_group)` → **동일 `eventId` 보존 필수**
   - **순서 역전과 재적용 (§2.2-9)**: `replayPolicy` 에 상태 사전조건 · 늦은 이벤트 허용 여부
   - **재실패의 귀착 (N11, §2.2-12)**: ① **replay 상관키**가 *발행 헤더 → 업무 실패 → DLT 헤더 → 원장* 까지 보존되는 계약 ② 원래 행과 연결하는 규칙 ③ 새 DLQ 행의 처분. **③이 "링크만" 이면 조상 해소 범위가 미정이므로**(3R #5) `root_record_id` 로 canonical incident root ↔ replay attempt 를 나누고 **성공 시 root 와 활성 자식의 종결을 원자적으로 전파**한다. 보존/병합/링크 각 안에 **backlog 카디널리티와 성공 후 잔여 unresolved 행 수**를 비교축으로 둔다
   - **상관키 헤더 계약 (N11 보안면, 3R #4, §2.1-aa)**: 표준 `DLT_*` 는 계속 제외하되 **replay correlation header 를 allowlist 에 명시**한다. 값은 *전역 UUID attempt ID + ledger owner + target consumer group + root incident ID* 를 담거나 서버가 검증 가능한 opaque token 으로 하고, **현재 group/owner 가 일치할 때만 읽는다** — 단순 숫자 원장 ID 만 실으면 모든 서비스가 같은 replay 를 받는 구조에서 **다른 DB 의 동명 ID 를 잘못 갱신하거나 위조 헤더로 임의 행을 전이**시킬 수 있다
 
-- [ ] **P6.** **D3 — replay 레코드의 표현.**
+- [x] **P6.** **D3 — replay 레코드의 표현.**
   - ① *`outbox_events` additive 컬럼 + poller kind 분기* / ② *별도 `replay_outbox` + 별도 poller*(poller·스케줄러·메트릭·retention 잡이 2벌)
   - 필요한 표현: `record_kind` · `destination_topic` · **nullable 임의 key** · `destination_partition` · header allowlist · raw payload · **`source_record_timestamp`**(P5 deadline 상속용)
   - **추적키 분리**: outbox 행의 `event_id`(unique, 발행 추적) ↔ **재발행 대상 payload 의 `eventId`**(보존 필수) 를 서로 다른 컬럼으로
   - **마이그레이션 표를 둘로 가른다 (§2.1-x)**: *outbox* = 현재 **3 DB**, P2 ① 채택 시 **4 DB** / *원장(`dead_letter_records`)* = **항상 4 DB**(order V6·product V5·payment V5·notification V3). 컬럼별 **expand → deploy → 검증 → (선택) contract** · 기존 행의 기본 의미 · nullable→NOT NULL 시점 · 구버전 호환
   - **fence 컬럼은 조건부다 (3R #12)**: `@Version` 은 P7 이 세 fence 안 중 그것을 택했을 때만 필요하다. **원장 공통 컬럼과 채택안 조건부 컬럼을 분리**하고 각 안의 DDL·잠금 비용을 대조한다
 
-- [ ] **P7.** **D6 + D7 — 상태 축 · 종결 실행자 · 관측 회귀 · 운영 진입점.**
+- [x] **P7.** **D6 + D7 — 상태 축 · 종결 실행자 · 관측 회귀 · 운영 진입점.**
   - **두 축을 물리적으로 분리한다 (N13, §2.2-15)** — 선언만으로는 안 된다. *발행 축* = outbox 상태 또는 별도 `publication_status` / *사건 축* = `resolution_status`. 최소한 **`PUBLISH_FAILED` 와 `CONSUMPTION_FAILED` 를 구분**하고 **두 축의 곱에 대한 전이표·불변식**을 만든다
   - **`RESOLVED` 의 근거 (N9)**: ① *업무 consumer 가 상관키를 받아 **비즈니스 처리와 같은 트랜잭션에서** 성공 확인 기록 → `RESOLVED` 존재* / ② *소비 성공 확인 없음*
   - **선택지 ②에는 나가는 전이가 있어야 한다 (3R #2)** — 현재 purge 는 `DISCARDED` 만 대상이고 미결 행은 삭제하지 않는 계약이라(`Repository:90-96`, `MaintenanceScheduler:20-23`), ②를 그대로 두면 **성공한 사건이 감소하지 않아 oldest-age 가 영구 고정**된다. ②를 채택 가능하게 두려면 `REPLAY_PUBLISHED → DISCARDED/MANUALLY_RESOLVED` 수동 종결 절차(증거·권한·SLA·purge 시점)를 정의하고, 그 증거를 만들 방침이 아니면 **②를 기각하고 소비 성공 확인을 필수로 한다**
@@ -156,7 +157,7 @@
   - **동시 요청 fence (§2.1-q)**: 조건부 상태 UPDATE / 행 잠금 / `@Version` 중 하나로 **outbox 행이 하나만 생성**됨을 계약
   - **진입점 1종 확정**: 운영 CLI vs Actuator `@WriteOperation`(§2.1-l). 인증·권한·트랜잭션 경계 포함. **직접 SQL 상태 변경 금지** — 2a 에서 runbook 이 도메인 가드를 우회하도록 지시하던 결함이 실제로 났다
 
-- [ ] **P8.** **ADR 작성 · Status 판정 · 문서 배선.**
+- [x] **P8.** **ADR 작성 · Status 판정 · 문서 배선.**
   - `docs/adr/0020-dlq-replay-contract.md` (`docs/adr/template.md` 준수) + `docs/adr/README.md` 인덱스 행
   - **ADR-0012 — 처분은 채택안 종속 (§2.2-11)**: D1 은 P2 ①일 때만, D4 는 P3 ①일 때만 바뀐다. 위임안이면 **Status 불변**. 무효화한다면 **ADR-0016·ADR-0020 두 superseder 를 모두 보존**하는 표기(N7)
   - **ADR-0012 D5 관계 판정 (N7, §2.2-18)**: D5 가 허용한 *"TTL 이후 새 eventId 발행"* 대안을 본 계약이 **금지·축소·refine 하는지** 명시적으로 판정한다. 판정 결과에 따라 `StockReservationService` javadoc 의 *"DLQ 재발행(새 eventId)"* 서술과 `docs/progress/PHASE4.md` 의 같은 서술 정정을 2b 영향 파일에 포함
@@ -211,25 +212,25 @@
 | V-P1 | [구조] | 보장 문구에 "중복 발행 0" 이 없고, Kafka 트랜잭션이 *비해결 대조군*으로 분리됐으며, 비용 수치가 §2.1-v·x 와 일치(4서비스 · poller 3+조건부 1) | exactly-once 주장 시 N2 위반. 트랜잭션을 "축소 수단" 목록에 넣으면 2R #5 재발 |
 | V-P2 | [구조] | ②의 범위가 4서비스 채널로 기술 · 채택안이 D1 을 바꾸는지 판정 | 축소 기술이면 되돌린다 |
 | V-P3 | [구조] | 프로비저닝 소유 ↔ 발행 권한 분리 · **ADR-0018 이 둘을 결합했고 replay 가 끊는다는 판정**(§2.2-14) · 채택안·기각 사유·Consequences · **목적지 fence(topic/partition/key/payload/eventId)** | 결합 사실 없이 "대상 ADR 정정" 으로 끝나면 미충족. 목적지 fence 누락 시 N14 위반 |
-| V-P4-1 | [측정] | 기준선 — `describeConfigs` 로 업무 토픽 1 + `.dlq` 1 의 3개 config 값과 `ConfigSource` 를 증적에 기록 | *(V-P4-2/3 이 이 값을 대조 기준으로 소비한다)* |
-| V-P4-2 | [변이] | 신규 토픽 경로 — 없는 토픽명으로 `NewTopic` 선언·기동 → 선언값 + `DYNAMIC_TOPIC_CONFIG` | **`.config(...)` 제거 시 red** |
-| V-P4-3 | [변이] | 기존 토픽 경로 — 지속되는 단일 Testcontainers 브로커에 ① 옛 config 로 토픽 생성 → ② 새 선언 + `modify-topic-configs=false` 컨텍스트 → **옛 값 유지 단언** → ③ `true` 컨텍스트 순차 기동 → 새 값 단언 | ②가 새 값을 보이면 테스트 무효 → 즉시 실패 |
+| V-P4-1 | [측정] | 기준선 — `describeConfigs` 로 업무 토픽 1 + `.dlq` 1 의 **7개 config 전부**(§D4-1) 값과 `ConfigSource` 를 증적에 기록 | *(V-P4-2/3 이 이 값을 대조 기준으로 소비한다)* |
+| V-P4-2 | [변이] | 신규 토픽 경로 — 없는 토픽명으로 `NewTopic` 선언·기동 → **7개 config 각각**의 선언값 + `DYNAMIC_TOPIC_CONFIG` 단언 | **config 를 하나씩 제거·변조할 때마다 각각 red** 여야 한다. 3개만 단언하면 `segment.*`·`message.timestamp.*` 미적용이 green 으로 통과한다(3R #2) |
+| V-P4-3 | [변이] | 기존 토픽 경로 — 지속되는 단일 Testcontainers 브로커에 ① 옛 config 로 토픽 생성 → ② 새 선언 + `modify-topic-configs=false` 컨텍스트 → **옛 값 유지 단언** → ③ `true` 컨텍스트 순차 기동 → **7개 전부** 새 값 단언 | ②가 새 값을 보이면 테스트 무효 → 즉시 실패 |
 | V-P4-4 | [변이] | 미선언 config 처분 — `NewTopic` 에 없는 config 를 dynamic 으로 심고 `true` 기동 → **보존되면 pass** | **삭제되면 fail 이며 red 를 유지한다** — (a) 모든 dynamic config 를 선언적으로 소유하거나 (b) modify 전략을 교체할 때까지. "사실대로 적으면 통과" 는 판정이 아니다 |
 | V-P4-5 | [변이] | 브로커 선언값과 `kafka-topic-retention` 이 갈라지면 기동 실패/lint red | 한쪽만 바꿔 red 확인 |
 | V-P4-6 | [변이] | **안전 여유 규칙** — `retention ≥ dlqReplayWindow + clockSkewBudget + cleanupSafetyBudget` fail-fast | **현재 값(7d==7d)으로 기동 시 red** 여야 한다. 통과하면 규칙이 등호를 막지 못한 것(N15) |
 | V-P4-7 | [구조] | 용량 판정 — 파티션별 하한과 디스크 하한이 **각각** 산정됐는가. 못 대면 보장 문구가 best-effort 로 낮아졌는가. 디스크 경보가 보장 수단이 아닌 운영 보조로 분류됐는가 | 하나라도 누락이면 미충족 |
 | V-P4-8 | [변이] | 배포 게이트 — 운영 적용 시 **`ALTER_CONFIGS` 권한 실패를 실제로 주입**해 배포가 중단되고 롤백 명령이 동작하는지 확인 | 권한을 뺀 자격증명으로 적용 시도 → 중단·명확한 실패 메시지가 안 나오면 red. *운영 적용 자체는 §8-4 게이트* |
-| V-P5-a | [구조] | 금지 축 5종이 독립 조건 + 조합 표 · `payloadTruncated` 가 금지 사유에 **없음** | 남아 있으면 N6 위반 |
+| V-P5-a | [구조] | 금지 축 **6종**이 독립 조건 + 조합 표 · `payloadTruncated` 가 금지 사유에 **없음** · `original_timestamp IS NULL` 이 금지 축에 있고 **`occurred_at` fallback 이 없는가** | `payloadTruncated` 가 남거나 fallback 이 살아 있으면 N6 위반 |
 | V-P5-b | [구조] | `origin_kind='DLQ_ORIGIN'` 금지 명시 | 누락 시 `.dlq` 내용이 원본 토픽에 주입되는 경로가 열린다 |
-| V-P5-c | [구조] | `replay_deadline` — 기준시각 출처·순위 · nullable 처분 · 미래값 거부 · clock skew 여유 · **루트 1회 계산 + 자식 상속 + 재계산 금지** | 어느 하나 누락이면 N12 위반 |
+| V-P5-c | [구조] | `replay_deadline` — **단일 계산식**(`original_timestamp + window`, fallback 없음) · NULL 은 금지 축 6 · **미래값은 `now + clockSkewBudget` 까지 허용하고 `now` 로 clamp** · **루트 1회 계산 + 자식 상속 + 재계산 금지** | 누락 시 N12 위반. "미래값 무조건 거부" 와 `clockSkewBudget` 을 함께 적으면 모순(3R #7) |
 | V-P5-d | [구조] | 모든 group 재전달 불변식(동일 `eventId` 필수) + 순서 역전/늦은 이벤트 처분 | 누락 시 N4 위반 |
 | **V-N11** | [구조] | 재실패 귀착 — 상관키 보존 경로(발행→업무 실패→DLT→원장) · 원래 행 연결 규칙 · 새 행 처분 · **`root_record_id` 로 root↔attempt 분리와 원자적 전파** · 보존/병합/링크의 backlog 카디널리티 비교 | 링크만 택하고 조상 해소 범위가 없으면 미충족(3R #5) |
-| **V-N11-s** | [구조] | 상관키 헤더 — allowlist 명시 · 값 구성(attempt UUID / owner / target group / root id 또는 opaque token) · **현재 group/owner 일치 시만 판독** | 단순 숫자 원장 ID 면 위조·타 DB 오갱신 표면(3R #4). *실제 보존·위조 무시 통합테스트는 2b 산출물* |
+| **V-N11-s** | [구조] | 상관키 헤더 — allowlist · **대조 정본이 원장(`last_replay_attempt_id`)이고 outbox 가 아님**(수명 경쟁) · 한 트랜잭션 안에서 owner·**실제 DLT group**·root·destination topic·kind 전부 대조 · 음성 테스트 7종 + 수명 경쟁 테스트 | outbox 를 정본으로 삼으면 3R #4 재발. 실제 DLT group 대조가 없으면 group 바꿔치기가 통과한다(3R #3) |
 | **V-N12** | [구조] | deadline 경계 규칙이 **null · 과거 · 미래 · skew · DLQ 지연** 각각에 대해 처분을 갖는가 · **재실패 시 비연장** 단언이 2b 검증 항목으로 명시됐는가 | 하나라도 누락이면 N12 위반 |
 | V-P6 | [구조] | 추적키 2종이 다른 컬럼 · **outbox(3~4 DB) ↔ 원장(항상 4 DB) 표 분리** · 컬럼별 expand→contract · **fence 컬럼이 채택안 조건부**(`@Version` 을 무조건 필수로 쓰지 않음) | 원장 변경을 outbox 표에 섞으면 2R #3 재발. `@Version` 무조건이면 3R #12 재발 |
 | V-P7-a | [구조] | **두 축이 물리적으로 분리**됐는가(`publication_status` ↔ `resolution_status`, 또는 `PUBLISH_FAILED` ≠ `CONSUMPTION_FAILED`) + 두 축 곱의 전이표·불변식 | 단일 `status` 로 둘을 표현하면 N13 위반 |
 | V-P7-b | [구조] | `RESOLVED` 근거가 ack 가 아님 · 상태 집합이 채택안 조건부 · **②를 남긴다면 `REPLAY_PUBLISHED` 의 수동 종결 절차(증거·권한·SLA·purge)가 있는가** | ②에 나가는 전이가 없으면 3R #2 위반 |
-| V-P7-c | [구조] | 새 상태별 unresolved/terminal/purge 분류표 + 쿼리·메트릭·경보·runbook 변경 목록 · **②에서 `REPLAY_PUBLISHED` 가 backlog·age 에 계속 잡히는 단언** 포함 | 누락 시 N10 위반 |
+| V-P7-c | [구조] | 새 상태별 unresolved/terminal/purge 분류표 + 쿼리·메트릭·경보·runbook 변경 목록 · **`REPLAY_PUBLISHED` 가 backlog·age 에 계속 잡히는 단언** · **`root_record_id` 전환 구간 계약**(expand 는 `IS NULL OR = id` → backfill → 무결성 검증 → contract) | 누락 시 N10 위반. 전환 계약 없이 `root_record_id = id` 를 바로 걸면 **기존 미결이 전부 0으로 사라진다**(3R #1) |
 | V-P7-d | [구조] | 동시 요청 fence 계약 · 진입점 1종 확정 · 직접 SQL 금지 문구 | 어느 하나 누락이면 미충족 |
 | V-P8-a | [구조] | ADR-0012 처분이 **채택안 종속**(위임안이면 Status 불변) · 무효화 시 **ADR-0016·ADR-0020 두 superseder 보존** · **D5 새-eventId 대안 판정** · ADR-0018 `:230` 선례 대조 · ADR-0011 Status 불변 | D5 판정 누락 시 N7 위반(§2.2-18) |
 | V-P8-b | [변이] | 문서 배선 정적검사 — `grep -n "task-impl4-c2b-dlq-replay.md.*§2" docs/runbooks/dlq-recovery.md` 무히트 · README 인덱스 행 존재 · 2b 계획서 §4 조건 1·2 종결 | 히트하거나 누락이면 red |

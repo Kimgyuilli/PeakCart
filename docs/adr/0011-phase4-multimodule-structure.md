@@ -7,6 +7,8 @@
 
 > **무효화 범위 (ADR-0014, 게이트웨이 이전 전환기)**: §D1 모듈 레이아웃에 `peekcart-common-auth` 추가 / §D2 `auth`/`jwt`/`security` 중 **검증 소유**만 전용 모듈로 변경(발급·AuthController·refresh·블랙리스트 write 등 User 저장소 소유는 **유효**) / §D3 서비스 허용 의존에 `:peekcart-common-auth` 추가. 그 외 §D1~D4 결정은 유효.
 
+> **ADR-0020 과의 관계 (무효화 아님)**: §D2 의 "`config.KafkaConfig` 토픽/DLQ 빈 = 발행 서비스 전속" 은 `NewTopic` **프로비저닝 소유**를 정한 것이다. ADR-0020 의 DLQ replay 예외는 **발행 권한**(누가 그 토픽에 write 하는가)에만 해당하며 프로비저닝 소유를 건드리지 않는다 → 본 ADR 은 **영향 없음**(ADR-0020 §D8-1).
+
 ## Context
 
 ADR-0010 이 Phase 4 서비스 경계를 5개(User/Product/Order/Payment/Notification)로 확정했다. 본 ADR 은 그 5개를 **Gradle 멀티모듈로 어떻게 물리 분리하는지**(모듈 레이아웃·`common` 경계·의존 규칙·빌드/테스트/이미지 계약)를 결정한다. 실제 전환(코드 이동·빌드 재구성)은 구현 ①(별도 task)이며, 본 ADR 은 그 전환의 SSOT 다.

@@ -77,6 +77,8 @@ Consumer 재시도 흐름:
      예: order.created 실패 → order.created.dlq
   3. DLQ 메시지 모니터링 → Slack 알림 발송
   4. 수동 재처리: DLQ 메시지를 확인 후 원인 해결 → 원본 토픽으로 재발행
+     (재발행의 보장 수준·발행 권한 예외·좌표 유효성·종결 축은 ADR-0020 이 계약으로 확정.
+      원장 적재는 구현 ④-c-2a, replay 경로 구현은 ④-c-2b — see ADR-0020)
 
 DLQ 토픽:
   - 위 8-1 표의 모든 토픽에 대해 <topic>.dlq 를 둡니다 (producer 가 NewTopic 소유).

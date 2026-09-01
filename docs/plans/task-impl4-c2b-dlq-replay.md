@@ -2,7 +2,7 @@
 
 > 형제: **④-c-2a (원장 적재)** — `task-impl4-c2a-dlq-ledger.md`
 > 부모: `docs/plans/task-impl4-choreography-saga.md` P9·P10
-> 상태: **🔲 계획 미착수** — 아래 §2 의 결정 사항이 ADR 로 확정된 뒤 `/plan` 을 다시 돌린다
+> 상태: **🔲 계획 미착수** — §2 의 결정은 **[ADR-0020](../adr/0020-dlq-replay-contract.md) 이 확정했다(2026-09-01)**. 남은 착수 조건은 §4 참조.
 > 근거: ④-c-2a 계획 리뷰 3라운드 audit — `task-impl4-c2a-dlq-ledger.audit.md`
 
 ---
@@ -19,7 +19,14 @@
 
 ---
 
-## 2. ADR 이 확정해야 할 것
+## 2. ADR 이 확정해야 할 것 → **ADR-0020 이 확정함 (2026-09-01)**
+
+> **아래 D1~D7 은 결정 대기 목록이었고, 지금은 [ADR-0020](../adr/0020-dlq-replay-contract.md) 이 정본이다.**
+> 계획 검증 중 **D8**(replay 발행 권한 예외 — 소비 경로 원장의 `origin_topic` 은 정의상 남의 토픽이라
+> `1 topic = 1 producer` 를 필연적으로 넘는다)이 추가로 드러나 함께 확정했다.
+> 아래 항목별 대응: D1→§D1 · D2→§D2 · D3→§D3 · D4→§D4·§D5-1 · D5→§D5-2 · D6→§D6 · D7→§D7 · (신규)D8→§D8.
+> **본문은 결정 당시의 문제 진술로 보존한다** — 무엇이 왜 ADR 사안이었는지의 기록이다.
+
 
 ### D1. 재발행 보장 수준
 - 일반 DB outbox 로는 **exactly-once 발행이 불가능**하다. `send().get()` 후 상태 저장 사이의 crash window 는 구조적이다.
@@ -73,7 +80,10 @@ new ProducerRecord<>(event.getEventType(), null, event.getAggregateId(), event.g
 
 ## 4. 착수 조건
 
-1. §2 의 D1~D7 을 ADR 로 확정 (D2 는 **ADR-0012 D1 개정** 여부를 포함)
+1. ~~§2 의 D1~D7 을 ADR 로 확정~~ → **✅ 충족** ([ADR-0020](../adr/0020-dlq-replay-contract.md), 2026-09-01).
+   D2 는 **ADR-0012 D1 개정**으로 확정(notification outbox 신설), 신규 D8 이 **ADR-0012 D4 부분 무효화**를 동반한다.
 2. 브로커 retention/compaction 을 **실제로 설정**하고 그 값을 계약으로 고정 (D4 선결)
-3. ④-c-2a 머지 완료
-4. 그 후 `/plan task-impl4-c2b-dlq-replay` 재실행
+   → **값과 규칙은 ADR-0020 §D4 가 확정**했다(선언·`modify-topic-configs`·안전여유 fail-fast·용량은 best-effort 강등).
+   **코드 적용은 PR ④-c-2b-0 소관으로 분리** — `docs/plans/task-adr0020-dlq-replay-contract.md` §3 P4.
+3. ~~④-c-2a 머지 완료~~ → **✅ 충족** ([#90](https://github.com/Kimgyuilli/PeakCart/pull/90))
+4. **남은 조건**: 위 2 의 코드 적용(④-c-2b-0) 후 `/plan task-impl4-c2b-dlq-replay` 재실행

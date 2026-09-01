@@ -1,6 +1,6 @@
 # ADR-0012: Phase 4 DB-per-service + 이벤트/Saga 계약
 
-- **Status**: Partially Superseded by [ADR-0016](./0016-reservation-and-payment-table-model.md)
+- **Status**: Partially Superseded by [ADR-0016](./0016-reservation-and-payment-table-model.md), [ADR-0020](./0020-dlq-replay-contract.md)
 
 > **무효화 범위 (ADR-0016)**: 본 ADR 의 **D1 소유표 중 두 행**과 **D3 재고 예약 모델**이 구현 실제와 달라 ADR-0016 으로 재기록된다.
 > - **D1 Product 행**: `inventories(+예약 컬럼, D3)` → 별도 **`stock_reservations`** 테이블(예약 원장)을 채택. inventories 에 예약 컬럼을 두지 않음.
@@ -8,7 +8,13 @@
 > - **D3 예약 모델**: "재검토" 대안(별도 reservation 테이블)이 strangler-1(#56)에서 채택됨.
 > 그 외 본 ADR 의 결정(DB-per-service 경계 원칙·교차 FK 제거·이벤트/Saga 계약 D2/D4·retention floor D5)은 유효하다.
 
-- **Decided**: 2026-06-14 (Proposed) → 2026-06-14 (Accepted) → 2026-06-22 (Partially Superseded by ADR-0016)
+> **무효화 범위 (ADR-0020, DLQ replay 계약)**: **D1 Notification 행**과 **D4 producer 컬럼의 함의 일부**가 바뀐다.
+> - **D1 Notification 행**: `processed_events` → **`processed_events, outbox_events`**. replay 재발행을 지휘하려면 Notification 도 outbox 를 소유해야 한다(ADR-0020 §D2).
+> - **D4 producer 컬럼**: producer 지정은 두 가지를 함께 함의했다 — ① *이 토픽의 이벤트를 만드는 서비스* ② *이 토픽에 write 하는 유일한 서비스*. **①은 유효하고, ②만 무효화된다** — DLQ replay 는 원장 소유 서비스가 남의 토픽에 기록된 레코드를 재전달하므로 ②를 깬다(ADR-0020 §D8). 재전달의 fence(주체·목적지 토픽/파티션·byte-for-byte 동일·payload 변경 금지)는 ADR-0020 §D8-3 이 정한다.
+> - **D5 는 무효화되지 않고 refine 된다**: "TTL 이후 수동 재처리는 새 `eventId` 발행" 대안은 **`replay_deadline` 밖 사건의 운영 우회로 유효하게 남되**, 그것은 ADR-0020 의 replay 가 아니며 원장 상태로 추적되지 않는다(ADR-0020 §D5-3).
+> 그 외 D2·D3·D4 의 나머지 결정과 D5 의 retention floor 는 유효하다.
+
+- **Decided**: 2026-06-14 (Proposed) → 2026-06-14 (Accepted) → 2026-06-22 (Partially Superseded by ADR-0016) → 2026-09-01 (Partially Superseded by ADR-0020: D1 Notification 행·D4 producer 함의 ②)
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: Phase 4 (MSA 분리)
 

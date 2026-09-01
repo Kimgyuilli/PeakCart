@@ -1,9 +1,11 @@
 package com.peekcart.product.infrastructure.kafka;
 
 import com.peekcart.global.kafka.FixedSequenceBackOff;
+import com.peekcart.global.kafka.KafkaTopicConfigs;
 import com.peekcart.global.kafka.MdcPayloadExtractor;
 import com.peekcart.global.kafka.MdcRecordInterceptor;
 import com.peekcart.global.port.SlackPort;
+import com.peekcart.global.retention.IdempotencyRetentionProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -34,15 +36,32 @@ public class ProductKafkaConfig {
 
     private final SlackPort slackPort;
 
+    /**
+     * 토픽 config 의 값 출처 (ADR-0020 §D4-1).
+     * {@code retention.ms} 는 멱등 창 계산의 입력({@code floor.kafka-topic-retention})과
+     * <b>같은 출처</b>에서 유도한다 — 두 곳에 따로 적으면 갈라진다.
+     */
+    private final IdempotencyRetentionProperties retentionProperties;
+
+    private java.util.Map<String, String> businessConfigs() {
+        return KafkaTopicConfigs.business(retentionProperties.getFloor().getKafkaTopicRetention(),
+                retentionProperties.topicMessageTimestampBeforeMax());
+    }
+
+    private java.util.Map<String, String> dlqConfigs() {
+        return KafkaTopicConfigs.dlq(retentionProperties.getFloor().getKafkaTopicRetention(),
+                retentionProperties.topicMessageTimestampBeforeMax());
+    }
+
     // --- 발행 토픽(producer-owns-topic) — Payment peel 로 root 소멸 후 자기 토픽 생성 책임 승계 ---
     @Bean
     public NewTopic productUpdatedTopic() {
-        return TopicBuilder.name("product.updated").partitions(3).replicas(1).build();
+        return TopicBuilder.name("product.updated").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     @Bean
     public NewTopic stockReservationResultTopic() {
-        return TopicBuilder.name("stock.reservation.result").partitions(3).replicas(1).build();
+        return TopicBuilder.name("stock.reservation.result").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     /**
@@ -51,22 +70,22 @@ public class ProductKafkaConfig {
      */
     @Bean
     public NewTopic stockCompensationRequestedTopic() {
-        return TopicBuilder.name("stock.compensation.requested").partitions(3).replicas(1).build();
+        return TopicBuilder.name("stock.compensation.requested").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     @Bean
     public NewTopic productUpdatedDlqTopic() {
-        return TopicBuilder.name("product.updated.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("product.updated.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean
     public NewTopic stockReservationResultDlqTopic() {
-        return TopicBuilder.name("stock.reservation.result.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("stock.reservation.result.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean
     public NewTopic stockCompensationRequestedDlqTopic() {
-        return TopicBuilder.name("stock.compensation.requested.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("stock.compensation.requested.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean

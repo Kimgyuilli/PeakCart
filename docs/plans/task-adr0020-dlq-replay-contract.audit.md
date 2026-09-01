@@ -120,3 +120,43 @@
 - 갱신: `docs/TASKS.md` ④ 행의 ④-c-2b 항목(ADR-0020 확정·PR 링크·남은 P4) · `docs/progress/PHASE4.md` 신규 절
 - 계획서 체크박스: P1·P2·P3·P5·P6·P7·P8 = `[x]`, **P4 는 의도적 미체크**(§5 PR 분할상 ④-c-2b-0 소관)
 - 머지하지 않았다
+
+---
+
+## 2026-09-01 — P4 (PR ④-c-2b-0) diff 리뷰 라운드 1
+- 항목: 5건 (P0:0, P1:3, P2:2) · 처리: 반영 5건 / 기각 0건
+- **내 검증 도구가 자기대조였다 (P1 #2)** — `KafkaTopicConfigsTest` 가 SUT 상수를 그대로 기대값으로
+  읽어, 업무 8/4 → 10/2 MiB 로 바꿔도 "절반 관계"·"총 420 MiB" 가 모두 유지되어 green 이었다.
+  ADR 본문 값을 테스트에 **리터럴로 다시 적어 독립 정본**을 만들었다. 변이 실측으로 red 확인.
+- **budget 0 이면 규칙이 무력화된다 (P1 #3)** — `@NotNull` 만 걸어서 `clockSkewBudget=0`·
+  `cleanupSafetyBudget=0` 이면 `required == dlqReplayWindow` 가 되어 **D4-3 이 제거하려던
+  7d == 7d 가 다시 부팅**된다. 양수 검증(`isBudgetsPositive`) 추가.
+- **메커니즘 테스트가 YAML 배선을 증명하지 못했다 (P1 #1)** — 테스트가 `setModifyTopicConfigs()` 를
+  직접 부르므로 base YAML 의 키를 지워도 green. 서비스별 YAML 배선 테스트를 따로 추가했다.
+- **리플렉션이 전수가 아니었다 (P2 #4)** — `@Bean` 여부를 안 보고 `getDeclaredMethods` 만 썼다.
+  `@Bean` 확인 + `getMethods()` 로 바꾸고, 수집기를 우회하는 `KafkaAdmin.NewTopics` 묶음 선언을
+  금지하는 테스트를 추가했다. 놓치는 형태를 javadoc 에 명시.
+- **기준선이 7종 중 4종만 단언했다 (P2 #5)** — 업무·dlq 각각 생성해 7종 값 + 정확한
+  `ConfigSource(DEFAULT_CONFIG)` 를 전부 단언하도록 확장. 실측 기본값:
+  `retention.ms=7d` · `cleanup.policy=delete` · `retention.bytes=-1` · `segment.bytes=1GiB` ·
+  `segment.ms=7d` · `message.timestamp.type=CreateTime` · `before.max.ms=Long.MAX_VALUE`
+- **변이 실측 4종 전부 red → 복원 후 green**:
+  (a) 토픽 하나에서 `.configs(...)` 제거 → 계약 테스트 3건 FAILED
+  (b) 안전여유 규칙을 등호 허용으로 되돌림 → validator 3건 FAILED
+  (c) YAML 에서 `modify-topic-configs` 제거 → 배선 테스트 FAILED
+  (d) 8/4 → 10/2 MiB(합 동일) → 독립 정본 대조 FAILED
+- 계획 이탈 1건(구현 전 계획·ADR 을 먼저 수정): `message.timestamp.before.max.ms` 를 리터럴 8d 가
+  아니라 **`app.idempotency.retention` 에서 유도**. 두 곳에 적으면 floor 변경 시 갈라진다.
+- raw: .cache/codex-reviews/diff-adr0020-p4-r1.json
+
+## 2026-09-01 — /ship (P4 · PR ④-c-2b-0)
+- PR: https://github.com/Kimgyuilli/PeekCart/pull/99 (신규, base=main)
+- #98 머지 후 origin/main 에 리베이스 — 스택 해소
+- consistency precheck: **ok** (warnings 0)
+- 커밋: 3개 — `feat(kafka)` / `test(kafka)` / `docs(adr0020)`. **분류 분리 지켰다**
+  (직전 /ship 의 미충족 7번 "커밋 분류 혼재" 재발 방지 — push 전에 re-split 했다)
+- 검증: **764 테스트 0 실패**(5모듈) · `hpx_plan_lint` OK · 변이 4종 red 실측
+- 계획서 체크박스: **P1~P8 전부 [x]**
+- 갱신: `docs/TASKS.md` ④ 행 ④-c-2b-0 항목 · `docs/progress/PHASE4.md` 신규 절
+- 미충족: diff 리뷰 2R 미실행 · PVC 안전성 미증명 · 운영 클러스터 미적용
+- 머지하지 않았다

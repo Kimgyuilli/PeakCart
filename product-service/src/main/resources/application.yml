@@ -12,6 +12,10 @@ spring:
     enabled: true
     locations: classpath:db/migration
   kafka:
+    # ADR-0020 D4-1 — NewTopic 선언만으로는 **기존** 토픽 config 가 바뀌지 않는다
+    # (KafkaAdmin.modifyTopicConfigs 기본값 false). 동작 규약이라 base 소유(ADR-0007).
+    admin:
+      modify-topic-configs: true
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -79,7 +83,10 @@ app:
       sweeper-batch-size: 200
   # processed_events 멱등성 보존 정책 (ADR-0012 D5 · 구현 ② PR3) — 동작 정책이므로 base 소유(ADR-0007).
   idempotency:
-    retention: 7d          # floor 4창 max(=7d) 이상 — 미만이면 부팅 실패(fail-fast)
+    retention: 9d          # floor 4창 max(7d) 이상 + ADR-0020 D4-3 replay 안전여유(dlq-replay-window 7d + clock-skew 5m + cleanup-safety 1d = 8d 5m) 이상 — 미만이면 부팅 실패
+    # ADR-0020 D4-3 — 등호 허용(7d==7d)은 창 끝을 보장하지 못한다. 여유를 설정으로 강제한다.
+    clock-skew-budget: 5m       # 서비스 간 시계 오차 (processed_at 이 각 서비스 로컬 시각)
+    cleanup-safety-budget: 1d   # 정리 잡이 일 1회라 삭제가 최대 1일 늦는다
     floor:
       kafka-topic-retention: 7d
       max-consumer-downtime: 24h

@@ -1,9 +1,11 @@
 package com.peekcart.payment.infrastructure.kafka;
 
 import com.peekcart.global.kafka.FixedSequenceBackOff;
+import com.peekcart.global.kafka.KafkaTopicConfigs;
 import com.peekcart.global.kafka.MdcPayloadExtractor;
 import com.peekcart.global.kafka.MdcRecordInterceptor;
 import com.peekcart.global.port.SlackPort;
+import com.peekcart.global.retention.IdempotencyRetentionProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -33,47 +35,64 @@ public class PaymentKafkaConfig {
 
     private final SlackPort slackPort;
 
+    /**
+     * 토픽 config 의 값 출처 (ADR-0020 §D4-1).
+     * {@code retention.ms} 는 멱등 창 계산의 입력({@code floor.kafka-topic-retention})과
+     * <b>같은 출처</b>에서 유도한다 — 두 곳에 따로 적으면 갈라진다.
+     */
+    private final IdempotencyRetentionProperties retentionProperties;
+
+    private java.util.Map<String, String> businessConfigs() {
+        return KafkaTopicConfigs.business(retentionProperties.getFloor().getKafkaTopicRetention(),
+                retentionProperties.topicMessageTimestampBeforeMax());
+    }
+
+    private java.util.Map<String, String> dlqConfigs() {
+        return KafkaTopicConfigs.dlq(retentionProperties.getFloor().getKafkaTopicRetention(),
+                retentionProperties.topicMessageTimestampBeforeMax());
+    }
+
     // --- 발행 토픽(producer-owns-topic) ---
     @Bean
     public NewTopic paymentCompletedTopic() {
-        return TopicBuilder.name("payment.completed").partitions(3).replicas(1).build();
+        return TopicBuilder.name("payment.completed").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     @Bean
     public NewTopic paymentFailedTopic() {
-        return TopicBuilder.name("payment.failed").partitions(3).replicas(1).build();
+        return TopicBuilder.name("payment.failed").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     @Bean
     public NewTopic paymentRequestedTopic() {
-        return TopicBuilder.name("payment.requested").partitions(3).replicas(1).build();
+        return TopicBuilder.name("payment.requested").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     /** 환불 결과 회신 (ADR-0018 D1). Payment 가 발행하고 Order·Product·Notification 이 소비한다. */
     @Bean
     public NewTopic paymentRefundedTopic() {
-        return TopicBuilder.name("payment.refunded").partitions(3).replicas(1).build();
+        return TopicBuilder.name("payment.refunded").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     // --- 발행 토픽 DLQ ---
     @Bean
     public NewTopic paymentCompletedDlqTopic() {
-        return TopicBuilder.name("payment.completed.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("payment.completed.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean
     public NewTopic paymentFailedDlqTopic() {
-        return TopicBuilder.name("payment.failed.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("payment.failed.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean
     public NewTopic paymentRequestedDlqTopic() {
-        return TopicBuilder.name("payment.requested.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("payment.requested.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean
     public NewTopic paymentRefundedDlqTopic() {
-        return TopicBuilder.name("payment.refunded.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("payment.refunded.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     // --- Error Handler + DLQ ---

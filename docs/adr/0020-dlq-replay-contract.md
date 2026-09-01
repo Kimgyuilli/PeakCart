@@ -105,7 +105,7 @@ replay 를 계획서 수정만으로 닫을 수 없었던 이유는, **같은 �
 | `segment.bytes` | **4 MiB** | **2 MiB** | **필수다.** `retention.bytes` 는 **닫힌 세그먼트만** 지우고 active segment 는 그 위에 얹힌다. 이미지 기본값이 **1 GiB**(`/opt/kafka/config/kraft/server.properties:128`)라 선언하지 않으면 파티션 하나가 PVC 전체를 넘길 수 있다 |
 | `segment.ms` | **1d** | **1d** | 유입이 적어 크기로 롤되지 않는 파티션도 세그먼트를 닫아 삭제 대상이 되게 한다 |
 | `message.timestamp.type` | **CreateTime** | (동일) | **replay 가 원본 timestamp 를 싣는 계약(§D3)의 전제.** `LogAppendTime` 이면 broker 가 append 시각으로 **덮어써** 안전창 계산이 오염된다. 기본값이 `CreateTime` 이지만 **의존하는 순간 계약이 되어야** 한다 |
-| `message.timestamp.before.max.ms` | **≥ `dlq-replay-window` + `clockSkewBudget`** | (동일) | 과거 timestamp 를 실은 replay 발행이 **거부되지 않도록**. 짧으면 적격 replay 가 `PUBLISH_FAILED` 가 된다 |
+| `message.timestamp.before.max.ms` | **`app.idempotency.retention` 에서 유도**(현재 9d) | (동일) | 과거 timestamp 를 실은 replay 발행이 **거부되지 않도록**. 짧으면 적격 replay 가 `PUBLISH_FAILED` 가 된다. 하한은 `dlq-replay-window + clockSkewBudget`(7d 5m)이며 §D4-3 의 fail-fast 가 `retention` 이 그 하한 이상임을 이미 강제하므로, **리터럴을 따로 두지 않고 `retention` 에서 유도**한다 — 두 곳에 적으면 floor 가 바뀔 때 갈라진다 |
 
 **산정식** — 파티션의 최악 점유는 `retention.bytes` 가 아니라 **`retention.bytes + segment.bytes`** 다. `retention.bytes` 는 **닫힌 세그먼트만** 삭제 대상으로 삼고 active segment 는 그 위에 쌓이기 때문이다.
 

@@ -1,9 +1,11 @@
 package com.peekcart.order.infrastructure.kafka;
 
 import com.peekcart.global.kafka.FixedSequenceBackOff;
+import com.peekcart.global.kafka.KafkaTopicConfigs;
 import com.peekcart.global.kafka.MdcPayloadExtractor;
 import com.peekcart.global.kafka.MdcRecordInterceptor;
 import com.peekcart.global.port.SlackPort;
+import com.peekcart.global.retention.IdempotencyRetentionProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -33,15 +35,32 @@ public class OrderKafkaConfig {
 
     private final SlackPort slackPort;
 
+    /**
+     * 토픽 config 의 값 출처 (ADR-0020 §D4-1).
+     * {@code retention.ms} 는 멱등 창 계산의 입력({@code floor.kafka-topic-retention})과
+     * <b>같은 출처</b>에서 유도한다 — 두 곳에 따로 적으면 갈라진다.
+     */
+    private final IdempotencyRetentionProperties retentionProperties;
+
+    private java.util.Map<String, String> businessConfigs() {
+        return KafkaTopicConfigs.business(retentionProperties.getFloor().getKafkaTopicRetention(),
+                retentionProperties.topicMessageTimestampBeforeMax());
+    }
+
+    private java.util.Map<String, String> dlqConfigs() {
+        return KafkaTopicConfigs.dlq(retentionProperties.getFloor().getKafkaTopicRetention(),
+                retentionProperties.topicMessageTimestampBeforeMax());
+    }
+
     // --- 발행 토픽(producer-owns-topic) ---
     @Bean
     public NewTopic orderCreatedTopic() {
-        return TopicBuilder.name("order.created").partitions(3).replicas(1).build();
+        return TopicBuilder.name("order.created").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     @Bean
     public NewTopic orderCancelledTopic() {
-        return TopicBuilder.name("order.cancelled").partitions(3).replicas(1).build();
+        return TopicBuilder.name("order.cancelled").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     /**
@@ -49,23 +68,23 @@ public class OrderKafkaConfig {
      */
     @Bean
     public NewTopic orderCompensationRequestedTopic() {
-        return TopicBuilder.name("order.compensation.requested").partitions(3).replicas(1).build();
+        return TopicBuilder.name("order.compensation.requested").partitions(3).replicas(1).configs(businessConfigs()).build();
     }
 
     // --- 발행 토픽 DLQ ---
     @Bean
     public NewTopic orderCreatedDlqTopic() {
-        return TopicBuilder.name("order.created.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("order.created.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean
     public NewTopic orderCancelledDlqTopic() {
-        return TopicBuilder.name("order.cancelled.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("order.cancelled.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     @Bean
     public NewTopic orderCompensationRequestedDlqTopic() {
-        return TopicBuilder.name("order.compensation.requested.dlq").partitions(1).replicas(1).build();
+        return TopicBuilder.name("order.compensation.requested.dlq").partitions(1).replicas(1).configs(dlqConfigs()).build();
     }
 
     // --- Error Handler + DLQ ---

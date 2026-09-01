@@ -11,7 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # ── lint: 정책 검사. Java/Gradle 불요라 테스트와 병렬로 즉시 시작한다 ──────────────
+  lint:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,13 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-          cache: gradle
-
-      - run: chmod +x gradlew
 
       - name: Install lint dependencies
         run: |
@@ -101,42 +95,237 @@ jobs:
             exit 1
           fi
 
-      - run: ./gradlew build --no-daemon
+
+      # shard 커버리지 — settings.gradle 의 모듈이 test 매트릭스에 정확히 1회 나타나는가.
+      # 누락되면 그 모듈 테스트가 조용히 사라지고, 중복되면 merge-multiple(last-writer-wins)이
+      # 증적을 덮는다. dockerfile-module-sync-lint 와 같은 종류의 실패를 막는다.
+      - name: CI test matrix coverage lint
+        run: |
+          bash scripts/ci-test-matrix-lint.sh
+          bash scripts/ci-test-matrix-lint.sh --self-test
+
+  # ── test: 모듈 shard 매트릭스. 분해 전 단일 build 는 32m23s 였다(run 33314020601) ──
+  # shard→모듈 매핑의 **단일 정본은 matrix.include[].modules** 다. Gradle 명령과
+  # ci-test-matrix-lint 가 같은 필드를 읽는다 — 실행식과 검증식이 갈리면 lint 가
+  # 자기 복사본만 보는 false-green 이 된다.
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # @Container 선언은 서비스에 몰려 있다(platform 0 / user 8 / notification 18 /
+          # payment 36 / product 48 / order 55). platform 은 light 모듈을 묶어 러너 기동과
+          # 공통 의존 컴파일 중복을 줄인다.
+          - shard: platform
+            modules: common peekcart-common-auth peekcart-common-observability internal-token-contract gateway
+          - shard: user-service
+            modules: user-service
+          - shard: notification-service
+            modules: notification-service
+          - shard: payment-service
+            modules: payment-service
+          - shard: product-service
+            modules: product-service
+          - shard: order-service
+            modules: order-service
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - run: chmod +x gradlew
+
+      # :module:build = assemble + check. test 만 돌리면 bootJar/jar 검증을 잃는다.
+      # 실패하면 **그대로 실패시킨다** — job 의 red 가 "이 shard 가 깨졌다" 는 신호다.
+      # 종료코드를 스텝 간에 나르지 않는다(단일 Gradle 호출에 모듈별 rc 는 존재하지 않는다).
+      - name: Build & test shard
         env:
           SPRING_PROFILES_ACTIVE: test
+        run: |
+          TASKS=""
+          for m in ${{ matrix.modules }}; do TASKS="$TASKS :${m}:build"; done
+          echo "shard=${{ matrix.shard }} tasks=$TASKS"
+          ./gradlew $TASKS --no-daemon --console=plain
 
-      # saga 계약 매트릭스 게이트 (계획 P11~P15).
-      # **build 뒤**에 둔다 — JUnit XML 이 있어야 --jvm-evidence 가 대조할 것이 생긴다.
-      # required-ID 정본은 lint 안에 있으므로 매트릭스에서 행을 지워도 통과하지 않는다(N4).
-      - name: saga contract matrix gate (structure + jvm evidence)
-        if: always()
+      # upload-artifact 는 매치된 파일의 **최소 공통 조상** 기준 상대 경로로 저장한다.
+      # `<module>/build/test-results/**` 를 그대로 올리면 그 조상 아래만 남아 gate 에서
+      # 배치가 복원되지 않는다. staging 을 조상으로 만들어야 `<module>/build/...` 가 보존된다.
+      - name: Stage results
+        if: ${{ !cancelled() }}
+        run: |
+          for m in ${{ matrix.modules }}; do
+            for d in test-results reports; do
+              [ -d "${m}/build/${d}" ] || continue   # 무테스트 모듈은 산출물이 없다(정상)
+              mkdir -p "staging/${m}/build"
+              cp -R "${m}/build/${d}" "staging/${m}/build/${d}"
+            done
+          done
+          find staging -type f | head -5 || true
+
+      # 이름에 run_attempt 를 넣지 않는다 — "Re-run failed jobs" 는 실패 job 만 재실행하므로
+      # 성공 shard 는 이전 attempt 이름으로 남는다. attempt 한정이면 gate 가 1개만 찾는다.
+      # v4 artifact 는 immutable 이라 재실행 충돌은 overwrite 로 푼다.
+      - name: Upload shard results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-results-${{ matrix.shard }}
+          path: staging/**
+          overwrite: true
+          if-no-files-found: error
+
+  # ── guards: 루트 프로젝트의 check 에 걸린 가드 5종 ────────────────────────────────
+  # `./gradlew check` 는 전 모듈 check 를 다시 돌린다. 루트 `:build` 로 한정한다.
+  # 다만 가드가 전 서비스 :classes 를 dependsOn 하므로 이 job 은 전 배포 모듈의
+  # **main 컴파일을 수행**한다(test 제외) — shard 들과 중복이다.
+  guards:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - run: chmod +x gradlew
+
+      # tee 가 필수다 — 이전 스텝의 콘솔 출력은 다음 셸에서 파일로 읽을 수 없다.
+      - name: Root build (guards)
+        run: |
+          set -o pipefail
+          ./gradlew :build --no-daemon --console=plain 2>&1 | tee "$RUNNER_TEMP/guards.log"
+
+      # 가드가 UP-TO-DATE 로 건너뛰면 "도는 것처럼 보이지만 안 도는" 상태가 된다.
+      # 패턴 판정은 lint 로 위임한다 — 가드 출력은 "assertX: <내용> OK (설명)" 형태라
+      # 콜론 바로 뒤에 OK 가 오지 않는 것이 있고(build.gradle:96 은 모듈 목록을 낀다),
+      # self-test 가 실제 5종 출력으로 그 패턴을 고정한다.
+      - name: Assert guards actually ran
+        if: ${{ !cancelled() }}
+        run: bash scripts/ci-test-matrix-lint.sh --verify-guards "$RUNNER_TEMP/guards.log"
+
+      # 루트는 소스 없는 aggregator 라 build/reports 생성이 보장되지 않는다(bootJar/jar 비활성).
+      # report 를 필수로 걸면 깨끗한 실행에서도 upload 가 실패해 guards→gate→images 가
+      # false-red 가 된다. 항상 생기는 guards.log 를 함께 담아 **artifact 존재만** 보장하고,
+      # report 자체는 있으면 보존한다(ADR-0011 §D4).
+      - name: Stage root evidence
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p root-staging/build
+          cp "$RUNNER_TEMP/guards.log" root-staging/guards.log 2>/dev/null || \
+            echo "guards.log 부재" > root-staging/guards.log
+          # build/ 경로 성분을 보존해야 ADR-0011 §D4 의 `**/build/reports/` 계약이 유지된다.
+          [ -d build/reports ] && cp -R build/reports root-staging/build/reports || true
+          find root-staging -type f | head -5
+
+      - name: Upload root evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: root-reports
+          path: root-staging/**
+          overwrite: true
+          if-no-files-found: error
+
+  # ── gate: saga 계약 매트릭스 + 증적 통합 ────────────────────────────────────────
+  # guards 를 needs 에 넣는 이유: 루트 report artifact 를 소비한다(병렬이면 아직 없다).
+  gate:
+    needs: [test, guards]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lint dependencies
+        if: ${{ !cancelled() }}
+        run: python3 -m pip install --user pyyaml
+
+      # merge-multiple 을 쓰지 않는다 — 같은 상대 경로에서 last-writer-wins 라 한 모듈이
+      # 두 shard 에 들어가면 증적이 조용히 덮인다(P6 이 정적으로 막지만, 업로드 이후의
+      # 충돌·변조는 못 본다). artifact 별로 받아 충돌을 먼저 검출하고 병합한다.
+      - name: Download shard results
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-results-*
+          path: _artifacts
+
+      # 충돌 0 을 확인한 뒤 `<module>/build/...` 배치로 병합한다. 이 배치라야 saga lint 의
+      # 기본 glob(./*/build/test-results/test)이 로컬과 같게 동작한다.
+      - name: Merge shard artifacts (collision-checked)
+        if: ${{ !cancelled() }}
+        run: bash scripts/ci-test-matrix-lint.sh --merge-artifacts _artifacts
+
+      - name: Download root reports
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@v4
+        with:
+          name: root-reports
+          path: root-evidence
+
+      # 4-a. 기대 목록은 관측이 아니라 **정적 매핑**에서 온다 — 관측값 0 을 기록하면
+      # "정상 무테스트" 와 "테스트 소실" 이 같아진다. 이 검사가 실패하면 아래 증적 대조의
+      # "증적 없음" 과 **다른 메시지**로 끝난다(원인 오진 방지).
+      - name: Verify artifact layout
+        id: layout
+        if: ${{ !cancelled() }}
+        run: bash scripts/ci-test-matrix-lint.sh --verify-layout
+
+      # 4-b. 배치가 온전할 때만 전체 증적 대조. 배치가 깨졌으면 결측 22행을 대량 출력하지 않는다.
+      - name: saga contract matrix — jvm evidence
+        if: ${{ !cancelled() && steps.layout.outcome == 'success' && needs.test.result == 'success' }}
+        run: |
+          SAGA_COMMIT_SHA="${GITHUB_SHA}" bash scripts/saga-contract-matrix-lint.sh --jvm-evidence
+
+      # shard 결과와 무관한 계약들 — 배치가 깨져도 항상 돈다.
+      - name: Contract self-tests (stack-independent)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/saga-contract-matrix-lint.sh --structure
           bash scripts/saga-contract-matrix-lint.sh --self-test
-          SAGA_COMMIT_SHA="${GITHUB_SHA}" bash scripts/saga-contract-matrix-lint.sh --jvm-evidence
-          # 시나리오 실행 순서 계약 — 스택이 필요 없어 여기서 돈다(계획 P10).
           bash scripts/saga-e2e-smoke.sh --self-test
-          # E2E 격리·구독 정본 계약 (스택 무관)
           bash scripts/e2e-network-contract-lint.sh --self-test
           bash scripts/kafka-subscription-contract-lint.sh --self-test
 
+      # ADR-0011 §D4 — CI test-report artifact path 를 **/build/reports/ 로 일반화.
+      # 모듈 test-results · 모듈 reports · 루트 reports 세 트리를 모두 담는다.
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ !cancelled() }}
         with:
           name: test-reports
-          # 멀티모듈이라 루트 build/reports 만 올리면 **어느 모듈도** 담기지 않는다.
           path: |
-            build/reports/
+            root-evidence/**
             */build/test-results/**
             */build/reports/**
+          overwrite: true
+          if-no-files-found: warn
 
-  # [PR3a] 서비스별 이미지 — 단일 Dockerfile + ARG SERVICE 매트릭스.
-  # build/smoke(PR+push, contents:read 만) 와 publish(main push 한정, packages:write) 를 **분리**한다.
-  # 권한은 job 단위라, PR 의 build/smoke 가 write 토큰 범위에서 돌지 않게 하려면 job 을 나눠야 한다.
-  # 중복 빌드 회피: build/smoke 가 smoke 통과한 *바로 그 이미지* 를 docker save → artifact 로 넘기고,
-  # publish 가 load 후 push 한다(재빌드/divergence 없음).
+      # gate 는 !cancelled() 라 선행 실패 뒤에도 진단을 위해 돈다. 그 상태를 결과에 반영하지
+      # 않으면 **테스트가 빨간데 gate 가 초록**이 되고, images(needs: [lint, gate])가 그대로
+      # 실행돼 e2e·publish 까지 간다. 진단·업로드를 마친 뒤 마지막에 전파한다.
+      - name: Propagate upstream failure
+        if: ${{ !cancelled() && (needs.test.result != 'success' || needs.guards.result != 'success') }}
+        run: |
+          echo "::error::선행 job 실패 — test=${{ needs.test.result }} guards=${{ needs.guards.result }}"
+          exit 1
+
   images:
-    needs: build
+    needs: [lint, gate]
     runs-on: ubuntu-latest
     permissions:
       contents: read

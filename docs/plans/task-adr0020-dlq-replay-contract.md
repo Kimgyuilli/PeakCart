@@ -121,9 +121,9 @@
   - ① *발행 권한 규약의 **명시적 예외**(원장 소유 서비스가 자기 행에 대해서만)* / ② *producer 서비스 위임*
   - **예외의 fence 를 목적지까지 못박는다 (N14, §2.2-16)**: `destination_topic == origin_topic` · `destination_partition == 검증된 origin_partition` · `key`/`payload`/`eventId` 는 원본 레코드와 **byte-for-byte 동일** · `record_kind=REPLAY` 표식 · 소유 위반·목적지 변경 시 **발행 거부**
 
-- [ ] **P4.** **D4-a — 브로커 retention 계약을 실제로 고정** (*유일한 코드 변경*).
+- [x] **P4.** **D4-a — 브로커 retention 계약을 실제로 고정** (*유일한 코드 변경*).
   - **현재 실효값을 런타임 관측으로 확정**한다 — `AdminClient.describeConfigs` 로 **ADR-0020 §D4-1 이 계약화한 7개 config 전부**의 값과 `ConfigSource` 를 증적에 남긴다: `retention.ms` · `cleanup.policy` · `retention.bytes` · `segment.bytes` · `segment.ms` · `message.timestamp.type` · `message.timestamp.before.max.ms`
-  - 업무·`.dlq` 토픽 전부의 `NewTopic` 에 `.config(RETENTION_MS/CLEANUP_POLICY/RETENTION_BYTES)` 선언. **값은 ADR-0020 §D4-1 이 확정했다** — `retention.ms=7d`(업무·`.dlq` 동일) · `cleanup.policy=delete` · `retention.bytes` 업무 **8 MiB** · `.dlq` **4 MiB**/파티션 · `segment.bytes` **4/2 MiB** · `segment.ms` **1d** · `message.timestamp.type=CreateTime` · `message.timestamp.before.max.ms` **≥ 7d+5m → 선언값 8d** (도메인 토픽 정상상태 약 **420 MiB**, hard bound 아님; PVC 안전성 **미증명**). `retention.ms` 는 `app.idempotency.floor.kafka-topic-retention` 과 **같은 출처에서 유도**한다
+  - 업무·`.dlq` 토픽 전부의 `NewTopic` 에 `.config(RETENTION_MS/CLEANUP_POLICY/RETENTION_BYTES)` 선언. **값은 ADR-0020 §D4-1 이 확정했다** — `retention.ms=7d`(업무·`.dlq` 동일) · `cleanup.policy=delete` · `retention.bytes` 업무 **8 MiB** · `.dlq` **4 MiB**/파티션 · `segment.bytes` **4/2 MiB** · `segment.ms` **1d** · `message.timestamp.type=CreateTime` · `message.timestamp.before.max.ms` **= `app.idempotency.retention` 에서 유도**(현재 9d; 하한 7d 5m 은 §D4-3 fail-fast 가 강제) (도메인 토픽 정상상태 약 **420 MiB**, hard bound 아님; PVC 안전성 **미증명**). `retention.ms` 는 `app.idempotency.floor.kafka-topic-retention` 과 **같은 출처에서 유도**한다
   - **동작 변경 여부를 나눠 보고한다** — `retention.ms`/`cleanup.policy` 명문화는 **실효 불변**(이미 Apache 기본값), **`retention.bytes` 유한값은 동작 변경**(현재 `-1`)
   - **기존 토픽 반영 경로** — `spring.kafka.admin.modify-topic-configs=true`. ADR-0007 상 동작 규약이므로 **base 또는 Java Config**(프로파일 금지)
   - **미선언 config 의 처분**을 관측하고 acceptance 로 고정한다(§6 P4-4)

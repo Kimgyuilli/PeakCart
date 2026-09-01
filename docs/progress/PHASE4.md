@@ -1334,3 +1334,70 @@ MySQL 이 정하는 미정의 순서였고, 클라이언트가 `?sort=` 로 임�
 
 **다음**: ③ PR3d-b-2(GKE 세션) + PR4 관측성 S9, 또는 ④-c-2b DLQ replay(ADR 선행).
 
+
+---
+
+## ADR-0020 — DLQ replay 계약 (④-c-2b 선행) — 2026-09-01 — [#98](https://github.com/Kimgyuilli/PeakCart/pull/98)
+
+> ④-c-2a(#90) 이후 남은 "replay 경로 미구현" 의 **선행 ADR**. 문서 전용 PR 이며 코드 변경은 0이다
+> (P4 브로커 retention 적용은 후속 **④-c-2b-0**).
+
+### 원 계획의 전제가 절반 틀렸다
+
+`task-impl4-c2b-dlq-replay.md` §2 D4 는 "브로커에 `retention.ms`·`cleanup.policy` 가 **어디에도 설정돼 있지 않다**" 고 적었다.
+**선언 기준으로는 참이지만 실효 기준으로는 거짓이다** — `apache/kafka:3.8.1` 의 `/opt/kafka/config/kraft/server.properties`
+가 `log.retention.hours=168`(7일)이다. 즉 오늘도 사실상 7일 보존이며, 문제는 값이 아니라 **그것이 계약이 아니라는 것**이다.
+따라서 P4 는 *동작을 바꾸는 작업이 아니라 계약을 명문화하는 작업*이고, 이 구분을 흐리면 "설정했다" 는 완료 보고가
+**아무 것도 안 바뀐 채 성공처럼** 보인다.
+
+### 결정 하나가 늘었다 — D8
+
+D1~D7 은 원 계획이 세운 목록이다. 계획 검증에서 **소비 경로 원장의 `origin_topic` 은 정의상 남이 발행한 토픽**이라는
+사실이 드러났다 — order 의 소비 원장은 `payment.*`·`product.updated`·`stock.reservation.result` 뿐이고, 자기 발행 토픽의
+행은 quarantine 경로에만 생긴다. `1 topic = 1 producer` 를 replay 에 그대로 적용하면 replay 가능 집합이 quarantine 행으로
+축소되는데 그 행들은 금지 축 ②③ 때문에 오히려 금지 대상이라 **공집합이 된다.** 그래서 발행 권한 예외를 D8 로 세웠다.
+
+### 두 곳은 의도적으로 약하게 결정했다
+
+- **"7일 좌표 가용" 을 보장하지 않고 best-effort 로 뒀다.** 유입량 실측이 없고 PVC 1GiB 안전성도 증명되지 않는다 —
+  도메인 토픽만 정상상태 ~420 MiB 로 억제되고 `__consumer_offsets` 50파티션·KRaft metadata 는 bound 밖이다.
+- **그 420 MiB 도 hard bound 가 아니다.** retention 검사 주기·`file.delete.delay.ms`·index/timeindex·대형 batch 가
+  계산에 없다. 3R 지적을 받고 "bound" 주장을 철회하고 정상상태 목표치로 낮췄다.
+
+### 리뷰가 반증한 것 — 내 진술 5건
+
+1. **"quarantine 행은 정의상 `eventId` 판독 불가"** → 거짓. quarantine 조건은 `failed_consumer_group=='__unknown__'`
+   (`DlqOrigin:41-63`)이고 `eventId` 는 `DeadLetterRecorder:57` 이 group 과 **독립** 추출한다. 좌표 출처(`DlqOriginKind`)는
+   제3의 축 → 금지 축이 **6개 독립 조건**이 됐고, `origin_kind='DLQ_ORIGIN'` 행을 replay 하면 **`.dlq` 내용이 원본
+   토픽에 주입**되는 사고 경로가 드러났다
+2. **"replay 는 ADR-0011 producer-owns-topic 과 충돌"** → 오지목. ADR-0011 D2:71 은 `NewTopic` **프로비저닝 소유**다
+3. **"Kafka 트랜잭션이 exactly-once 발행 대안"** → 성립 안 함. DB↔Kafka 경계를 없애지 못한다
+4. **ADR-0018 을 refine 으로 둔 것** → **자기 판정기준 불일치.** §D8-4 는 "규칙에 예외를 내면 부분 무효화" 라고
+   판정해놓고 0018 만 제외했고, 근거로 쓴 "새 도메인 이벤트 한정" 은 **원문 `0018:49` 에 없는 말**이었다
+5. **용량 산정** → `retention.bytes` 를 파티션 상한처럼 썼는데 Kafka 는 **닫힌 세그먼트만** 지운다.
+   이미지 기본 `log.segment.bytes=1GiB` 직접 확인
+
+### 내가 만든 false-green 3건
+
+- **P4-4 를 "관측해서 사실대로 적으면 통과"** 로 설계했다 — 미선언 config 가 삭제되는 위험한 결과도 green
+- **축 A/B 분리를 선언으로만** 하고 단일 `status` 컬럼에서 재결합했다(`DeadLetterRecord:98-105`)
+- **반대 방향 false-green** — 자식 과다집계를 고치려 `root_record_id = id` 를 걸었는데 그 컬럼은 additive 라
+  ④-c-2a 가 적재한 **기존 행이 전부 NULL** 이다. 그대로면 기존 미결이 전량 탈락해 **backlog 가 0 으로 보인다**
+
+### 검증
+
+문서 전용(비-마크다운 변경 0)이라 `./gradlew test` 를 돌리지 않았다. `hpx_plan_lint` OK · 문서 배선 정적검사 5/5 ·
+ADR 상대링크 무결성 PASS · consistency precheck ok(warnings 0).
+
+### 미충족
+
+1. **리뷰 미수렴(양쪽)** — 계획 13→9→15, diff 7→6→7. 3R 잔여는 전부 ADR 문구·계약 정밀도이며 코드 산출물이 아니다.
+   실제 구현이 계약을 코드로 옮길 때 다시 검증된다 — 특히 `root_record_id` 전환 계약과 상관 대조 트랜잭션 경계
+2. **P4 미이행(의도)** — 브로커 retention 코드 적용은 ④-c-2b-0
+3. **PVC 1GiB 안전성 미증명** · **`original_timestamp` NULL 비율 미측정**(네 DB 모두 nullable 이고 현
+   `DlqIntegrationTest` 가 timestamp 저장을 단언하지 않는다) — 둘 다 2b 산출물
+4. **`retention.bytes` 유한값은 동작 변경** (현재 `-1`). `retention.ms`/`cleanup.policy` 명문화만 실효 불변
+5. **커밋 분류 혼재** — `a4ddf9d` 가 ADR 본문·계획서·runbook·Layer 1 을 한 커밋에 담았다. 스킬 규칙에서 벗어나며
+   이력 재작성 대신 사실대로 남겼다
+
+**다음**: ④-c-2b-0 (P4 브로커 retention 코드) → ④-c-2b (replay 구현). 또는 ③ PR3d-b-2(GKE 세션) + PR4 관측성 S9.

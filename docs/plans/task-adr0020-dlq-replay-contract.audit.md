@@ -111,3 +111,12 @@
 - 잔여의 성격: 3R 지적은 전부 **ADR 문구·계약 정밀도** 였고 코드 산출물이 아니다. 실제 구현(④-c-2b)이
   이 계약들을 코드로 옮길 때 다시 검증된다 — 특히 `root_record_id` 전환 계약과 상관 대조 트랜잭션 경계.
 - **이 PR 은 문서 전용(10파일 전부 .md)이라 런타임 회귀 위험이 없다**는 점이 상한 종료를 감당 가능하게 한다.
+
+## 2026-09-01 — /ship
+- PR: https://github.com/Kimgyuilli/PeekCart/pull/98 (신규 생성, base=main)
+- consistency precheck: **ok** (warnings 0) — 게이트 미노출
+- 커밋: 3개 (재커밋 없음). **`a4ddf9d` 가 ADR·계획서·runbook·Layer1 혼재** — 스킬 규칙(ADR/계획서 별도 커밋)
+  이탈이나 이력 재작성 대신 PR 본문 미충족 7번에 사실로 남겼다
+- 갱신: `docs/TASKS.md` ④ 행의 ④-c-2b 항목(ADR-0020 확정·PR 링크·남은 P4) · `docs/progress/PHASE4.md` 신규 절
+- 계획서 체크박스: P1·P2·P3·P5·P6·P7·P8 = `[x]`, **P4 는 의도적 미체크**(§5 PR 분할상 ④-c-2b-0 소관)
+- 머지하지 않았다

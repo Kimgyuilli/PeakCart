@@ -79,3 +79,14 @@
 - 갱신: `docs/TASKS.md` 에 행 추가(🔄 — CI 실측 후 ✅)
 - ADR 신설 없음 — 외부 의존성·아키텍처 경계·인프라 변경 없음. ADR-0011 §D4(report artifact path)는 **준수 대상**이지 변경 대상이 아니다
 - **머지 전 필수**: 이 PR 의 CI 실행으로 P7(실측) · T6(게이트 순서) · T9(재실행)를 채운다. 그 전에는 ✅ 로 올리지 않는다
+
+## 2026-09-01 — CI 실측 (P7 · T7)
+- run [33470741832](https://github.com/Kimgyuilli/PeekCart/actions/runs/33470741832) **전량 통과**
+- **전체 run 51m44s → 30m23s (−41%)** · 테스트 단계 **33m20s → 11m23s (−66%)**
+- shard: platform 1m21s / user 3m21s / notification 4m01s / payment 8m28s / product 10m38s / order 11m22s
+- 합산 test runner-minutes 39m11s (baseline build 33m20s 대비 ×1.18 — 중복 컴파일)
+- **서비스 shard 비 3.39 > 2.0** → §5-7 판단: **재분할 안 함**. 임계 경로가 e2e(15m28s)로 넘어가
+  order 를 쪼개도 전체 run 이 줄지 않는다. 재검토 조건 = e2e 가 빨라져 테스트가 다시 임계가 될 때
+- gate 20s — 병합·배치검증·jvm 증적 대조·self-test 5종. 배치 복원이 실제로 동작
+- **미검증**: T2·T3b·T6·T9 (전부 실패 경로) · `test-reports` 세 트리 **내용** 미확인
+- 증적: `docs/progress/evidence/ci-test-matrix-20260901.md`

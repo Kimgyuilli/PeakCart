@@ -144,16 +144,16 @@
 - [x] P4 `gate` job — `needs: [test, guards]` · 배치검증 → 증적대조 2단 · 스텝별 `!cancelled()`
 - [x] P5 게이트 순서 재배선 (`images: needs: [lint, gate]`)
 - [x] P6 `ci-test-matrix-lint.sh` — `--merge-artifacts` · `--verify-layout` · `--verify-guards` · `--self-test` **22종**(coverage 8 + layout 2 + zero-drift 3 + guards 3 + merge 3 + guard-list 3)
-- [~] P7 실측 기록 — **CI 실행 후**. 이 PR 이 CI 자체를 바꾸므로 **첫 실행이 곧 측정**이다
+- [x] P7 실측 기록 — `docs/progress/evidence/ci-test-matrix-20260901.md`. **전체 run 51m44s → 30m23s(−41%)**, 테스트 단계 **33m20s → 11m23s(−66%)**
 
 
 
-- [~] N1~N7 — **N2·N3·N4·N5 불성립 확인**(가드 실행 실측 · 병합 실측 · 154==154 태스크 동등 · shard 커버리지 lint). **N1·N6·N7 은 CI 실행이 판정**(임계경로 · 게이트 순서 · 러너 시간)
-- [~] **T1·T4·T5 그린 + 실패 주입 확인**(가드 5종 실측 · lint 실패주입 3종 · 태스크 집합 154==154) · **T3 병합 실측**(206파일 2artifact 충돌 0). **T2·T3b·T6·T7·T8·T9 는 CI 실행이 판정**
-- [ ] P7 실측 표가 `docs/progress/evidence/` 에 존재 — 벽시계 임계 경로 · job/shard 별 소요 · 합산 runner-minutes(**과금 아닌 자원 지표로 명시**) · 중복 컴파일 비용
-- [ ] 임계 경로가 baseline 32m23s **미만**이고, 서비스 shard 최대/최소 비가 기록됨 (2.0 초과 시 §5-7 판단 문서화)
+- [~] **N1~N5·N7 불성립 확인** — N1(병렬 실행 실측) · N2(가드 5종 실행) · N3(gate 20s 증적 대조 성공) · N4(154==154) · N5(커버리지 lint) · N7(합산 +18%, 근거 기록). **N6 미검증** — shard 실패 시 게이트 차단은 이번 run 이 전량 통과라 경로를 안 탔다
+- [~] **T1·T4·T5 실패주입 확인 · T3 병합 실측 · T7 실측 완료 · T8 무회귀 확인**(e2e 이미지 4종 수신·시나리오 4종 통과, publish 정상 skip). **T2·T3b·T6·T9 미검증** — 전부 실패 경로라 전량 통과 run 에서는 안 탄다
+- [x] P7 실측 표가 `docs/progress/evidence/ci-test-matrix-20260901.md` 에 존재 — 벽시계·shard별·합산 runner-minutes(과금 아닌 자원 지표로 명시)·중복 컴파일 비용
+- [x] 임계 경로 **30m23s < baseline 51m44s**. 서비스 shard 비 **3.39 (2.0 초과)** → §5-7 판단 문서화 완료: **재분할하지 않는다** — 임계 경로를 order(11m22s)가 아니라 **e2e(15m28s)가 쥐고 있어** order 를 쪼개도 전체 run 이 줄지 않는다
 - [x] `ci-test-matrix-lint` 신설 + `--self-test` **22종** + `lint` job 배선 (`ci-task-parity-lint` 는 V13 으로 **폐기**)
-- [ ] `test-reports` artifact 에 **세 트리** 보존 (ADR-0011 §D4 · V15)
+- [~] `test-reports` artifact 업로드 성공(gate 20s 통과). **세 트리 내용 확인은 미실시** — artifact 를 내려받아 검사하지 않았다
 - [~] Codex diff 리뷰 — 3라운드(4건 P1:2 → 3건 P1:1 → 3건 P1:2), **상한 도달로 수렴 미달**. 3R 지적 3건은 전량 반영했고 재리뷰는 돌리지 않았다. 남은 검증은 CI 실행
 
 ---

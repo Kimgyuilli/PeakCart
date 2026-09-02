@@ -115,6 +115,16 @@ public class DeadLetterRecord {
     @Column(name = "publication_status", length = 20)
     private PublicationStatus publicationStatus;
 
+    /**
+     * 이 행의 replay 요청이 만든 {@code outbox_events.id} (④-c-2b-2 P12, ADR-0020 §D6-4).
+     *
+     * <p>컬럼 자체는 ④-c-2b-1 이 만들었으나 <b>읽는 주체가 없어 매핑하지 않았다</b>. reconciler 가
+     * 처음으로 읽는다. FK 를 걸지 않는 것은 원장 행이 outbox retention 보다 오래 살기 때문이다 —
+     * 정상 경로에서 outbox 행이 먼저 사라지는 것을 cleanup 제외 조건이 막지만, 그것은 제약이 아니라 정책이다.
+     */
+    @Column(name = "outbox_event_id")
+    private Long outboxEventId;
+
     // --- 상태 ---
 
     /**
@@ -236,6 +246,29 @@ public class DeadLetterRecord {
      *
      * @return 실제로 전이했으면 true
      */
+    /**
+     * 발행 축을 종착 상태로 옮긴다 (ADR-0020 §D6-4 · 구현 ④-c-2b-2 P12).
+     *
+     * <p><b>{@code REQUESTED} 인 행만 전이한다.</b> 이미 {@code PUBLISHED}/{@code PUBLISH_FAILED} 인 행을
+     * 다시 덮으면 reconciler 가 재실행될 때마다 감사 사실이 바뀐다. {@code NULL}(요청 없음) 행은
+     * 애초에 reconciler 의 조회 대상이 아니지만, 방어적으로 같은 가드에 걸린다.
+     *
+     * <p><b>사건 축({@link #status})은 건드리지 않는다</b> — 발행 성공은 사건 해소가 아니다(§D6-2).
+     * 두 축을 물리적으로 분리한 이유가 여기서 지켜진다.
+     *
+     * @return 실제로 전이했으면 true, 이미 전이된 행이면 false(no-op)
+     */
+    public boolean settlePublication(PublicationStatus settled) {
+        if (publicationStatus != PublicationStatus.REQUESTED) {
+            return false;
+        }
+        if (settled != PublicationStatus.PUBLISHED && settled != PublicationStatus.PUBLISH_FAILED) {
+            throw new IllegalArgumentException("발행 축의 종착 상태가 아니다: " + settled);
+        }
+        this.publicationStatus = settled;
+        return true;
+    }
+
     public boolean acknowledge(String actor) {
         if (statusValue() != DeadLetterStatus.OPEN) {
             return false;

@@ -180,6 +180,18 @@ public interface DeadLetterRecordJpaRepository extends JpaRepository<DeadLetterR
     List<Long> findPurgeableRootIds(@Param("threshold") LocalDateTime threshold, Pageable pageable);
 
     /**
+     * 발행 축이 {@code REQUESTED} 인 행을 오래된 순으로 읽는다 (ADR-0020 §D6-4 · 구현 ④-c-2b-2 P12).
+     *
+     * <p>reconciler 전용이다. <b>root 로 한정하지 않는다</b> — 발행은 행 단위 사실이고, 자식도 자기
+     * replay 요청을 가질 수 있다. incident 집계(사건 축)만 root 로 정규화한다.
+     *
+     * <p>인덱스를 따로 두지 않았다(계획 §10 R8). 이 테이블은 DLQ 유입량에 유계이고, 같은 컬럼을 스캔하는
+     * {@link #countUnresolvedByPublicationStatus} 가 이미 무인덱스로 돈다.
+     */
+    @Query("SELECT r FROM DeadLetterRecord r WHERE r.publicationStatus = 'REQUESTED' ORDER BY r.id ASC")
+    List<DeadLetterRecord> findRequestedPublications(Pageable pageable);
+
+    /**
      * incident 1건(root + 자식 전부)을 삭제한다. <b>자식 단독 purge 경로는 두지 않는다</b> —
      * 자식은 진단용이며 root 를 따라 종결·정리된다(ADR-0020 §D6-3).
      *

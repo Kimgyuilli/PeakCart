@@ -1462,3 +1462,69 @@ YAML `modify-topic-configs` 제거 · 8/4→10/2 MiB.
    별도 인프라 결정
 
 **다음**: **④-c-2b (replay 구현)** — 착수 조건이 전부 닫혔다. 또는 ③ PR3d-b-2(GKE 세션) + PR4 관측성 S9.
+
+---
+
+## ④-c-2b-1 — DLQ 원장 replay 축 + incident 집계 정정 — 2026-09-02 — [#100](https://github.com/Kimgyuilli/PeakCart/pull/100)
+
+> ADR-0020 의 4분할 구현 중 첫 번째. **축을 열고 집계를 고칠 뿐 replay 를 실행하지 않는다.**
+
+### 진입점을 상관보다 나중에 열기로 순서를 뒤집었다
+
+초안은 2b-3 에서 `action=replay` 를 열고 2b-4 에서 재실패 상관을 붙이려 했다. 계획 리뷰가 반증했다 —
+그 사이 구간에서 재발행분이 다시 실패하면 **독립 incident 로 갈라져** ADR-0020 §D5-4·§D6-3 을
+정면으로 위반한다. "endpoint 를 플래그로 잠갔다가 나중에 연다" 는 대안은 **계약을 지키는 코드 대신
+운영 규율에 기대는 것**이라 채택하지 않았다. 상관 경로를 먼저 세우면 replay 가 열리는 순간
+이미 계약이 성립한다.
+
+### 반대 방향의 false-green 이 같은 표면에 있었다
+
+집계를 행 단위로 두면 재실패마다 backlog 가 부풀어 "재실패 N회에도 미결 1건" 이 거짓이 된다.
+그런데 조건을 `root_record_id = id` 로만 걸면 **④-c-2a 가 적재한 기존 행이 전부 탈락해 backlog 가 0**
+으로 보인다 — 과다집계를 고치다 정확히 반대편으로 넘어간다. `IS NULL` 분기를 함께 두는 것이
+expand 단계의 계약이고, 배포 전후 미결 건수가 같음을 회귀로 고정했다.
+
+### diff 리뷰가 잡은 실제 버그 — JPA 1차 캐시가 잠금 재검사를 무력화한다
+
+두 건의 뿌리가 같았다:
+- 후보·요청 행을 **엔티티로** 먼저 읽으면 영속성 컨텍스트에 적재되어, 뒤의 `SELECT ... FOR UPDATE` 가
+  **DB 잠금은 얻되 이미 관리 중인 인스턴스를 refresh 하지 않는다**. 잠금을 기다리는 동안 다른
+  트랜잭션이 커밋한 종결을 못 보고 **캐시의 과거 상태로 전이**한다 → id projection 으로 전환
+- 자식을 잠그지 않으면 REPEATABLE READ **스냅샷**을 본다. root 는 current read 라 최신인데 자식만
+  과거를 봐서, 앞선 트랜잭션이 root+자식을 종결한 뒤 **root 에선 no-op 하면서 자식만 덮어쓴다**
+  → `findChildrenForUpdate`(활성 자식만 배타 잠금)
+
+둘 다 **2라운드 리뷰가 1라운드 수정에서 찾아낸 것**이다(첫 번째는 1R, 두 번째는 1R 수정이 만든 새 결함).
+
+### 변이 검증이 내 테스트의 false-green 을 잡았다
+
+변이 8종 중 **M3(purge 기준을 `COALESCE` 로 회귀)이 처음에 green** 이었다. 잠금 후 인메모리 재검사가
+어차피 걸러내서 쿼리를 되돌려도 통과했다 — 테스트가 두 방어선 중 하나만 보고 있었다. 쿼리 계약을
+직접 단언해 red 로 만들었다. 계획 §1 N17 이 겨냥한 자기대조 유형이 실제로 나왔고,
+**변이 검증이 없었으면 그대로 통과했다.**
+
+부수로 두 가지를 배웠다 — ShedLock 락 행은 **지우면 오히려 영구히 잠긴다**(`StorageBasedLockProvider`
+가 JVM registry 로 락 이름을 기억해 이후 UPDATE 만 시도하므로 행이 없으면 0행 갱신 = "It's locked").
+만료시켜야 한다. 그리고 `information_schema.INNODB_TRX` 는 `PROCESS` 권한이 필요해 컨테이너 앱
+계정으로 못 읽는다 — 경합 테스트의 잠금 대기 관측은 root 커넥션을 따로 연다.
+
+### 검증
+
+**918 테스트 0 실패**(common 73 · order 310 · product 186 · payment 168 · notification 40 · user 61 ·
+gateway 80, 32분 28초). parity lint 본체 + **self-test 10종** 통과. 변이 8종 전부 red → 복원 green.
+
+리뷰: 계획 3라운드 40건 + diff 3라운드 12건, **전량 반영 · 기각 0**. diff 3R 에서 P0/P1 = 0 으로 수렴.
+
+### 미충족
+
+1. **V-21c(purge 잠금 후 재검사의 2-트랜잭션 경합)를 직접 관측하지 못했다** — 재개방 경로가
+   2b-3 P15 에 생기므로 검증도 그 PR 소관이다. 이 PR 은 잠금·재검사 코드만 넣었다
+2. **신규 테스트는 order-service 에만** 있다. java 9파일이 4서비스 byte 동일이고 parity lint 가
+   그것을 강제하므로 4벌 복제는 같은 코드를 네 번 도는 비용만 든다
+3. **`publication_status` 를 쓰는 주체가 없다**(reconciler=2b-2, claim=2b-4). 자식 행 생성 경로도
+   없다(2b-3) — 테스트가 fixture 로 그 DB 상태를 구성한다
+4. **`NOT NULL` contract 는 범위 밖**(계획 §10 R1). backfill(2b-4) 이후 별도 마이그레이션이며,
+   그때까지 `record_kind` 명시 계약은 코드 경로로만 강제되고 DB 는 막지 않는다
+5. **운영 클러스터 미적용** — 로컬 Testcontainers 로만 검증했다
+
+**다음**: ④-c-2b-2 (발행 표면 — outbox replay kind · notification outbox 신설 · reconciler, 계획 P8~P13)

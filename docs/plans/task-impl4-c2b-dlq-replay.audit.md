@@ -110,3 +110,14 @@ M5 purge 가 자식을 남김 · M6 요청 행 엔티티 선읽기 · M7/M7b 자
 > **M3 은 처음에 green 이었다** — purge 의 `COALESCE` 회귀 테스트가 잠금 후 인메모리 재검사에 가려 vacuous 했다.
 > 쿼리 계약을 직접 단언해 red 로 만들었다. 계획 §1 **N17**(자기대조 금지)이 겨냥한 유형이 실제로 나왔고,
 > **변이 검증이 없었으면 그대로 통과했다.**
+
+---
+
+## 2026-09-02 — /ship (PR ④-c-2b-1)
+
+- PR: **[#100](https://github.com/Kimgyuilli/PeakCart/pull/100)** (머지 안 함)
+- consistency precheck: **ok** (warnings 0) — 게이트 미노출
+- 커밋 6개 (분류별 분리, mixed 0): `feat(deadletter)` · `test(deadletter)` · `chore(lint)` · `docs(impl4-c2b)` ×3
+- 검증: **918 tests 0 failed** · parity lint 본체 + self-test 10종 · 변이 8종 red
+- 갱신: `docs/TASKS.md`(④-c-2b 를 🔲 → 🔄 4분할, 2b-1 ✅ #100) · `docs/progress/PHASE4.md`(작업 이력 + 미충족 5건)
+- Skipped findings: **없음** (계획 40건 · diff 12건 전량 반영, 기각 0)

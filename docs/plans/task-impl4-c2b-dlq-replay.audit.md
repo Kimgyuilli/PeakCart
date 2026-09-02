@@ -121,3 +121,121 @@ M5 purge 가 자식을 남김 · M6 요청 행 엔티티 선읽기 · M7/M7b 자
 - 검증: **918 tests 0 failed** · parity lint 본체 + self-test 10종 · 변이 8종 red
 - 갱신: `docs/TASKS.md`(④-c-2b 를 🔲 → 🔄 4분할, 2b-1 ✅ #100) · `docs/progress/PHASE4.md`(작업 이력 + 미충족 5건)
 - Skipped findings: **없음** (계획 40건 · diff 12건 전량 반영, 기각 0)
+
+## 2026-09-02 22:26 — 계획 리뷰 (④-c-2b-2) · **리뷰 미실행**
+
+- **착수 전 코드 검증은 완료** — C-1~C-13 을 계획서 §5 "PR ④-c-2b-2 / 착수 전 코드 검증" 표에 기록.
+  뒤집힌 전제 5건(C-3 범위 2→4곳 · **C-5 outbox parity lint 부재** · **C-6 DELETE+LIMIT alias 불가** ·
+  C-8 `cleanup.cron` 미선언 · **C-12 ADR-0012 D1 표 미갱신**) → P9-b·P9-c 신설, P9·P12 정정, V-30~V-33·R8 추가.
+- **Codex 리뷰 3회 시도 전부 실패**:
+  1. `plan-task-impl4-c2b-dlq-replay-2b2-r1-1788355609` — 10분 조사 후 **호출측 타임아웃으로 중단**(결과 없음). exec 다수 관측.
+  2. `plan-2b2-r1b-1788356291` — exec 6회(계획서·ADR 만 읽음) 후 `items: []`. summary 는 *"…대조하겠습니다"* 라는 **예고문**.
+  3. `plan-2b2-r1c-1788356371` — **exec 0회**, 즉시 `items: []` + 동일한 예고문.
+  → 실패 양상: `--output-schema` 응답을 **조사 착수 전에 확정**해 버린다. codex-cli 0.152.1.
+- **처리**: 반영 0건 / 기각 0건 (리뷰 산출물 없음). **P0/P1 = 0 이 아니라 "미측정"이다** — 자동 통과로 간주하지 않는다.
+- raw: `.cache/codex-reviews/plan-2b2-r1{,b,c}-*.json` (+ `.stderr`)
+
+## 2026-09-02 22:52 — 계획 리뷰 (④-c-2b-2) 라운드 1 · **분할 재시도**
+
+긴 단일 프롬프트가 조기 종료를 유발한다고 보고 A(코드 사실 반증) / B(누락·부작용)로 나눠 호출.
+
+- **A 성공** (exec 30회) — 2건(P0:0, P1:0, **P2:2**), **전량 반영**:
+  - A#1 → C-3 의 stale 주석 범위가 **4곳 → 6곳**. `notification-service/build.gradle:27-28`·`:31-32` 추가.
+    그리고 `NotificationApplication:12` 는 **P9 를 기다릴 것 없이 이미 거짓**이다(`DeadLetterMaintenanceScheduler:58·114`
+    가 이미 `@Scheduled` 2개를 얹었다) — 선재 결함으로 재분류하고 같은 PR 에서 고친다.
+  - A#2 → **내 C-6 정정이 틀렸다**. "단일 테이블 DELETE 에 alias 를 못 붙인다" 는 거짓이고,
+    MySQL 8.0.16+ 는 `DELETE FROM tbl [[AS] alias] … LIMIT` 을 지원한다.
+    **`mysql:8.0.46` 컨테이너로 직접 실측**해 반증을 확인하고 매트릭스 4행을 계획서에 기록:
+    `AS o`+LIMIT **성공** / 초안(alias 미선언 `o.id`) **ERROR 1054** / 정규명 **성공** / multi-table+LIMIT **ERROR 1064**.
+    → 초안 SQL 이 깨진다는 **결론은 유지**되나 이유가 다르다(alias 를 선언한 적이 없을 뿐).
+    정규명을 택하는 근거를 "문법 제약" → "4서비스 byte 동일 복제의 diff 최소화" 로 정정.
+- **B 실패 2회** (`plan-2b2-B-*`: exec 36회 후 `items: []` · `plan-2b2-B2-*`: exec 35회 후 `items: []`).
+  둘 다 summary 가 *"…대조 중입니다"* 라는 진행형 예고문 — A 와 동일 조건에서 B 만 재현되는 조기 종료.
+  → **3회째 동일 재시도 대신 스윕을 직접 수행**하고 결과를 C-14 로 기록했다. 결론: **갱신 필요 표면 0건**
+  (ci.yml·k8s·notification 프로파일 yml·promql lint·ShedLock 락 이름·runbook 전부 무영향, 근거는 C-14 에 인용).
+  B 축의 나머지(V-30~V-33 의 false-green 저항성)는 **제3자 미검토로 남는다** — 미충족에 명시.
+- 처리: 반영 2건 / 기각 0건. raw: `.cache/codex-reviews/plan-2b2-{A,B,B2}-*.json`
+
+## 2026-09-03 00:20 — diff 리뷰 (④-c-2b-2) · **Codex 미실행 (usage limit)**
+
+- **시도 3회 전부 산출물 없음**. 1·2회는 `items: []` + *"…대조하겠습니다"* 예고문, 3회에서 원인이 드러났다:
+  `ERROR: You've hit your usage limit ... try again at 3:00 AM` (codex-cli 0.152.1).
+  → **앞선 두 번의 빈 응답도 프롬프트 문제가 아니라 같은 원인**이었을 가능성이 높다. 계획 리뷰 A/B 단계의
+  빈 응답도 같은 신호였던 것으로 재해석된다(A 만 성공한 것은 그 시점에 잔여 quota 가 있었기 때문).
+- **처리**: 반영 0건 / 기각 0건. **P0/P1 = 0 이 아니라 미측정**이다.
+- **대신 수행한 것 (제3자 리뷰의 대체가 아님을 명시)**:
+  · 자체 리뷰에서 **실제 결함 1건 발견·수정** — `DeadLetterPublicationReconciler` 를 4서비스 byte 동일로
+    복제해 놓고 `dead-letter-schema-parity-lint` 의 `java_files` 목록에 더하지 않았다. 목록에 없으면
+    4벌이 갈라져도 아무 것도 실패하지 않는다 — ④-c-2b-1 이 glob 을 안 넓혀 겪은 것과 **같은 구멍**을
+    신규 파일에서 재현한 것이다. 목록 추가 + self-test 9b 신설 + 변이(M-6) red 로 고정.
+  · **변이 검사 12종 전부 red** (아래 검증 절 참조)
+- raw: `.cache/codex-reviews/diff-2b2-r1{,b,c}-*.json` (+ `.stderr`)
+
+### 검증 (④-c-2b-2)
+
+**모듈별 테스트** — 전 모듈 0 실패. 로컬 전체 스위트가 한 번에 완주하지 못해(장시간 백그라운드 잡이
+반복 중단) **모듈 단위로 나눠 실행**했고, 각 모듈의 결과는 변경 이후 시점의 것이다:
+
+| 모듈 | tests | 실패 |
+|---|---|---|
+| common | 73 | 0 |
+| order-service | 317 | 0 (신규 7) |
+| product-service | 186 | 0 |
+| payment-service | 168 | 0 |
+| notification-service | 45 | 0 (신규 5) |
+| peekcart-common-auth | 52 | 0 |
+| user-service · gateway | 61 · 80 | 0 |
+
+**변이 검사 12종 전부 red** (복원 시 green):
+
+| # | 변이 | red 가 된 검증 |
+|---|---|---|
+| M-A | `isReplay()` 를 `!= DOMAIN` 으로 (NULL 이 replay 가 됨) | V-30 |
+| M-B | reconciler 가 `PENDING` 도 종착 | V-33 |
+| M-C | outbox 부재를 `PUBLISH_FAILED` 로 강등 | V-21d |
+| M-D | cleanup 의 `NOT EXISTS` 제외 조건 제거 | V-21b |
+| M-E | replay 경로가 `source_record_timestamp` 미탑재 | replay 좌표 |
+| M-F | notification poller 의 실제 발행 제거 | **V-32 가 "배선됐다" 판정이 아님을 실증** |
+| M-1~M-5 | lint 의 OUTBOX-PARITY-002/004/005/007/009 검사 각각 제거 | self-test 10~15 |
+| M-6 | `java_files` 목록에서 reconciler 제거 | self-test 9b |
+
+> **M-4 는 1차 시도에서 GREEN 으로 보고됐으나 실제로는 변이가 적용되지 않은 것**(내 변이 스크립트의
+> anchor 불일치)이었다. 앵커를 고쳐 재실행하니 red. **변이 하네스 자체의 false-green** 이므로 기록한다.
+
+**lint 7종 green**: `dead-letter-schema-parity`(self-test **17종**) · `kafka-subscription-contract` ·
+`observability-promql` · `observability-ssot` · `ci-test-matrix` · `saga-contract-matrix` · `e2e-network-contract`.
+
+**실행 중 정정 3건**:
+1. `NotificationCleanupMatrixIntegrationTest` 가 "notification 은 outbox cleanup 부재" 를 단언하고 있었다 —
+   ADR-0020 D2 가 바꾼 계약이라 갱신하고, "테이블만 있고 아무도 발행하지 않는" 상태가 통과하지 않도록
+   poller·reconciler bean 검사를 더했다. **계획 §8 이 이 파일을 예상하지 못했다.**
+2. at-least-once 단언이 "정확히 2개" 였는데 실측 3개 — 배경 poller 도 같은 행을 집어간다. ADR-0020 D1 은
+   중복 수에 상한을 두지 않으므로 **계약이 말하지 않는 것을 테스트가 주장**하던 것이고 flaky 였다.
+   `≥2 + 전부 동일 payload + offset 중복 없음` 으로 정정.
+3. cleanup 2회 호출 사이에 `lockAtLeastFor(PT1M)` 를 만료시키지 않아 두 번째가 통째로 건너뛰어졌다 —
+   "제외 조건이 계속 막고 있다" 와 "잡이 안 돌았다" 가 구분되지 않는 상태였다.
+
+**미충족**:
+1. **Codex diff 리뷰 미실행** (usage limit, 3:00 AM 리셋) — P0/P1 = 0 이 아니라 **미측정**
+2. **로컬 전체 스위트 1회 완주 없음** — 모듈별 그린을 합산한 것이다. CI 에서 확인 필요
+3. 신규 테스트는 order·notification 에만. product/payment 는 byte 동일 복제 + parity lint 로 대체
+4. replay 행은 **fixture 로만** 생성 — 진입점은 ④-c-2b-4
+5. 운영 클러스터 미적용 · E2E(`saga_e2e.py`) 로컬 미실행
+
+### 추가 — parity lint `DLQ-PARITY-014` (계획에 없던 확대)
+
+self-test 9b(“reconciler drift 를 잡는가”)는 **내가 기억한 그 파일 하나만** 본다. 다음 신규 복제본에는
+아무 도움이 안 되므로, 목록 자체를 검사가 지키도록 `DLQ-PARITY-014` 를 넣었다 —
+*지금 4벌이 byte 동일한데 `java_files` 에 없는 파일*을 위반으로 본다.
+
+- **디렉토리 전체 일치를 요구하지 않는다**: `DeadLetterConsumer`/`KafkaConfig`/`QuarantineConsumer` 는
+  토픽·group 이 서비스마다 정당하게 다르다. 첫 구현이 이 구분을 놓쳐 self-test 1 이 red 였고, 그것이
+  설계를 정정하게 했다.
+- **부수 발견**: 기존 미등록 복제본 2개(`DeadLetterContainerGuard`·`DeadLetterKafkaConfig`, ④-c-2a 산출물)를
+  찾아내 목록에 편입했다. **계획에 없던 소폭 확대**이며, allowlist 로 덮는 대신 편입한 이유는 그것들이
+  실제 복제 자산이기 때문이다("의도적으로 무방비" 라는 거짓을 기록하지 않는다).
+- **fixture 오염 2건도 함께 고쳤다**: ① `seed_fixture` 가 per-service 파일까지 order 사본으로 채워
+  fixture 안에서만 byte 동일해지던 것 ② `seed_fixture` 가 `$TMP` 를 지우지 않아 9c 가 심은 파일이
+  뒤 케이스를 red 로 만들던 것. **fixture 가 현실을 왜곡하면 self-test 가 검사하는 대상이 현실이 아니다.**
+- 변이 **M-7**(014 검사 제거) red · **M-8**(byte 동일 조건 제거 → per-service 파일 오탐) red.
+  양방향을 다 잡는다. self-test **18종** 통과.

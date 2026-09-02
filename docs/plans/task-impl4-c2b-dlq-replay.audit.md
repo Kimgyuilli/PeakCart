@@ -59,3 +59,54 @@ preflight 스크립트 · ADR Update Log)을 다시 만들었다.
 `replay_deadline` 영속 계약(P21 2b) · 10토픽 초기 정책표(P19) · `replay-drain-preflight.sh`(P24) —
 은 **계획 리뷰를 거치지 않았다**. 이 표면들은 각 PR 의 **diff 리뷰가 첫 검토 지점**이 되므로,
 해당 PR 본문과 진행 기록에 그 사실을 명시한다.
+
+---
+
+## 2026-09-02 — diff 리뷰 (PR ④-c-2b-1, P1~P7)
+
+### 라운드 1 — 5건 (P0:0, P1:2, P2:3)
+- 처리: **반영 5건 / 기각 0건**
+- **리뷰가 내 코드의 실제 버그 2건을 잡았다.** 둘 다 뿌리가 같다 — **JPA 1차 캐시가 잠금 후 재검사를 무력화**한다:
+  - `findPurgeable` 이 root 를 엔티티로 먼저 읽어 영속성 컨텍스트에 적재 → 뒤의 `SELECT ... FOR UPDATE` 는
+    잠금만 얻고 **상태를 refresh 하지 않는다**. 재개방이 끼어들면 purge 가 캐시의 과거 terminal 상태로
+    통과해 **살아 있는 incident 를 삭제**한다 → `findPurgeableRootIds`(id projection)
+  - `transition` 도 같은 구조 → `findRootIdOf`(id projection). 두 요청이 OPEN 을 읽고 A 가 `RESOLVED` 를
+    커밋하면 B 가 캐시의 OPEN 을 보고 **`DISCARDED` 로 덮어쓴다**
+- 그 외: backlog 의 `publication` 이 `NULL`(요청 없음)을 누락 · replay-axis parity 가 정규화 해시라 주석 drift 통과 ·
+  self-test 4 가 self-test 3 의 변조를 이어받아 **001 을 지워도 006 때문에 통과**하는 false-green
+- 변이 **M6**(요청 행 엔티티 선읽기로 회귀) red 확인
+- raw: `.cache/codex-reviews/diff-task-impl4-c2b-1-r1-1788341444.json`
+
+### 라운드 2 — 5건 (P0:0, P1:2, P2:3) — **P1 2건 전부 1R 수정이 만든 새 결함**
+- 처리: **반영 5건 / 기각 0건**
+- 1R 수정이 만든 새 결함:
+  - id projection 이 root 의 캐시 문제는 없앴지만 **비잠금 조회가 REPEATABLE READ 스냅샷을 먼저 연다**.
+    root 는 current read 인데 자식은 스냅샷을 봐서, 앞선 트랜잭션이 root+자식을 종결한 뒤
+    **root 에선 no-op 하면서 자식만 덮어쓰는** 상태가 된다 → `findChildrenForUpdate`
+  - 신설 경합 테스트가 `Thread.sleep(500)` 으로 잠금 대기를 **추정** → 느린 CI 에서 결함 변이를 확률적으로 놓친다
+    → InnoDB `LOCK WAIT` 실관측
+- 그 외: backlog 5회 집계가 각각 별도 트랜잭션(합 불변식 미보장) · `CASE WHEN ... IS NULL` 의 NULL 분기 미검증 ·
+  "원문 바이트 해시" 가 실제로는 text mode(개행 drift 통과)
+- 변이 **M7**(자식 잠금 제거) · **M8**(CASE WHEN 제거) red 확인
+- raw: `.cache/codex-reviews/diff-task-impl4-c2b-1-r2-1788343763.json`
+
+### 라운드 3 — 2건 (P0:0, **P1:0**, P2:2)
+- 처리: **반영 2건 / 기각 0건**
+- `findChildrenForUpdate` 가 terminal 자식까지 잠가 대기 집합만 키움 → `status IN ('OPEN','ACKED')` 필터 ·
+  `awaitLockWait()` 가 **컨테이너 전체 건수**만 봐 무관한 트랜잭션에도 latch 가 풀림 → 커넥션 id 로 대상 특정
+- 리뷰가 확인해 준 것: P5·P15·purge 가 전부 root→자식 순서라 **잠금 순환 없음** · actuator readOnly 트랜잭션 ·
+  Testcontainers 전용 root 접속 · 바이트 parity 해시에 결함 없음
+- 변이 **M7b**(활성 필터 유지한 채 잠금만 제거) red 재확인
+- raw: `.cache/codex-reviews/diff-task-impl4-c2b-1-r3-1788346508.json`
+
+### 수렴
+**3라운드에서 P0/P1 = 0 이고 반영한 2건이 새 계약 표면을 만들지 않았다**(잠금 범위 축소 · 테스트 관측 정밀화).
+`/work` 의 재리뷰 조건은 "P0/P1 을 실제로 수정했을 때"이고 3R 은 P2 만 고쳤으므로 여기서 종료한다.
+
+### 변이 검증 종합 (8종 전부 red → 복원 후 green)
+M1 집계 root 조건 제거 · M2 `IS NULL` 분기 제거 · M3 purge 를 `COALESCE` 로 회귀 · M4 자식 id 의 root 정규화 제거 ·
+M5 purge 가 자식을 남김 · M6 요청 행 엔티티 선읽기 · M7/M7b 자식 잠금 제거 · M8 `CASE WHEN` 제거.
+
+> **M3 은 처음에 green 이었다** — purge 의 `COALESCE` 회귀 테스트가 잠금 후 인메모리 재검사에 가려 vacuous 했다.
+> 쿼리 계약을 직접 단언해 red 로 만들었다. 계획 §1 **N17**(자기대조 금지)이 겨냥한 유형이 실제로 나왔고,
+> **변이 검증이 없었으면 그대로 통과했다.**

@@ -112,11 +112,20 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 
 ## 5. 작업 항목
 
+### 진행 상태
+
+| PR | 항목 | 상태 |
+|---|---|---|
+| 2b-1 | P1 · P1-b · P2 · P3 · P4 · P5 · P6 · P7 | ✅ **완료** — diff 리뷰 3R(12건 전량 반영, 3R P1=0) · 918 tests 0 failed · 변이 8종 red |
+| 2b-2 | P8 ~ P13 | 🔲 |
+| 2b-3 | P14 ~ P17 | 🔲 |
+| 2b-4 | P18 ~ P25 | 🔲 |
+
 ### PR ④-c-2b-1 — 원장 축 확장 + incident 집계 정정
 
 **P1.** `dead_letter_records` additive 마이그레이션 **4 DB** (order **V8** · product **V6** · payment **V6** · notification **V4**).
 전부 nullable. 컬럼: `root_record_id BIGINT` · `publication_status VARCHAR(20)` · `outbox_event_id BIGINT` ·
-`replay_deadline DATETIME(6)` · `replay_policy VARCHAR(40)` · `last_replay_attempt_id VARCHAR(36)` ·
+`replay_deadline DATETIME(6)` · `replay_policy VARCHAR(120)`(정책 식별자+버전+판정을 담으므로 40 은 부족 — 구현 중 상향) · `last_replay_attempt_id VARCHAR(36)` ·
 `last_replay_target_group VARCHAR(120)` · `resolved_at DATETIME(6)` · `resolved_by VARCHAR(120)` ·
 `reopened_at DATETIME(6)` · `reopened_reason VARCHAR(500)`.
 인덱스: `idx_dlr_root (root_record_id, status)` — root-only 집계용 · `idx_dlr_attempt (last_replay_attempt_id)` — P15 대조용.
@@ -148,6 +157,11 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
   살아 있는 incident 와 새 자식을 지운다**. P5·P15 는 root 잠금으로 직렬화되는데 purge 만 그 규약 밖에 있었다
 
 **P5.** **종결의 root 정규화·전파** (ADR §D5-4 "root 와 활성 자식에 원자적 전파" · 리뷰 1R #6).
+> **구현 중 추가된 계약 (diff 리뷰 1R·2R)**: 요청 행과 purge 후보를 **엔티티가 아니라 id 로** 읽는다.
+> 엔티티로 읽으면 영속성 컨텍스트에 적재되어 뒤의 `SELECT ... FOR UPDATE` 가 **잠금만 얻고 상태를
+> refresh 하지 않고**, 자식은 잠그지 않으면 REPEATABLE READ **스냅샷**을 봐서 root 는 no-op 하면서
+> 자식만 덮어쓴다. 그래서 `findRootIdOf`/`findPurgeableRootIds`(id projection) + `findChildrenForUpdate`
+> (활성 자식만 `PESSIMISTIC_WRITE`)가 계약이다.
 - 종결 요청의 대상 id 가 **자식이면 canonical root 로 정규화**한다(자식 단독 종결은 미결을 종결로 위장한다)
 - root 를 `SELECT ... FOR UPDATE` 로 잠근 뒤 root 와 **활성 자식 전부**를 같은 트랜잭션에서 전이한다
 - `acknowledge`/`resolve`/`discard` 셋 다 이 경로를 쓴다 — 하나라도 빠지면 축이 갈라진다
@@ -156,11 +170,22 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 **I-1 가드는 여기 넣지 않는다** — `publication_status='REQUESTED'` 를 만드는 주체가 2b-4 에 생기므로
 2b-1 의 가드는 vacuous 하다. I-1 은 **P21 과 같은 PR**에서 원자 조건으로 넣는다.
 
+**P1-b.** (구현 중 추가) `dead-letter-schema-parity-lint` 를 **신규 마이그레이션까지** 확장하고
+**java 복제 parity** 를 함께 검사한다.
+> **P25 에서 앞당긴 이유**: 신규 파일을 만드는 PR 이 그 파일의 parity 를 검사하지 않으면 2b-2·2b-3 세 PR 동안
+> 4벌이 갈라져도 아무 것도 실패하지 않는다. 기존 lint 는 `V*__dead_letter_records.sql` 만 보므로 신규 파일이
+> **glob 에 걸리지 않아 조용히 통과**한다.
+> java 7파일은 현재 4서비스에서 **byte 동일**이며(구현 전 확인), 이 PR 이 그 7파일을 전부 고친다 —
+> 한 벌만 고치는 실수를 정적으로 막는다. P25 에는 `outbox_events` parity 와 진입점 단일성 검사가 남는다.
+
 **P7.** 회귀 테스트 + E2E 게이트 갱신.
 - 기존 미결 행(= `root_record_id IS NULL`)이 마이그레이션 **전후로 같은 건수**로 집계된다 (N9)
 - `publication_status='PUBLISHED'` 인 root 가 backlog·oldest-age 에 **계속 잡힌다** (N5 — ADR 이 지목한 핵심 단언)
 - `RESOLVED` 는 backlog 에서 빠지고 purge 대상이 된다. **`DISCARDED` → 재개방 → `RESOLVED` 교차 전이**의 purge 경계
 - 자식 id 로 종결 요청 시 root 로 정규화되어 root+자식이 함께 전이된다
+> **테스트 배치**: 신규 회귀 테스트는 **order-service** 에 둔다. `global/deadletter` java 7파일은 4서비스에서
+> **byte 동일**이고 그 동일성을 P1-b lint 가 강제하므로, 4벌 테스트 복제는 같은 코드를 네 번 도는 비용만 든다.
+> 나머지 3서비스는 **기존 원장 테스트가 회귀 없이 통과**하는 것으로 확인한다.
 - **`scripts/e2e/saga_e2e.py:64-68` 의 `EXPECTED_MIGRATIONS` 를 `order 1~8 · product 1~6 · payment 1~6 · notification 1~4` 로 갱신**한다
   (리뷰 1R #14 — 이 상수는 **버전 집합 정확 일치**를 readiness 에서 강제하므로, 갱신하지 않으면 E2E 가 먼저 red 가 된다)
 
@@ -434,7 +459,7 @@ replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evid
 | **V-21** | N11 | outbox cleanup 선행 실행 후 지연 DLQ 적재 | 같은 root 상관 + backlog 1 |
 | **V-21b** | N11 | **reconciler 장기 중단 → cleanup 실행 → reconciler 복구** | cleanup 이 해당 replay outbox 를 **건너뛴다**(제외 조건). 행이 남아 있어 reconciler 복구 시 정상 전이. 제외 조건을 빼면 red (2R #6) |
 | **V-21d** | N11 | outbox 행을 **강제로 삭제**한 뒤 reconciler 실행 | **`PUBLISH_FAILED` 로 강등되지 않고 자동 재요청도 열리지 않는다**. fail-closed 경보만 발생 (3R #3 — OR 조건 하나로 묶으면 정상 제외 경로만 통과해도 green 이 되어 강등 분기를 전혀 실행하지 않는다) |
-| **V-21c** | N8 | purge 가 root 를 **조회한 뒤 삭제 전에** 재개방을 끼워 넣는다 | 재개방된 root 와 새 자식이 **삭제되지 않는다**. purge 의 `FOR UPDATE` + 상태 재검사를 빼면 red (2R #5) |
+| **V-21c** | N8 | purge 가 root 를 **조회한 뒤 삭제 전에** 재개방을 끼워 넣는다 | 재개방된 root 와 새 자식이 **삭제되지 않는다**. purge 의 `FOR UPDATE` + 상태 재검사를 빼면 red (2R #5). **재개방 경로가 2b-3 P15 에 생기므로 이 행의 검증도 2b-3 에서 수행한다** — 2b-1 은 잠금·재검사 코드만 넣고, 그 코드 자체는 이 시점에 직접 관측되지 않는다(미충족으로 명시) |
 | **V-22** | N12 | 같은 원장 행에 replay 요청 **동시 2회** | outbox 행 정확히 1개, 한쪽 거부. **orphan outbox 0** 을 DB 조회로 확인 |
 | **V-23** | N13 | broker ack 성공 후 아무 조작 없이 대기 | `status` 가 `OPEN`/`ACKED` 유지. 자동 `RESOLVED` 없음 |
 | **V-24** | N14 | 진입점 단일성 lint (P25) | replay 개시 코드가 `DeadLetterEndpoint` 밖에 있거나 runbook 에 직접 상태 변경 SQL 이 있으면 red |

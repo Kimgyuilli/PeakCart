@@ -22,6 +22,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p><b>{@code OPEN}/{@code ACKED} 는 삭제하지 않는다.</b> 장기 미결은 용량 문제가 아니라
  * 운영 SLA 문제이고, 지우면 그 사실 자체가 사라진다. 대신 age·건수 경보로 사람을 부른다.
  *
+ * <p><b>집계·정리 단위는 incident(root) 다</b>(ADR-0020 §D6-3) — 재발행 재실패로 늘어난 자식 행을 세면
+ * backlog 가 사건 수보다 부풀어 임계값이 의미를 잃는다.
+ *
  * <p><b>임계값을 설정으로 고정한 이유</b>: "오래되면 경보한다" 만 적으면 mock 호출 1회로 통과하는
  * false-green 이 된다. {@code stale-after}·{@code backlog-threshold}·{@code cooldown} 이 계약이다.
  *
@@ -42,8 +45,15 @@ public class DeadLetterMaintenanceScheduler {
     private final AtomicReference<Instant> lastAlertAt = new AtomicReference<>(Instant.EPOCH);
 
     /**
-     * 종결 건 정리. unbounded DELETE 가 큰 테이블에서 장기 락을 만들지 않도록
+     * 종결 <b>incident</b> 정리. unbounded DELETE 가 큰 테이블에서 장기 락을 만들지 않도록
      * cutoff 를 1회 계산하고 작은 batch 를 반복한다 (기존 cleanup 계약 승계).
+     *
+     * <p><b>root 를 잠그고 상태를 다시 본다</b>(④-c-2b-1 P4). 조회와 삭제 사이에 늦은 자식이 도착해
+     * root 가 재개방될 수 있는데(ADR-0020 §D6-2b I-2), 먼저 조회한 목록으로 그대로 지우면
+     * <b>살아 있는 incident 와 방금 들어온 자식을 삭제</b>한다. 종결 전이(P5)·재개방도 같은 잠금을
+     * 먼저 잡으므로 진입 순서가 같아 순환이 없다.
+     *
+     * <p>삭제는 root + 자식을 <b>함께</b> 한다 — 자식은 진단용이며 독립 종결·정리되지 않는다.
      */
     @Scheduled(cron = "${app.dead-letter.purge.cron:0 40 3 * * *}")
     @SchedulerLock(name = "deadLetterPurgeJob", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
@@ -55,20 +65,49 @@ public class DeadLetterMaintenanceScheduler {
 
         long total = 0;
         for (int i = 0; i < maxBatches; i++) {
-            List<DeadLetterRecord> batch =
-                    repository.findPurgeable(cutoff, PageRequest.of(0, batchSize));
+            // **엔티티가 아니라 id 만 받는다.** 후보를 엔티티로 읽으면 영속성 컨텍스트에 적재되어
+            // 뒤의 SELECT ... FOR UPDATE 가 최신 상태를 다시 읽지 않는다 — 재검사가 캐시의 과거
+            // terminal 상태를 보고 통과해 **살아 있는 incident 를 삭제**한다.
+            List<Long> batch = repository.findPurgeableRootIds(cutoff, PageRequest.of(0, batchSize));
             if (batch.isEmpty()) {
                 break;
             }
-            repository.deleteAll(batch);
-            total += batch.size();
+            for (Long rootId : batch) {
+                total += purgeIncidentIfStillTerminal(rootId, cutoff);
+            }
             if (batch.size() < batchSize) {
                 break;
             }
         }
         if (total > 0) {
-            log.info("dead_letter_records purge: {}건 삭제 (DISCARDED cutoff={})", total, cutoff);
+            log.info("dead_letter_records purge: {}행 삭제 (종결 incident cutoff={})", total, cutoff);
         }
+    }
+
+    /**
+     * root 를 잠그고 <b>여전히 종결 상태이며 cutoff 를 지났는지</b> 다시 확인한 뒤 incident 를 삭제한다.
+     *
+     * @return 삭제된 행 수 (root + 자식). 재개방됐거나 cutoff 를 벗어났으면 0
+     */
+    private int purgeIncidentIfStillTerminal(Long rootId, LocalDateTime cutoff) {
+        DeadLetterRecord root = repository.findByIdForUpdate(rootId).orElse(null);
+        if (root == null) {
+            return 0;
+        }
+        if (!isPurgeable(root, cutoff)) {
+            log.info("DLQ 원장 purge 건너뜀 — 조회 후 상태가 바뀌었다. rootId={}, status={}", rootId, root.getStatus());
+            return 0;
+        }
+        return repository.deleteIncident(rootId);
+    }
+
+    /** {@code findPurgeableRootIds} 의 조건을 인메모리로 다시 판정한다 — 잠금 후 재검사가 목적이다. */
+    private static boolean isPurgeable(DeadLetterRecord root, LocalDateTime cutoff) {
+        return switch (root.statusValue()) {
+            case DISCARDED -> root.getDiscardedAt() != null && root.getDiscardedAt().isBefore(cutoff);
+            case RESOLVED -> root.getResolvedAt() != null && root.getResolvedAt().isBefore(cutoff);
+            case OPEN, ACKED -> false;
+        };
     }
 
     /** 미결 경보. 임계값 둘 중 하나라도 넘으면 1회 알린다 (cooldown 내 재발송 없음). */

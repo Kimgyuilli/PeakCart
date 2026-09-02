@@ -144,7 +144,9 @@ class DeadLetterRunbookRehearsalTest extends AbstractIntegrationTest {
         recorder.record(origin(5, 500L));
         Long id = repository.findAll().get(0).getId();
 
-        assertThat(endpoint.transition(id, "resolve", "ops", "x")).containsKey("error");
+        // ④-c-2b-1 이 resolve 를 실제 action 으로 만들었으므로 예시를 교체한다 — 여기서 필요한 것은
+        // "매핑되지 않은 문자열이 조용히 no-op 되지 않는다" 이고, resolve 는 더 이상 그 예가 아니다.
+        assertThat(endpoint.transition(id, "delete", "ops", "x")).containsKey("error");
         assertThat(endpoint.transition(999_999L, "acknowledge", "ops", null)).containsKey("error");
     }
 

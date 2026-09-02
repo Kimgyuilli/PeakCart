@@ -1,7 +1,9 @@
 package com.peekcart.global.deadletter;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -74,24 +76,117 @@ public interface DeadLetterRecordJpaRepository extends JpaRepository<DeadLetterR
             String clusterId, int topicGeneration, String originTopic,
             int originPartition, long originOffset, String failedConsumerGroup);
 
-    /** 미결 건수 (actuator 조회 표면 · 건수 상한 경보). */
-    @Query("SELECT COUNT(r) FROM DeadLetterRecord r WHERE r.status IN ('OPEN', 'ACKED')")
+    /**
+     * 미결 <b>incident</b> 건수 (actuator 조회 표면 · 건수 상한 경보).
+     *
+     * <p><b>집계 단위는 행이 아니라 root 다</b>(ADR-0020 §D6-3). 재발행이 실패할 때마다 자식 행이 늘어나므로
+     * 행 단위로 세면 backlog 가 사건 수보다 계속 부풀고, "재실패해도 미결은 1건" 이 거짓이 된다.
+     *
+     * <p><b>{@code root_record_id IS NULL} 을 함께 받는 것이 전환 구간 계약이다</b> — 이 컬럼은 additive 라
+     * ④-c-2a 가 적재한 기존 행이 전부 NULL 이다. 조건을 {@code = id} 로만 걸면 <b>기존 미결이 전부 탈락해
+     * backlog 가 0 으로 보인다</b>. backfill(④-c-2b-4 P23) 이후에도 이 분기는 남는다.
+     */
+    @Query("SELECT COUNT(r) FROM DeadLetterRecord r "
+            + "WHERE (r.rootRecordId IS NULL OR r.rootRecordId = r.id) AND r.status IN ('OPEN', 'ACKED')")
     long countUnresolved();
 
-    /** 가장 오래된 미결 건의 발생 시각 (age 경보). 없으면 empty. */
-    @Query("SELECT MIN(r.occurredAt) FROM DeadLetterRecord r WHERE r.status IN ('OPEN', 'ACKED')")
+    /** 가장 오래된 미결 incident 의 발생 시각 (age 경보). 없으면 empty. */
+    @Query("SELECT MIN(r.occurredAt) FROM DeadLetterRecord r "
+            + "WHERE (r.rootRecordId IS NULL OR r.rootRecordId = r.id) AND r.status IN ('OPEN', 'ACKED')")
     Optional<LocalDateTime> findOldestUnresolvedOccurredAt();
 
-    /** age 임계값을 넘긴 미결 건 (경보 대상). */
-    @Query("SELECT r FROM DeadLetterRecord r WHERE r.status IN ('OPEN', 'ACKED') "
+    /** age 임계값을 넘긴 미결 incident (경보 대상). */
+    @Query("SELECT r FROM DeadLetterRecord r "
+            + "WHERE (r.rootRecordId IS NULL OR r.rootRecordId = r.id) AND r.status IN ('OPEN', 'ACKED') "
             + "AND r.occurredAt < :threshold ORDER BY r.occurredAt ASC")
     List<DeadLetterRecord> findStaleUnresolved(@Param("threshold") LocalDateTime threshold, Pageable pageable);
 
     /**
-     * 종결 건 정리 대상. <b>{@code OPEN}/{@code ACKED} 는 대상이 아니다</b> —
-     * 장기 미결은 용량 문제가 아니라 운영 SLA 문제이고, 지우면 그 사실이 사라진다(§2.6-E).
+     * 미결 incident 중 <b>replay 를 요청한 적 없는</b> 건수 (actuator 요약).
+     *
+     * <p>{@code publication_status IS NULL} 은 ADR-0020 §D6-1 표의 정식 상태("요청 없음")이며
+     * 현 단계에서는 <b>사실상 전부</b>가 여기 해당한다. 이 값을 빼고 enum 3값만 노출하면
+     * 미결이 있는데도 발행 분포가 전부 0 인 오해를 부른다.
      */
-    @Query("SELECT r FROM DeadLetterRecord r WHERE r.status = 'DISCARDED' "
-            + "AND r.discardedAt < :threshold ORDER BY r.discardedAt ASC")
-    List<DeadLetterRecord> findPurgeable(@Param("threshold") LocalDateTime threshold, Pageable pageable);
+    @Query("SELECT COUNT(r) FROM DeadLetterRecord r "
+            + "WHERE (r.rootRecordId IS NULL OR r.rootRecordId = r.id) AND r.status IN ('OPEN', 'ACKED') "
+            + "AND r.publicationStatus IS NULL")
+    long countUnresolvedWithoutPublication();
+
+    /**
+     * 미결 incident 중 발행 축이 특정 상태인 건수 (actuator 요약).
+     * <b>{@code PUBLISHED} 도 미결에 포함된다</b> — 발행 성공은 사건 해소가 아니다(ADR-0020 §D6-2).
+     */
+    @Query("SELECT COUNT(r) FROM DeadLetterRecord r "
+            + "WHERE (r.rootRecordId IS NULL OR r.rootRecordId = r.id) AND r.status IN ('OPEN', 'ACKED') "
+            + "AND r.publicationStatus = :publicationStatus")
+    long countUnresolvedByPublicationStatus(@Param("publicationStatus") PublicationStatus publicationStatus);
+
+    /**
+     * 요청 id 가 속한 <b>canonical root 의 id</b>. 없으면 empty.
+     *
+     * <p><b>엔티티가 아니라 id 만 돌려주는 것이 계약이다.</b> 엔티티로 읽으면 그 인스턴스가 영속성
+     * 컨텍스트에 적재되고, 뒤이은 {@link #findByIdForUpdate}(SELECT ... FOR UPDATE)는 <b>DB 잠금은 얻지만
+     * 이미 관리 중인 인스턴스의 상태를 refresh 하지 않는다</b>. 그러면 잠금을 기다리는 동안 다른
+     * 트랜잭션이 커밋한 최신 상태를 못 보고 <b>캐시의 과거 상태를 기준으로 전이</b>하게 된다 —
+     * "이미 terminal 이면 no-op" 계약이 그 경로에서 깨진다.
+     */
+    @Query("SELECT CASE WHEN r.rootRecordId IS NULL THEN r.id ELSE r.rootRecordId END "
+            + "FROM DeadLetterRecord r WHERE r.id = :id")
+    Optional<Long> findRootIdOf(@Param("id") Long id);
+
+    /**
+     * incident 의 <b>활성</b> 자식(재발행 재실패분)을 잠그고 읽는다. root 자신은 제외한다.
+     *
+     * <p><b>잠금이 정확성의 일부다.</b> 잠금 없는 조회는 MySQL REPEATABLE READ 에서 이 트랜잭션이
+     * 처음 연 consistent-read <b>스냅샷</b>을 본다. root 는 {@code FOR UPDATE}(current read)로 최신을
+     * 보는데 자식만 과거 스냅샷을 보면, 앞선 트랜잭션이 root+자식을 종결한 뒤 이 트랜잭션이
+     * <b>root 에서는 no-op 하면서 자식만 덮어쓰는</b> 상태가 만들어진다 — ADR-0020 §D5-4 의
+     * "root 와 활성 자식에 원자적 전파" 가 그 경로에서 깨진다.
+     *
+     * <p><b>활성({@code OPEN}/{@code ACKED})만 잠근다.</b> 호출부가 terminal 자식을 어차피 건너뛰므로
+     * 전부 잠그면 재개방·재실패가 반복돼 과거 terminal 자식이 쌓일수록 <b>쓰지도 않을 행까지 배타
+     * 잠금</b>해 대기 집합만 커진다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM DeadLetterRecord r WHERE r.rootRecordId = :rootId AND r.id <> :rootId "
+            + "AND r.status IN ('OPEN', 'ACKED')")
+    List<DeadLetterRecord> findChildrenForUpdate(@Param("rootId") Long rootId);
+
+    /**
+     * 종결 전이·purge 를 위해 root 를 잠근다.
+     *
+     * <p>종결 전파(P5)·재개방(④-c-2b-3 P15)·purge(P4)가 <b>전부 이 잠금을 먼저 잡는다</b> —
+     * 진입 순서가 같아야 순환이 생기지 않는다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM DeadLetterRecord r WHERE r.id = :id")
+    Optional<DeadLetterRecord> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * 종결 incident 의 정리 대상 <b>root</b>. {@code OPEN}/{@code ACKED} 는 대상이 아니다 —
+     * 장기 미결은 용량 문제가 아니라 운영 SLA 문제이고, 지우면 그 사실이 사라진다(§2.6-E).
+     *
+     * <p><b>{@code COALESCE(discarded_at, resolved_at)} 를 쓰지 않는다</b>: {@code DISCARDED} → 재개방 →
+     * {@code RESOLVED} 를 거친 root 는 <b>두 시각을 모두</b> 갖고, {@code COALESCE} 는 항상 과거의
+     * {@code discarded_at} 을 골라 <b>새 종결의 보존기간이 지나기 전에 삭제</b>한다. 현재 상태에 해당하는
+     * 시각만 본다. 감사 시각 자체는 재개방 시에도 지우지 않는다.
+     */
+    @Query("SELECT r.id FROM DeadLetterRecord r "
+            + "WHERE (r.rootRecordId IS NULL OR r.rootRecordId = r.id) "
+            + "AND ((r.status = 'DISCARDED' AND r.discardedAt < :threshold) "
+            + "  OR (r.status = 'RESOLVED' AND r.resolvedAt < :threshold)) "
+            + "ORDER BY r.id ASC")
+    List<Long> findPurgeableRootIds(@Param("threshold") LocalDateTime threshold, Pageable pageable);
+
+    /**
+     * incident 1건(root + 자식 전부)을 삭제한다. <b>자식 단독 purge 경로는 두지 않는다</b> —
+     * 자식은 진단용이며 root 를 따라 종결·정리된다(ADR-0020 §D6-3).
+     *
+     * <p>{@code r.id = :rootId} 를 함께 두는 이유: 전환 구간의 기존 root 는 {@code root_record_id} 가
+     * {@code NULL} 이라 {@code rootRecordId = :rootId} 조건에 자기 자신이 걸리지 않는다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM DeadLetterRecord r WHERE r.id = :rootId OR r.rootRecordId = :rootId")
+    int deleteIncident(@Param("rootId") Long rootId);
 }

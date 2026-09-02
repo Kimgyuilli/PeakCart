@@ -16,6 +16,10 @@ import java.time.LocalDateTime;
  * <p>actuator 조회 표면은 유지한다. 메트릭은 시계열·alert 용이고, actuator 는 운영자가 지금
  * 바로 물어보는 용도다(④-c-2a §2.6-E).
  *
+ * <p><b>집계 단위는 행이 아니라 incident(root) 다</b>(ADR-0020 §D6-3). 재발행이 실패할 때마다 자식 행이
+ * 늘어나므로 행으로 세면 backlog·oldest-age 가 사건 수보다 계속 부풀고 alert 임계값이 의미를 잃는다.
+ * PromQL 식(`k8s/monitoring/shared/grafana-alerts.yml`)은 메트릭 이름만 참조하므로 <b>변경이 없다</b>.
+ *
  * <p><b>토픽·group 별 분해는 두지 않는다.</b> 태그로 달면 시계열이 (토픽 × group) 으로 늘어난다.
  * 잔량 2종으로 "쌓이고 있는가" 를 답할 수 있고, 무엇이 쌓이는지는 원장을 조회하면 된다.
  */
@@ -24,11 +28,11 @@ public class DeadLetterMetrics {
 
     public DeadLetterMetrics(MeterRegistry registry, DeadLetterRecordJpaRepository repository) {
         Gauge.builder("dlq.backlog", repository, DeadLetterRecordJpaRepository::countUnresolved)
-                .description("미결(OPEN/ACKED) DLQ 원장 건수")
+                .description("미결(OPEN/ACKED) DLQ incident 건수 — 재발행 재실패로 늘어난 자식 행은 세지 않는다")
                 .register(registry);
 
         Gauge.builder("dlq.oldest.age", repository, DeadLetterMetrics::oldestAgeSeconds)
-                .description("가장 오래된 미결 DLQ 원장의 경과 시간(초). 미결 0건이면 0")
+                .description("가장 오래된 미결 DLQ incident 의 경과 시간(초). 미결 0건이면 0")
                 .baseUnit("seconds")
                 .register(registry);
     }

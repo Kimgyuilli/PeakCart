@@ -95,11 +95,32 @@ public class DeadLetterRecord {
     @Column(name = "exception_message", length = 2000)
     private String exceptionMessage;
 
+    // --- incident 축 (④-c-2b-1, ADR-0020 §D6-3) ---
+
+    /**
+     * canonical incident root 의 id. <b>{@code root_record_id = id} 인 행이 root</b> 이고,
+     * 다른 값이면 replay 재실패로 생긴 자식이다.
+     *
+     * <p><b>{@code NULL} 은 "root" 로 해석한다.</b> ④-c-2a 가 적재한 기존 행은 이 컬럼이 없었기 때문이다.
+     * 집계 조건을 곧바로 {@code root_record_id = id} 로 걸면 <b>기존 미결이 전부 탈락해 backlog 가 0</b> 이
+     * 된다 — 자식 과다집계를 고치려다 정확히 반대 방향의 false-green 을 만드는 경로다(§D6-3 전환 구간).
+     */
+    @Column(name = "root_record_id")
+    private Long rootRecordId;
+
+    // --- 발행 축 (④-c-2b-1, ADR-0020 §D6-1) ---
+
+    /** {@code NULL} = replay 요청 없음. 어느 값도 terminal 이 아니다 — 발행 성공은 사건 해소가 아니다. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "publication_status", length = 20)
+    private PublicationStatus publicationStatus;
+
     // --- 상태 ---
 
     /**
      * {@link DeadLetterStatus} 의 name. enum 매핑이 아니라 문자열인 이유는 ④-c-2b 가
-     * {@code REPLAY_*}/{@code RESOLVED} 를 <b>마이그레이션 없이</b> 추가할 수 있게 하기 위함이다(§2.6-A).
+     * {@code RESOLVED} 를 <b>마이그레이션 없이</b> 추가할 수 있게 하기 위함이다(§2.6-A).
+     * 실제로 ④-c-2b-1 이 그 확장점을 썼다.
      */
     @Column(name = "status", nullable = false, length = 30)
     private String status;
@@ -121,6 +142,12 @@ public class DeadLetterRecord {
 
     @Column(name = "discarded_by", length = 120)
     private String discardedBy;
+
+    @Column(name = "resolved_at")
+    private LocalDateTime resolvedAt;
+
+    @Column(name = "resolved_by", length = 120)
+    private String resolvedBy;
 
     @Column(name = "note", length = 1000)
     private String note;
@@ -155,6 +182,53 @@ public class DeadLetterRecord {
 
     public DeadLetterStatus statusValue() {
         return DeadLetterStatus.valueOf(status);
+    }
+
+    /** 이 행이 canonical incident root 인가. {@code NULL} 은 root 로 본다(전환 구간). */
+    public boolean isRoot() {
+        return rootRecordId == null || rootRecordId.equals(id);
+    }
+
+    /**
+     * 자기 자신을 root 로 지정한다. 신규 적재 직후 1회만 호출된다.
+     *
+     * <p><b>{@code LAST_INSERT_ID()} 를 쓰지 않는 이유</b>: {@code INSERT IGNORE} 가 중복으로 건너뛰면
+     * 그 함수는 <b>직전 성공 INSERT 의 값</b>을 그대로 돌려줘 남의 행을 root 로 지목한다.
+     */
+    public void assignSelfRoot() {
+        if (this.rootRecordId == null) {
+            this.rootRecordId = this.id;
+        }
+    }
+
+    /**
+     * 이 행을 다른 incident 의 <b>자식</b>으로 잇는다. 재발행 재실패분을 원래 사건에 귀속시키는
+     * 경로(④-c-2b-3 P15)가 쓴다 — 자식은 backlog 에 세지 않고 root 를 따라 종결·정리된다.
+     */
+    public void linkToRoot(Long rootId) {
+        this.rootRecordId = rootId;
+    }
+
+    /**
+     * 해소를 확인했음을 기록한다. <b>근거가 없으면 거부한다</b> — {@code RESOLVED} 는 "무엇을 보고
+     * 해소를 확인했는지"(도메인 상태 조회 결과 등)가 남아야 {@code DISCARDED} 와 구분된다.
+     *
+     * <p>이 전이는 <b>사람만</b> 개시한다. broker ack 로는 도달하지 않는다(ADR-0020 §D6-2).
+     *
+     * @return 실제로 전이했으면 true
+     */
+    public boolean resolve(String actor, String evidence) {
+        if (evidence == null || evidence.isBlank()) {
+            throw new IllegalArgumentException("RESOLVED 는 해소를 확인한 근거 기록이 필수입니다");
+        }
+        if (statusValue().isTerminal()) {
+            return false;
+        }
+        this.status = DeadLetterStatus.RESOLVED.name();
+        this.resolvedAt = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
+        this.resolvedBy = actor;
+        this.note = evidence;
+        return true;
     }
 
     /**

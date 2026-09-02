@@ -68,6 +68,17 @@ public class DeadLetterRecorder {
                 candidate.getExceptionType(), candidate.getExceptionMessage(),
                 candidate.getOccurredAt());
 
+        if (inserted == 1) {
+            // self-root 지정 (④-c-2b-1 P3). INSERT 와 나눈 이유는 INSERT IGNORE 가 건너뛴 경우
+            // LAST_INSERT_ID() 가 **직전 성공 INSERT 의 값**을 돌려줘 남의 행을 root 로 지목하기 때문이다.
+            // 같은 트랜잭션 안이므로 이 조회는 방금 넣은 행을 본다.
+            repository.findByClusterIdAndTopicGenerationAndOriginTopicAndOriginPartitionAndOriginOffsetAndFailedConsumerGroup(
+                            candidate.getClusterId(), candidate.getTopicGeneration(),
+                            candidate.getOriginTopic(), candidate.getOriginPartition(),
+                            candidate.getOriginOffset(), candidate.getFailedConsumerGroup())
+                    .ifPresent(DeadLetterRecord::assignSelfRoot);
+        }
+
         if (inserted == 0) {
             repository.incrementAttempt(
                     candidate.getClusterId(), candidate.getTopicGeneration(),

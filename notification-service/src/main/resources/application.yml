@@ -56,7 +56,6 @@ app:
       - kid: peekcart-gateway-dev-2026
         location: classpath:keys/dev-gateway-internal-public.pem
   # processed_events 멱등성 보존 정책 (ADR-0012 D5 · 구현 ② PR3) — 동작 정책이므로 base 소유(ADR-0007).
-  # notification 은 소비 전용(outbox 미소유) → outbox retention 없음.
   idempotency:
     retention: 9d          # floor 4창 max(7d) 이상 + ADR-0020 D4-3 replay 안전여유(dlq-replay-window 7d + clock-skew 5m + cleanup-safety 1d = 8d 5m) 이상 — 미만이면 부팅 실패
     # ADR-0020 D4-3 — 등호 허용(7d==7d)은 창 끝을 보장하지 못한다. 여유를 설정으로 강제한다.
@@ -70,6 +69,19 @@ app:
     cleanup:
       batch-size: 500
       max-batches-per-run: 20
+
+  # outbox 발행 정책 (ADR-0020 D2 · 구현 ④-c-2b-2 P9) — 동작 정책이므로 base 소유(ADR-0007).
+  # notification 은 도메인 이벤트를 발행하지 않지만 자기 DLQ 원장의 replay 재발행 주체다(D8 예외).
+  # cleanup.cron 은 선언하지 않는다 — 3서비스도 @Scheduled 인라인 기본값을 쓴다(키를 여기만 두면 4벌이 갈라진다).
+  outbox:
+    retention: 7d          # PUBLISHED outbox_events 보존기간 (구현 ② PR3 과 동일 계약)
+    # 서비스별 poller 소유권 분리 — order/product/payment 와 겹치지 않는 이름이어야 한다.
+    lock-name: notificationOutboxPollingJob
+    polling:
+      batch-size: 100
+      max-retry: 5
+      publish-timeout: 6s
+      cycle-timeout: 4m
 
   # DLQ 원장 운영 계약 (구현 ④-c-2a P5) — 동작 정책이므로 base 소유(ADR-0007).
   dead-letter:

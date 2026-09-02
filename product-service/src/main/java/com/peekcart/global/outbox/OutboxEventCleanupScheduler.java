@@ -20,7 +20,9 @@ import java.time.LocalDateTime;
  * processed cleanup 과 동일({@link IdempotencyRetentionProperties.Cleanup} 공유 — {@code cutoff} 1회 계산 후
  * 작은 batch 반복).
  *
- * <p>발행 서비스(product/order/payment)에만 물리 배치된다(구현 ② PR3 매트릭스 — notification/user 제외).
+ * <p>outbox 를 소유한 4서비스(order/product/payment/notification)에 물리 배치된다. notification 은
+ * 도메인 이벤트를 발행하지 않지만 DLQ replay 재발행 주체라 같은 테이블·잡을 갖는다(ADR-0020 D2 · ④-c-2b-2 P9).
+ * user-service 는 Kafka 소비/발행이 없어 제외된다.
  */
 @Component
 @EnableConfigurationProperties({OutboxRetentionProperties.class, IdempotencyRetentionProperties.class})

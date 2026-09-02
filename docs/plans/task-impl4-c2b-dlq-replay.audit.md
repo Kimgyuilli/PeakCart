@@ -239,3 +239,13 @@ self-test 9b(“reconciler drift 를 잡는가”)는 **내가 기억한 그 파
   뒤 케이스를 red 로 만들던 것. **fixture 가 현실을 왜곡하면 self-test 가 검사하는 대상이 현실이 아니다.**
 - 변이 **M-7**(014 검사 제거) red · **M-8**(byte 동일 조건 제거 → per-service 파일 오탐) red.
   양방향을 다 잡는다. self-test **18종** 통과.
+
+## 2026-09-03 01:10 — `/ship` (④-c-2b-2)
+
+- **PR**: https://github.com/Kimgyuilli/PeakCart/pull/102
+- **precheck**: `ok` (warnings 0) — 자동 통과
+- **커밋 6개** (한 커밋 = 한 분류): `feat(outbox)` · `feat(deadletter)` · `test(outbox)` · `chore(lint)` ·
+  `fix(adr)` · `docs(impl4-c2b)`. ADR 과 계획서는 별도 커밋.
+- **갱신**: `docs/TASKS.md`(④ 행에 #102 + 범위 변화·미충족 기록) · `docs/progress/PHASE4.md`(작업 이력 + 미충족 7항목)
+- **편입 부채**: 없음
+- **머지하지 않았다.** **diff 리뷰가 미측정 상태**로 남아 있으므로 머지 전 리뷰를 권한다.

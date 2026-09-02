@@ -50,7 +50,7 @@ ADR-0010(서비스 경계·토픽 4개·Saga 골격)·ADR-0011(모듈 구조·�
 | Product | products, categories, **inventories(+예약 컬럼, D3)** | **outbox_events, processed_events** (신규 — Product 가 producer/consumer) |
 | Order | orders, order_items, carts, cart_items | outbox_events, processed_events |
 | Payment | payments, payment_failures, webhook_logs | outbox_events, processed_events |
-| Notification | notifications | processed_events |
+| Notification | notifications | processed_events, **outbox_events** (ADR-0020 D2 — replay 재발행 주체, Update Log 2026-09-02) |
 
 > `05-data-design.md §11` Product DB 에 `outbox_events`/`processed_events` 추가 필요(Layer 1 정정). DDL 은 구현 ②.
 
@@ -152,3 +152,23 @@ choreography 단계:
 
 **커밋**: `9f74bd6` — `fix(adr): ADR-0012 §D2·구현⑤ 산출물의 사실 정정 + Update Log (P11)`
 (해시는 자기 자신을 참조할 수 없어 후속 커밋 `7a7b719` 에서 채웠다 — diff 리뷰 1R #3)
+
+### 2026-09-02 — Notification `outbox_events` 신설 반영 (`fix(adr):`)
+
+**변경 사유**: ADR-0020 §D2 가 notification-service 에 `outbox_events` 를 신설하기로 결정했고(본 ADR §D1 의
+Notification 행을 개정하도록 명시), 구현 ④-c-2b-2 P9 가 그 테이블·poller·ShedLock 잡을 실제로 만들었다.
+표를 그대로 두면 **ADR 이 거짓을 말하는 구간**이 후속 3개 PR 동안 이어진다.
+
+| 위치 | 기존 | 정정 |
+|---|---|---|
+| §D1 표 Notification 행 · infra 테이블 | `processed_events` | `processed_events, outbox_events` |
+
+**왜 소비 전용 서비스가 outbox 를 갖게 됐나**: DLQ replay 는 **원장 소유 서비스가 자기 원장 행을 재발행**하는
+것이다(ADR-0020 §D8-3 fence). notification 도 자기 DLQ 원장을 가지므로 재발행 주체가 되고, 재발행은 별도
+테이블이 아니라 **기존 outbox 경로**를 탄다(§D3 — `replay_outbox` 분리는 Alternative D 로 기각됐다).
+
+**바뀌지 않은 것**: DB-per-service 경계, 교차 FK 금지, 이벤트/Saga 계약. notification 은 여전히 **도메인
+이벤트를 발행하지 않는다** — 이 테이블에 들어가는 것은 replay 재발행뿐이다. 본 ADR §D4 의 producer 컬럼이
+함의하던 "이 토픽에 write 하는 유일한 서비스" 는 ADR-0020 §D8-4 가 이미 부분 무효화했다.
+
+**커밋**: 구현 ④-c-2b-2 (`fix(adr):` — 해시는 자기 자신을 참조할 수 없어 후속 커밋에서 채운다)

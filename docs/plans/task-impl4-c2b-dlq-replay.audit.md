@@ -249,3 +249,15 @@ self-test 9b(“reconciler drift 를 잡는가”)는 **내가 기억한 그 파
 - **갱신**: `docs/TASKS.md`(④ 행에 #102 + 범위 변화·미충족 기록) · `docs/progress/PHASE4.md`(작업 이력 + 미충족 7항목)
 - **편입 부채**: 없음
 - **머지하지 않았다.** **diff 리뷰가 미측정 상태**로 남아 있으므로 머지 전 리뷰를 권한다.
+
+## 2026-09-03 16:40 — CI 실패 대응 (④-c-2b-2, PR #102)
+
+- **CI**: `test (order-service)` 만 실패 — `317 tests, 1 failed` (`OutboxAtLeastOnceIntegrationTest:105`).
+  lint·guards·나머지 5 test job pass. `gate` 실패는 전파, e2e/images/publish 는 그로 인한 skip.
+- **운영 코드 결함 0.** 전부 내 테스트 하네스 결함이며 4건이었다. 상세·반증된 가설 4개·내가 틀렸던 추론
+  2건은 계획서 §5 “CI 후속” 에 기록.
+- **핵심 증거**: 실패 시 `brokerEndOffsets` 전부 0 → 소비 실패가 아니라 **1사이클 send 실패**(토픽 준비 경합).
+- **계획 C-9 결정을 뒤집었다** — `@Scheduled` 리터럴 유지 → `fixedDelayString` 설정화. 배경 잡이 도는 상태에서는
+  발행 횟수를 세는 테스트가 구조적으로 성립하지 않는다. 운영 기본값 5s 불변, 4서비스 복제 유지(parity green).
+- **검증**: 두 클래스 동시 6회 연속 green(느린 실행 포함) · notification 2종 green · parity self-test 18종 green.
+- **남은 것**: CI 재확인. Codex diff 리뷰는 여전히 **미측정**(usage limit).

@@ -205,7 +205,7 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 | C-6 | P12 의 cleanup 제외 조건을 `NOT EXISTS (… d.outbox_event_id = o.id …)` 로 표기 | **그대로는 실행되지 않는다** — 다만 이유는 초안 정정이 처음 적은 것과 다르다(리뷰 A #2 가 반증, `mysql:8.0.46` 실측으로 확인). 실제 원인은 **alias `o` 를 선언한 적이 없다**는 것뿐이다 | **P12 SQL 정정** — 정규명 `outbox_events.id` (또는 `AS o` 선언). 아래 실측 매트릭스 참조 |
 | C-7 | (초안 무언급) reconciler 는 `publication_status='REQUESTED'` 원장 행을 조회한다 | 해당 컬럼에 **인덱스가 없다**(V8 은 `(root_record_id, status)`·`(last_replay_attempt_id)` 만 생성) | **인덱스를 추가하지 않는다** — `dead_letter_records` 는 DLQ 유입량에 유계이고, 같은 컬럼을 스캔하는 `countUnresolvedByPublicationStatus`(2b-1)가 이미 무인덱스로 돈다. 4 DB 마이그레이션 + parity lint glob 확장 비용이 이득을 넘는다. **§10 R8 로 이연** |
 | C-8 | P9 가 notification base yml 에 `cleanup.cron` 키를 선언 | `app.outbox.cleanup.cron` 은 **order/product/payment 어느 yml 에도 선언돼 있지 않다**(`@Scheduled` 인라인 기본값 `0 45 3 * * *` 만) | **선언하지 않는다** — notification 에만 선언하면 4벌이 갈라진다. P9 의 키 목록에서 제거 |
-| C-9 | (초안 무언급) `OutboxPollingScheduler` 는 `@Scheduled(fixedDelay = 5000)` **리터럴**이다 | ④-d-2b P17 의 “주기를 타입 안전 properties 로, 인라인 기본값 금지” 계약은 **`app.scheduler.*`·`app.refund.*` 에만** 적용됐다(실측: outbox·deadletter·idempotency 스케줄러는 전부 인라인 유지) | **복제본도 그대로 둔다** — 여기서 고치면 P17 범위를 조용히 넓히고 byte 동일 복제 계약이 깨진다 |
+| C-9 | (초안 무언급) `OutboxPollingScheduler` 는 `@Scheduled(fixedDelay = 5000)` **리터럴**이다 | ④-d-2b P17 의 “주기를 타입 안전 properties 로, 인라인 기본값 금지” 계약은 **`app.scheduler.*`·`app.refund.*` 에만** 적용됐다(실측: outbox·deadletter·idempotency 스케줄러는 전부 인라인 유지) | ~~복제본도 그대로 둔다~~ → **CI 실패가 이 판단을 뒤집었다 (아래 “CI 후속” 참조)**. 주기를 `fixedDelayString` 으로 뺐다 — 배경 잡이 도는 상태에서는 발행 횟수를 세는 테스트가 성립하지 않는다. 운영 기본값 5s 는 불변 |
 | C-10 | (초안 무언급) notification 에 poller 를 배선할 수 있는가 | `KafkaTemplate<String,String>`(DLQ recoverer 가 이미 사용) · `SlackPort` · `@EnableScheduling` · `shedlock` 테이블 **전부 존재** | 신규 인프라 0 |
 | C-11 | (초안 무언급) sentinel/원장 id 가 컬럼 폭에 들어가는가 | 3서비스 `outbox_events` DDL byte 동일 · `event_type VARCHAR(50)`(`__replay__` 수용) · `aggregate_id VARCHAR(50)`(원장 id 문자열 수용) | 유지 |
 | C-12 | (초안 무언급) ADR-0012 D1 표 갱신 | `0012:53` 이 아직 `| Notification | notifications | processed_events |` 이다. ADR-0020 D2 가 개정을 지시했으나 **미반영** | **P9-c 신설** — 이 PR 이 표를 참으로 만드는 순간이므로 Update Log 를 같은 PR 에서 단다 |
@@ -240,6 +240,38 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 로 오독한다.
 **발행 권한 근거는 ADR-0020 D8** — notification 은 자기가 프로비저닝하지 않은 토픽에 write 하게 된다.
 `NewTopic` 소유는 옮기지 않으므로 ADR-0011 D2 는 무영향이다 (C-13).
+
+#### CI 후속 (2026-09-03) — 테스트 3종의 결함 4건
+
+PR [#102] 의 CI 에서 `OutboxAtLeastOnceIntegrationTest` 가 실패했다. **운영 코드 결함이 아니라 전부 내 테스트
+하네스 결함**이었고, 원인을 확정하기까지 가설 4개가 실측으로 반증됐다.
+
+| 가설 | 판정 |
+|---|---|
+| Mockito 재스터빙이 배경 `@Scheduled` 호출과 경합 | **참** — CI 실패(`RuntimeException at :105`)의 원인. 다만 이것만으로는 로컬 실패가 남았다 |
+| 배경 스케줄러가 같은 행을 집어간다 | 껐는데도 실패 → **단독 원인 아님** |
+| 첫 발행이 6s 타임아웃을 넘긴다 | `publish-timeout=30s` 로도 실패 → **반증** |
+| 앱과 drain 이 서로 다른 Kafka 컨테이너를 본다 | 부트스트랩 주소 일치 실측 → **반증** |
+
+**확정된 원인**: 실패 시 `brokerEndOffsets` 가 **전부 0** 이었다 — 소비를 못 한 게 아니라 **1사이클의 send 가
+실제로 실패**한 것이다. 컨테이너가 여럿 뜬 느린 실행에서 **토픽 생성이 끝나기 전에 첫 send 가 나가** 메타데이터
+대기로 타임아웃한다.
+
+**도중에 내가 틀렸던 추론 2건도 남긴다**:
+- *“`hasMessage("DB down")` 이 통과했으니 send 는 성공했다”* — **거짓**. send 가 실패해도
+  `handlePublishFailure` 끝의 save 가 같은 예외를 덮어써 밖으로 나간다. 이 착각이 진단을 한 라운드 지연시켰다.
+- *“배경 잡을 껐다”* — **거짓**. `fixedDelay` 는 **간격**만 정하고 첫 실행은 기동 직후 그대로 일어난다
+  (로그의 `[scheduling-1] Unexpected error occurred in scheduled task` 가 증거).
+
+**수정 4건** (세 테스트 클래스 공통):
+1. **`awaitTopicReady`** — 측정 전 토픽·리더 준비 대기. 이 테스트가 재는 것은 재발행이지 토픽 프로비저닝이 아니다
+2. **측정을 소비 → broker end offset 으로 전환** — group 조인·리밸런스·fetch 타이밍이라는 변수를 제거
+3. **1사이클 ack 를 명시적으로 단언** — 이 단언이 없어 첫 발행이 조용히 사라져도 통과하고 **마지막 개수
+   단언에서 엉뚱하게** 터졌다. 실제로 이 단언이 원인을 특정했다
+4. `drain()` 을 `subscribe` → `assign` + `seekToBeginning`, Mockito 재스터빙 → `AtomicBoolean` 단일 answer
+
+**검증**: 두 클래스 동시 실행 **6회 연속 통과**(6m20s·8m15s 짜리 느린 실행 포함 — 예전에 실패하던 것이 정확히
+그 구간이다). notification 2종·parity lint(self-test 18종) green.
 
 **P9-b.** `outbox_events` parity 대조기 (C-5). `dead-letter-schema-parity-lint.sh` 를 확장한다 —
 신규 스크립트를 만들지 않는 이유는 대조 대상·판단 근거("4개 모듈에 흩어져 한 모듈의 테스트가 다른 모듈을 볼 수 없다")가

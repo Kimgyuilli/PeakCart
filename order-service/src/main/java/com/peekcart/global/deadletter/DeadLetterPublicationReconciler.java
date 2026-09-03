@@ -50,7 +50,9 @@ public class DeadLetterPublicationReconciler {
      * <p>주기를 짧게 두는 이유: 이 전이가 늦어지면 사건 종결(I-1 가드)이 그만큼 막힌다.
      * outbox poller 와 같은 주기 축에 둔다.
      */
-    @Scheduled(fixedDelay = 5000)
+    // 주기 설정화 근거는 OutboxPollingScheduler 와 같다 — 배경 전이가 fixture 상태를 바꾸면
+    // "부재를 강등하지 않는다"·"제외 조건이 막는다" 같은 단언이 관측 전에 무너진다.
+    @Scheduled(fixedDelayString = "${app.dead-letter.reconcile.delay:5s}")
     @SchedulerLock(name = "deadLetterPublicationReconcileJob", lockAtMostFor = "PT5M", lockAtLeastFor = "PT4S")
     @Transactional
     public void reconcile() {

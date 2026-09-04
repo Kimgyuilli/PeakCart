@@ -58,6 +58,9 @@ public class DeadLetterProperties {
     @Valid
     private final Purge purge = new Purge();
 
+    @Valid
+    private final Reconcile reconcile = new Reconcile();
+
     /**
      * 해당 토픽의 세대를 돌려준다.
      *
@@ -113,6 +116,17 @@ public class DeadLetterProperties {
     public static class Payload {
         /** 저장 상한(문자). 초과분은 잘리고 {@code payload_truncated} 로 표시한다. */
         private int maxLength = 8000;
+    }
+
+    /**
+     * 발행 축 reconciler (ADR-0020 §D6-4 · 구현 ④-c-2b-2 P12).
+     * {@code publication_status} 를 전이시키는 <b>유일한 주체</b>이며, 관리 API 는 {@code REQUESTED} 까지만 만든다.
+     */
+    @Getter
+    @Setter
+    public static class Reconcile {
+        /** 한 사이클에 대조할 {@code REQUESTED} 행 상한 (unbounded 조회 방지). */
+        private int batchSize = 200;
     }
 
     /** 종결 건 정리. {@code OPEN}/{@code ACKED} 는 대상이 아니다 — 장기 미결은 운영 SLA 문제다. */

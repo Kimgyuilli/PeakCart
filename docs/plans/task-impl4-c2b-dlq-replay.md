@@ -117,7 +117,7 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 | PR | 항목 | 상태 |
 |---|---|---|
 | 2b-1 | P1 · P1-b · P2 · P3 · P4 · P5 · P6 · P7 | ✅ **완료** — diff 리뷰 3R(12건 전량 반영, 3R P1=0) · 918 tests 0 failed · 변이 8종 red |
-| 2b-2 | P8 ~ P13 | 🔲 |
+| 2b-2 | P8 · **P9 · P9-b · P9-c** · P10 ~ P13 | 🔄 구현 완료 · 902 tests 0 실패(모듈별) · 변이 14종 red · lint 7종 green(parity self-test 18종) · **Codex diff 리뷰 미실행(quota)** |
 | 2b-3 | P14 ~ P17 | 🔲 |
 | 2b-4 | P18 ~ P25 | 🔲 |
 
@@ -191,6 +191,27 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 
 ### PR ④-c-2b-2 — 발행 표면
 
+#### 착수 전 코드 검증 (2026-09-02) — 계획이 바뀐 곳
+
+> 원칙: 전제는 ADR 이 아니라 **현재 코드**다. 아래는 P8~P13 초안의 진술을 직접 grep/파일 확인한 결과다.
+
+| # | 초안의 진술 | 확인 결과 | 처분 |
+|---|---|---|---|
+| C-1 | `OutboxPollingService:83-86`(ack→`markPublished`→save) · `:116`(실패 경로 재save) · `:119-124`(`event_type` 을 토픽으로) | **전부 정확**. `buildRecord` 는 `new ProducerRecord<>(event_type, null, aggregate_id, payload)` + trace/user 헤더 2종 | 유지 |
+| C-2 | `OutboxEventJpaRepository:31-33` 이 `status='PUBLISHED' AND published_at < cutoff` 를 **무조건** 삭제 | 정확 (native `DELETE ... LIMIT :limit`) | 유지 |
+| C-3 | 거짓이 되는 javadoc **2곳**(`OutboxEventCleanupScheduler:23` · `OutboxRetentionProperties:18-19`) | 정확하나 **4곳이 더 있다**(리뷰 A #1 로 2곳 추가) — `notification-service/application.yml`(“소비 전용(outbox 미소유)”) · `notification-service/build.gradle:27-28`(“cleanup 소유(processed only)”) · `build.gradle:31-32`(“소비 전용이라 outbox poller 가 없어”) · `NotificationApplication:12`. **`NotificationApplication:12` 는 P9 를 기다릴 것 없이 이미 거짓이다** — `DeadLetterMaintenanceScheduler:58·114` 가 이미 `@Scheduled` 2개를 갖는데 javadoc 은 `@EnableScheduling` 을 processed_events cleanup 전용으로 서술한다 | **P9 를 6곳으로 확대** |
+| C-4 | `global/outbox` 8파일 복제 · `OutboxEventStatus` 는 payment 판본(`BACKFILL` 없음) | 정확. 8파일 중 **7개가 order↔product↔payment byte 동일**이고 `OutboxEventStatus` 만 갈린다(order/product 에 `BACKFILL` 있음) | 유지 |
+| C-5 | “3서비스와 스키마 동일 — **parity lint 가 대조한다**” | **거짓**. `dead-letter-schema-parity-lint.sh` 는 `dead_letter_records` 전용이다 — `CREATE TABLE dead_letter_records` 추출 · `V*__dead_letter_records.sql`/`V*__dead_letter_replay_axis.sql` glob · `global/deadletter` java 9파일. **`outbox_events` 를 대조하는 검사는 존재하지 않는다** | **P9-b 신설** — 대조기를 만들지 않으면 notification 판본이 갈라져도 아무 것도 실패하지 않는다 |
+| C-6 | P12 의 cleanup 제외 조건을 `NOT EXISTS (… d.outbox_event_id = o.id …)` 로 표기 | **그대로는 실행되지 않는다** — 다만 이유는 초안 정정이 처음 적은 것과 다르다(리뷰 A #2 가 반증, `mysql:8.0.46` 실측으로 확인). 실제 원인은 **alias `o` 를 선언한 적이 없다**는 것뿐이다 | **P12 SQL 정정** — 정규명 `outbox_events.id` (또는 `AS o` 선언). 아래 실측 매트릭스 참조 |
+| C-7 | (초안 무언급) reconciler 는 `publication_status='REQUESTED'` 원장 행을 조회한다 | 해당 컬럼에 **인덱스가 없다**(V8 은 `(root_record_id, status)`·`(last_replay_attempt_id)` 만 생성) | **인덱스를 추가하지 않는다** — `dead_letter_records` 는 DLQ 유입량에 유계이고, 같은 컬럼을 스캔하는 `countUnresolvedByPublicationStatus`(2b-1)가 이미 무인덱스로 돈다. 4 DB 마이그레이션 + parity lint glob 확장 비용이 이득을 넘는다. **§10 R8 로 이연** |
+| C-8 | P9 가 notification base yml 에 `cleanup.cron` 키를 선언 | `app.outbox.cleanup.cron` 은 **order/product/payment 어느 yml 에도 선언돼 있지 않다**(`@Scheduled` 인라인 기본값 `0 45 3 * * *` 만) | **선언하지 않는다** — notification 에만 선언하면 4벌이 갈라진다. P9 의 키 목록에서 제거 |
+| C-9 | (초안 무언급) `OutboxPollingScheduler` 는 `@Scheduled(fixedDelay = 5000)` **리터럴**이다 | ④-d-2b P17 의 “주기를 타입 안전 properties 로, 인라인 기본값 금지” 계약은 **`app.scheduler.*`·`app.refund.*` 에만** 적용됐다(실측: outbox·deadletter·idempotency 스케줄러는 전부 인라인 유지) | ~~복제본도 그대로 둔다~~ → **CI 실패가 이 판단을 뒤집었다 (아래 “CI 후속” 참조)**. 주기를 `fixedDelayString` 으로 뺐다 — 배경 잡이 도는 상태에서는 발행 횟수를 세는 테스트가 성립하지 않는다. 운영 기본값 5s 는 불변 |
+| C-10 | (초안 무언급) notification 에 poller 를 배선할 수 있는가 | `KafkaTemplate<String,String>`(DLQ recoverer 가 이미 사용) · `SlackPort` · `@EnableScheduling` · `shedlock` 테이블 **전부 존재** | 신규 인프라 0 |
+| C-11 | (초안 무언급) sentinel/원장 id 가 컬럼 폭에 들어가는가 | 3서비스 `outbox_events` DDL byte 동일 · `event_type VARCHAR(50)`(`__replay__` 수용) · `aggregate_id VARCHAR(50)`(원장 id 문자열 수용) | 유지 |
+| C-12 | (초안 무언급) ADR-0012 D1 표 갱신 | `0012:53` 이 아직 `| Notification | notifications | processed_events |` 이다. ADR-0020 D2 가 개정을 지시했으나 **미반영** | **P9-c 신설** — 이 PR 이 표를 참으로 만드는 순간이므로 Update Log 를 같은 PR 에서 단다 |
+| C-13 | (초안 무언급) notification 이 **남의 토픽에 발행**하게 되는 근거 | ADR-0020 **D8**(`1 topic = 1 producer` 명시적 예외 · 프로비저닝 소유와 발행 권한 분리). `NewTopic` 소유는 그대로이므로 ADR-0011 D2 는 무영향 | P9·P11 에 근거 명시 |
+| C-14 | (무언급) notification 이 outbox 를 갖게 되면 갱신이 필요한 **운영 표면**이 있는가 | **없다 — 스윕으로 확인**. `.github/workflows/ci.yml`·`k8s/**` 에 outbox 참조 0건(설정이 이미지 안 base yml 소유) · notification `application-k8s.yml`/`application-local.yml` 에 outbox·shedlock 키 0건(ADR-0007 정합) · `observability-promql-lint.sh` 의 유일한 outbox 문자열은 self-test 치환용이고 per-service alert 목록이 아니다 · ShedLock 락 이름은 3서비스가 각각 다른 값을 선언하고 있어 `notificationOutboxPollingJob` 추가에 충돌 없다(DB-per-service 라 `shedlock` 테이블 자체가 분리) · `docs/runbooks/dlq-recovery.md:213` 의 outbox 서술은 서비스 중립이라 참으로 남는다 | **범위 확대 없음**. 갱신 대상은 계획에 이미 있는 `EXPECTED_MIGRATIONS`(notification `1~5`) · `05:177`(P24) · ADR-0012 D1(P9-c) 뿐이다 |
+
 **P8.** `outbox_events` additive 마이그레이션 **3 DB** (order **V9** · product **V7** · payment **V7**). 전부 nullable:
 `record_kind VARCHAR(10)` · `destination_topic VARCHAR(120)` · `destination_partition INT` ·
 `record_key VARCHAR(255)` · `source_record_timestamp BIGINT` · `replay_target_event_id VARCHAR(36)` ·
@@ -199,14 +220,81 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 `EXPECTED_MIGRATIONS` → `order 1~9 · product 1~7 · payment 1~7 · notification 1~5`.
 
 **P9.** notification outbox 신설 (D2). Flyway **V5** 로 `outbox_events` 를 **replay 컬럼 포함 상태로** 생성
-(3서비스와 스키마 동일 — parity lint 가 대조한다) + `global/outbox` 8파일 복제(`OutboxEventStatus` 는 payment 판본 =
-`BACKFILL` 없음) + `OutboxRetentionProperties` 활성화.
-설정키 `app.outbox.*`(`retention` · `lock-name: notificationOutboxPollingJob` · `polling.*` · `cleanup.cron`)는
+(3서비스 `V1__init_*.sql` 의 DDL + P8 의 additive 컬럼을 합친 최종 형태 — 대조기는 P9-b 가 만든다) +
+`global/outbox` 8파일 복제(`OutboxEventStatus` 는 payment 판본 = `BACKFILL` 없음, 나머지 7파일은 **byte 동일**) +
+`OutboxRetentionProperties` 활성화. `@Scheduled` 인라인 기본값은 **그대로 복제한다** (C-9).
+설정키 `app.outbox.*`(`retention` · `lock-name: notificationOutboxPollingJob` · `polling.*`)는
 **`notification-service/src/main/resources/application.yml` (base) 소유**다 — 런타임 동작 정책이므로 ADR-0007 상
 프로파일 배치가 금지된다. 프로파일에 중복·override 가 없음을 바인딩 테스트로 고정한다.
+**`cleanup.cron` 은 선언하지 않는다 (C-8)** — 3서비스 어디에도 없는 키다.
 `docs/05-data-design.md:177` 의 "notification 은 `processed_events` 만" 서술은 P24 에서 정정한다.
-**소스 javadoc 계약도 같은 PR 에서 고친다 (2R #13)** — `OutboxEventCleanupScheduler:23`("notification/user 제외")과
-`OutboxRetentionProperties:18-19`("product/order/payment 만 활성화")는 이 PR 이 머지되는 순간 **거짓이 된다**.
+**소스 javadoc/주석 계약은 같은 PR 에서 고친다 (2R #13 · C-3 으로 6곳 확대)** — 이 PR 이 머지되는 순간
+**거짓이 되는** 진술 5곳: `OutboxEventCleanupScheduler:23`("notification/user 제외") ·
+`OutboxRetentionProperties:18-19`("product/order/payment 만 활성화") ·
+`notification-service/application.yml`("notification 은 소비 전용(outbox 미소유) → outbox retention 없음") ·
+`notification-service/build.gradle:27-28`("notification 은 cleanup 소유(processed only)") ·
+`build.gradle:31-32`("notification 은 소비 전용이라 outbox poller 가 없어 미보유였음").
+**+ 이미 거짓인 것 1곳**: `NotificationApplication:12` 가 `@EnableScheduling` 을 processed_events cleanup 전용으로
+서술하는데 `DeadLetterMaintenanceScheduler:58·114` 의 `@Scheduled` 2개가 이미 그 위에 얹혀 있다(④-c-2a 이후).
+**선재 결함이지만 같은 문장을 이 PR 이 또 건드리므로 함께 고친다** — 남겨두면 다음 사람이 "이 PR 이 만든 stale"
+로 오독한다.
+**발행 권한 근거는 ADR-0020 D8** — notification 은 자기가 프로비저닝하지 않은 토픽에 write 하게 된다.
+`NewTopic` 소유는 옮기지 않으므로 ADR-0011 D2 는 무영향이다 (C-13).
+
+#### CI 후속 (2026-09-03) — 테스트 3종의 결함 4건
+
+PR [#102] 의 CI 에서 `OutboxAtLeastOnceIntegrationTest` 가 실패했다. **운영 코드 결함이 아니라 전부 내 테스트
+하네스 결함**이었고, 원인을 확정하기까지 가설 4개가 실측으로 반증됐다.
+
+| 가설 | 판정 |
+|---|---|
+| Mockito 재스터빙이 배경 `@Scheduled` 호출과 경합 | **참** — CI 실패(`RuntimeException at :105`)의 원인. 다만 이것만으로는 로컬 실패가 남았다 |
+| 배경 스케줄러가 같은 행을 집어간다 | 껐는데도 실패 → **단독 원인 아님** |
+| 첫 발행이 6s 타임아웃을 넘긴다 | `publish-timeout=30s` 로도 실패 → **반증** |
+| 앱과 drain 이 서로 다른 Kafka 컨테이너를 본다 | 부트스트랩 주소 일치 실측 → **반증** |
+
+**확정된 원인**: 실패 시 `brokerEndOffsets` 가 **전부 0** 이었다 — 소비를 못 한 게 아니라 **1사이클의 send 가
+실제로 실패**한 것이다. 컨테이너가 여럿 뜬 느린 실행에서 **토픽 생성이 끝나기 전에 첫 send 가 나가** 메타데이터
+대기로 타임아웃한다.
+
+**도중에 내가 틀렸던 추론 2건도 남긴다**:
+- *“`hasMessage("DB down")` 이 통과했으니 send 는 성공했다”* — **거짓**. send 가 실패해도
+  `handlePublishFailure` 끝의 save 가 같은 예외를 덮어써 밖으로 나간다. 이 착각이 진단을 한 라운드 지연시켰다.
+- *“배경 잡을 껐다”* — **거짓**. `fixedDelay` 는 **간격**만 정하고 첫 실행은 기동 직후 그대로 일어난다
+  (로그의 `[scheduling-1] Unexpected error occurred in scheduled task` 가 증거).
+
+**수정 4건** (세 테스트 클래스 공통):
+1. **`awaitTopicReady`** — 측정 전 토픽·리더 준비 대기. 이 테스트가 재는 것은 재발행이지 토픽 프로비저닝이 아니다
+2. **측정을 소비 → broker end offset 으로 전환** — group 조인·리밸런스·fetch 타이밍이라는 변수를 제거
+3. **1사이클 ack 를 명시적으로 단언** — 이 단언이 없어 첫 발행이 조용히 사라져도 통과하고 **마지막 개수
+   단언에서 엉뚱하게** 터졌다. 실제로 이 단언이 원인을 특정했다
+4. `drain()` 을 `subscribe` → `assign` + `seekToBeginning`, Mockito 재스터빙 → `AtomicBoolean` 단일 answer
+
+**검증**: 두 클래스 동시 실행 **6회 연속 통과**(6m20s·8m15s 짜리 느린 실행 포함 — 예전에 실패하던 것이 정확히
+그 구간이다). notification 2종·parity lint(self-test 18종) green.
+
+**P9-b.** `outbox_events` parity 대조기 (C-5). `dead-letter-schema-parity-lint.sh` 를 확장한다 —
+신규 스크립트를 만들지 않는 이유는 대조 대상·판단 근거("4개 모듈에 흩어져 한 모듈의 테스트가 다른 모듈을 볼 수 없다")가
+같고, CI 배선이 이미 있기 때문이다. 비교 축 3개:
+1. **최종 스키마 동일성** — order/product/payment 는 `V1__init_*.sql` 의 `CREATE TABLE outbox_events` + P8 의
+   `ALTER TABLE outbox_events`, notification 은 P9 의 `CREATE TABLE outbox_events`. **한 벌씩 다른 파일에서 오므로
+   원문 해시가 아니라 "컬럼명 → 타입·nullability" 집합**으로 정규화해 비교한다(replay 축 ALTER 는 원문 해시였다 —
+   그쪽은 4벌이 서로의 사본이라 성립했지만 여기서는 성립하지 않는다).
+2. **P8 신설 9컬럼이 4서비스 전부에 존재하고 전부 nullable** (`DEFAULT` 절 부재도 함께 — D3)
+3. **`global/outbox` java 7파일 byte 동일** + `OutboxEventStatus` 는 **order/product 동일 · payment/notification 동일**
+   (2집합 계약을 lint 가 명시적으로 인코딩한다 — “전부 동일” 로 걸면 기존 상태가 곧바로 red 다)
+4. **목록 자체를 검사한다 (구현 중 추가)** — `global/deadletter` 에서 *지금 4벌이 byte 동일한데 `java_files`
+   목록에 없는* 파일을 `DLQ-PARITY-014` 로 잡는다. 구현 중 `DeadLetterPublicationReconciler` 를 4벌 복제해
+   놓고 목록에 더하는 것을 잊었고, 그것은 **아무 것도 실패시키지 않아 드러나지 않았다** — ④-c-2b-1 의
+   glob 미확장과 같은 구멍이 신규 파일에서 재발한 것이다. 사람의 기억 대신 검사가 목록을 지킨다.
+   디렉토리 전체를 요구하지 않는 이유: `DeadLetterConsumer`/`KafkaConfig`/`QuarantineConsumer` 는 토픽·group 이
+   서비스마다 정당하게 다르다. **이 검사가 기존 미등록 복제본 2개(`DeadLetterContainerGuard`·
+   `DeadLetterKafkaConfig`, ④-c-2a 산출물)도 찾아내 목록에 편입**했다 — 계획에 없던 소폭 확대다
+
+**P9-c.** ADR-0012 D1 표 갱신 (C-12). `0012:53` 의 Notification 행을
+`processed_events` → `processed_events, outbox_events` 로 고치고 **Update Log** 에 근거(ADR-0020 D2)를 남긴다.
+ADR 본문 수정은 Update Log 를 동반해야 하며 커밋은 `fix(adr):` 로 낸다(⑤ 의 ADR-0012 갱신 선례).
+**이 PR 에서 하는 이유**: 표를 참으로 만드는 변경이 이 PR 이고, P24 로 미루면 3개 PR 동안 ADR 이 거짓을 말한다.
 
 **P10.** `OutboxEvent.replay(...)` 팩토리 — `record_kind='REPLAY'` · `destination_topic`/`destination_partition`/
 `record_key`/`source_record_timestamp`/`replay_target_event_id`/`replay_headers`/`replay_root_record_id`/
@@ -230,9 +318,29 @@ outbox 상태를 조회해 `PUBLISHED`/`PUBLISH_FAILED` 로 전이한다. `@Sche
 **outbox cleanup 과의 경쟁을 닫는다 (2R #6)** — 현 cleanup 은 `status='PUBLISHED' AND published_at < cutoff` 인
 행을 **무조건** 지운다(`OutboxEventJpaRepository:31-33`). reconciler 가 retention 이상 멈추면 replay outbox 가
 먼저 삭제되고, root 는 **`REQUESTED` 에 영구 고착**된다 — I-1 때문에 종결도 못 한다. 둘을 함께 막는다:
-1. cleanup 에서 **연결된 root 가 아직 `REQUESTED` 인 replay 행을 제외**한다 (원장과 outbox 는 **같은 서비스 DB**라
-   `NOT EXISTS (SELECT 1 FROM dead_letter_records d WHERE d.outbox_event_id = o.id AND d.publication_status='REQUESTED')`
-   로 표현 가능하다)
+1. cleanup 에서 **연결된 root 가 아직 `REQUESTED` 인 replay 행을 제외**한다 (원장과 outbox 는 **같은 서비스 DB**다).
+   **상관 참조를 정규명으로 쓴다 (C-6)** — 초안의 `d.outbox_event_id = o.id` 는 **alias `o` 를 선언한 적이 없어서**
+   깨진다. `mysql:8.0.46`(프로젝트 이미지) 실측 매트릭스:
+
+   | 형태 | 결과 |
+   |---|---|
+   | `DELETE FROM outbox_events AS o … WHERE … o.id … LIMIT 1` | **성공** (1행 삭제) — 단일 테이블 DELETE 는 8.0.16+ 부터 alias 를 받는다 |
+   | `DELETE FROM outbox_events … WHERE … o.id … LIMIT 1` (초안) | **ERROR 1054** `Unknown column 'o.id' in 'where clause'` |
+   | `DELETE FROM outbox_events … WHERE … outbox_events.id … LIMIT 1` (채택) | **성공** (1행 삭제) |
+   | `DELETE o FROM outbox_events o … LIMIT 1` | **ERROR 1064** — multi-table 형식은 `LIMIT` 을 지원하지 않는다 |
+
+   즉 `AS o` 선언도 유효한 선택지다. **정규명을 택하는 이유는 문법 제약이 아니라** 이 파일이 4서비스 byte 동일
+   복제라 diff 를 최소로 두기 위함이다. 세 번째 행의 실행에서 `publication_status='REQUESTED'` 로 연결된 행이
+   실제로 **살아남는 것**까지 함께 확인했다:
+   ```sql
+   DELETE FROM outbox_events
+    WHERE status = 'PUBLISHED' AND published_at < :cutoff
+      AND NOT EXISTS (SELECT 1 FROM dead_letter_records d
+                       WHERE d.outbox_event_id = outbox_events.id
+                         AND d.publication_status = 'REQUESTED')
+    LIMIT :limit
+   ```
+   이 파일은 4서비스 byte 동일 복제이므로 **notification 판본을 포함해 4벌을 함께 고친다**(P9-b 축 3이 강제한다)
 2. **outbox 부재를 `PUBLISH_FAILED` 로 추론하지 않는다 (3R #3)** — 행 부재는 실패의 증거가 아니다.
    **이미 발행된 행**이 레거시 cleanup·수동 삭제·정합성 결함으로 사라져도 똑같이 관측된다. 자동 강등하면
    **발행된 사건을 "실패" 로 감사 기록하고 재요청까지 열어준다**. ADR §D6-4 는 outbox 가 **실제 `FAILED` 로
@@ -469,6 +577,10 @@ replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evid
 | **V-28** | 롤백 | replay `PENDING` 잔여가 있는 상태에서 **구 이미지 배포 명령을 실제로 실행** | **preflight 게이트가 배포를 실패시킨다**(문서 절차 확인이 아니다 — 2R #9). kill-switch 로 진입점을 끈 뒤 drain 이 끝나면 통과 |
 | **V-28b** | N3 | `replay_policy` **allow 판정** 기록 | root 에 *정책 식별자+버전+판정* 이 남고 자식이 상속한다 |
 | **V-28c** | N3 | `replay_policy` **deny 판정**(`order.created` 등) | **거부 이력이 남는다**. claim 에만 기록하는 구조로 되돌리면 deny 는 claim 에 도달하지 않아 **아무 기록도 없어** red (3R #5) |
+| **V-30** | D3 | `record_kind IS NULL` 인 outbox 행(구버전 writer 흉내)을 fixture 로 넣고 poll | **도메인 경로로 발행된다**. 분기를 `record_kind = 'DOMAIN'` 로만 좁히면 그 행이 영원히 미발행으로 남아 red. expand 단계의 NULL 해석(D3)을 직접 관측하는 유일한 행 |
+| **V-31** | C-5 | parity 대조기(P9-b) **self-test** — ① notification `outbox_events` 에서 컬럼 1개 제거 ② P8 신설 컬럼 1개에 `DEFAULT 'DOMAIN'` 부여 ③ 신설 컬럼 1개를 `NOT NULL` 로 ④ `OutboxEvent.java` 한 벌만 1바이트 변경 ⑤ `OutboxEventStatus` 를 order 판본으로 notification 에 복사 | 4종은 red, ⑤는 **green**(2집합 계약). 대조 축을 하나 빼면 해당 fixture 가 통과해 self-test 가 red. **정상 트리에서 lint 가 green 임도 함께 확인**한다 — 항상 red 인 lint 는 검사가 아니다 |
+| **V-32** | D2 | notification `outbox_events` 에 **도메인 행 1건을 fixture 로 직접 INSERT** 후 poller 사이클 실행 (실제 DB + Kafka) | broker 에 해당 레코드가 도착하고 행이 `PUBLISHED` 로 전이. **poller 빈 배선을 지우면 red**. (replay 행은 진입점이 없어 이 PR 에서 만들 수 없으므로, 발행 표면이 실제로 도는지는 도메인 행으로 관측한다 — V-25 로 미루면 이 PR 이 "배선됐다" 수준의 판정으로 끝난다) |
+| **V-33** | D6-4 | 원장 행 `publication_status='REQUESTED'` + 연결된 outbox 행을 **① `PUBLISHED` ② `FAILED` ③ `PENDING`** 세 상태로 두고 reconciler 실행 | ①→`PUBLISHED` ②→`PUBLISH_FAILED` ③→**전이 없음**(`REQUESTED` 유지). ③을 빼고 "REQUESTED 가 아니면 전이" 로 되돌리면 **발행 중인 건이 조기 종결**되어 red |
 | **V-29** | N17 | **변이 목록 전수** — V-1~V-28b 가 지목한 각 변이 | 각 변이가 red → 복원 후 green. 변이 목록과 red 테스트 id 를 PR 본문에 **열거**한다. 자기대조 0건 |
 
 **모듈별 그린 기준**: 각 PR 에서 `common` + 변경된 서비스 모듈 전체 테스트 0 실패 +
@@ -499,10 +611,10 @@ replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evid
 | `order-service` | 마이그레이션 **V8 · V9 · V10** · outbox 4파일 · deadletter 6파일 · reconciler |
 | `product-service` | 마이그레이션 **V6 · V7 · V8** · 동일 |
 | `payment-service` | 마이그레이션 **V6 · V7 · V8** · 동일 |
-| `notification-service` | 마이그레이션 **V4 · V5 · V6** · **outbox 8파일 신설** · deadletter 6파일 · reconciler |
+| `notification-service` | 마이그레이션 **V4 · V5 · V6** · **outbox 8파일 신설**(7파일 byte 동일 · `OutboxEventStatus` 는 payment 판본) · deadletter 6파일 · reconciler · yml `app.outbox.*` |
 | `user-service` | **무변경** (Kafka consumer 없음) |
-| scripts | `scripts/e2e/saga_e2e.py` `EXPECTED_MIGRATIONS` **3회 갱신**(2b-1 · 2b-2 · 2b-4) · lint 2종 |
-| docs | runbook §6 + §6-R · 05-data-design · 02-architecture · PHASE4 · grafana-alerts 주석 |
+| scripts | `scripts/e2e/saga_e2e.py` `EXPECTED_MIGRATIONS` **3회 갱신**(2b-1 · 2b-2 · 2b-4) · lint 2종 + **`dead-letter-schema-parity-lint.sh` 에 `outbox_events` 축 확장**(P9-b) |
+| docs | runbook §6 + §6-R · 05-data-design · 02-architecture · PHASE4 · grafana-alerts 주석 · **ADR-0012 D1 표 + Update Log**(P9-c, 2b-2 에서 선행) |
 
 ---
 
@@ -529,6 +641,7 @@ replay 행이 남은 채 구버전으로 내려가면 안 된다.
 | **R4** | `replay_policy` 정책의 **장기 운영 정밀화** | 레지스트리·default-deny·기록/상속은 P19·P21 이 만든다. **초기 정책표(토픽별 allow/deny + 사전조건)는 2b-4 착수 전에 확정**하며, 최소 1개 토픽은 실제 도메인 상태 조회를 거친다(2R #7). 이연되는 것은 *운영 경험에 따른 정밀화*뿐이며 "전부 deny" 나 "검사 없는 allow" 로 시작하지 않는다 |
 | **R5** | 소비 성공 확인 자동 종결 | ADR Alternative E 기각. replay 빈도가 오르면 재검토 |
 | **R6** | `__consumer_offsets`·KRaft metadata bound, PVC 증설 | ADR §D4-2 후속 인프라 결정 |
+| **R8** | `dead_letter_records.publication_status` **인덱스** | 추가하지 않는다 (C-7). 이 테이블은 DLQ 유입량에 유계이고 같은 컬럼을 스캔하는 `countUnresolvedByPublicationStatus`(2b-1)가 이미 무인덱스로 돈다. 4 DB 마이그레이션 + parity glob 확장 비용이 이득을 넘는다. **원장 행 수가 경보 `scan-limit`(100) 규모를 상시 넘기면 재검토** |
 | **R7** | **outbox 행이 사라진 `REQUESTED` root 의 종결 경로** | 정상 경로에서는 cleanup 제외 조건이 부재를 만들지 않으므로 이 상태는 **계약 위반 신호**다. 자동 강등은 발행을 실패로 오분류하므로 채택하지 않았다(3R #3). 실제로 발생하면 **ADR-0020 Update Log 로 `PUBLISH_UNKNOWN` 축 추가를 결정**한다 — 상태값 신설은 ADR 사안이다 |
 
 ---

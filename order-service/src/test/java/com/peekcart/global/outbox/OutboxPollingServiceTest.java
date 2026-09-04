@@ -208,6 +208,7 @@ class OutboxPollingServiceTest {
     private OutboxPollingService service(Duration publishTimeout, Duration cycleTimeout) {
         // DB-per-service(구현 ② PR2): poller 는 자기 스키마 outbox_events 의 PENDING 전체를 발행한다(allowlist 제거).
         return new OutboxPollingService(outboxEventRepository, kafkaTemplate, slackPort,
+                new com.fasterxml.jackson.databind.ObjectMapper(),
                 meterRegistry, 100, 5, publishTimeout, cycleTimeout);
     }
 }

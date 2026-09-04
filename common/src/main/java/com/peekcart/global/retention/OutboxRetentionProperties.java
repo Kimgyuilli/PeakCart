@@ -15,7 +15,8 @@ import java.time.Duration;
  * PENDING·FAILED·{@code published_at IS NULL} 행은 보존한다(유실 금지). 배치 삭제 계약은
  * {@link IdempotencyRetentionProperties.Cleanup} 를 공유한다.
  *
- * <p>발행 서비스(product/order/payment)만 {@code @EnableConfigurationProperties} 로 활성화한다.
+ * <p>outbox 를 소유한 4서비스(order/product/payment/notification)가
+ * {@code @EnableConfigurationProperties} 로 활성화한다 (ADR-0020 D2 · 구현 ④-c-2b-2 P9).
  * 설정키는 base {@code application.yml} 소유(동작 정책 — ADR-0007).
  */
 @ConfigurationProperties(prefix = "app.outbox")

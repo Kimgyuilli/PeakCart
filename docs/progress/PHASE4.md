@@ -1528,3 +1528,97 @@ gateway 80, 32분 28초). parity lint 본체 + **self-test 10종** 통과. 변�
 5. **운영 클러스터 미적용** — 로컬 Testcontainers 로만 검증했다
 
 **다음**: ④-c-2b-2 (발행 표면 — outbox replay kind · notification outbox 신설 · reconciler, 계획 P8~P13)
+
+## ④-c-2b-2 — 발행 표면 (PR [#102](https://github.com/Kimgyuilli/PeakCart/pull/102))
+
+replay 레코드를 **발행할 수 있는** 표면을 만든다. 진입점은 없다(④-c-2b-4) — 이 PR 만으로는 replay 행이
+생기지 않는다. 순서를 이렇게 잡은 이유는 진입점을 재실패 상관(2b-3)보다 먼저 열면 그 구간의 재발행 실패가
+독립 incident 로 갈라져 ADR-0020 §D5-4·§D6-3 을 위반하기 때문이다.
+
+### 결정
+
+**`record_kind` 의 nullable 과 DEFAULT 부재는 이유가 다르다.** nullable 은 롤링 배포 중 구버전 writer 의
+INSERT 를 살리기 위함이고, DEFAULT 부재는 `DEFAULT 'DOMAIN'` 을 두면 신버전 writer 가 판별자를 빠뜨려도
+DB 가 조용히 도메인으로 분류하기 때문이다. **읽기는 `null` 을 `DOMAIN` 으로 관대하게 해석하고 쓰기는 항상
+명시**한다 — 비대칭이 의도된 것이다.
+
+**`event_type` 에 sentinel `__replay__` 를 넣는다.** 구버전 poller 는 `event_type` 을 그대로 목적지 토픽으로
+쓰므로, 실제 업무 토픽 이름이 거기 있으면 롤백 시 원장 id 를 key 로 fence 없이 발행된다.
+
+**reconciler 는 outbox 행 부재를 실패로 추론하지 않는다.** 부재는 실패의 증거가 아니다 — 이미 발행된 행이
+cleanup·수동 삭제로 사라져도 똑같이 관측된다. 자동 강등하면 발행된 사건을 "실패" 로 감사 기록하고 재요청까지
+열어 같은 메시지를 두 번 낸다. 대신 cleanup 이 `REQUESTED` root 연결분을 제외하고, 그럼에도 부재가 관측되면
+그것 자체를 계약 위반 신호로 둔다(계획 §10 R7).
+
+### 착수 전 코드 검증이 뒤집은 전제
+
+`docs/plans/task-impl4-c2b-dlq-replay.md` §5 의 C-1~C-14 가 정본. 핵심 2건:
+
+- **C-5** — "parity lint 가 대조한다" 는 **거짓**이었다. 기존 lint 는 `dead_letter_records` 전용이고
+  `outbox_events` 를 보는 검사가 없었다 → P9-b 신설
+- **C-6** — 계획 리뷰 A#2 가 **내 정정을 다시 반증**했다. "단일 테이블 DELETE 에 alias 불가" 는 거짓이고
+  MySQL 8.0.16+ 는 허용한다. `mysql:8.0.46` 컨테이너로 직접 실측해 4행 매트릭스를 남겼다 — 초안 SQL 이
+  깨진다는 **결론은 유지되나 이유가 달랐다**(alias 를 선언한 적이 없을 뿐)
+
+### 구현 중 자체 발견
+
+**`DeadLetterPublicationReconciler` 를 4벌 복제해 놓고 parity lint 목록에 더하지 않았다.** 목록에 없으면
+4벌이 갈라져도 아무 것도 실패하지 않는다 — **④-c-2b-1 의 glob 미확장과 같은 구멍의 재발**이다. 개별
+self-test 로 때우면 "내가 기억한 그 파일" 만 지켜지므로 **`DLQ-PARITY-014`(지금 4벌 byte 동일인데 목록에
+없는 파일)로 목록 자체를 검사**하게 했고, 그 검사가 **기존 미등록 복제본 2개**(`DeadLetterContainerGuard`·
+`DeadLetterKafkaConfig`, ④-c-2a 산출물)까지 찾아내 편입했다.
+
+**내 fixture 가 현실을 왜곡하고 있었다 (2건)** — `seed_fixture` 가 per-service 파일까지 order 사본으로 채워
+fixture 안에서만 byte 동일해지던 것, `$TMP` 를 지우지 않아 앞 케이스가 뒤 케이스를 red 로 만들던 것.
+**fixture 가 현실을 왜곡하면 self-test 가 검사하는 대상이 현실이 아니게 된다.**
+
+**at-least-once 단언이 과했다** — "정확히 2개" 인데 실측 3개(배경 poller 도 같은 행을 집어간다). ADR-0020
+§D1 은 중복 수에 상한을 두지 않으므로 계약이 말하지 않는 것을 테스트가 주장하던 flaky 였다.
+
+### 검증
+
+**902 tests 0 실패** (common 73 · order 317 · product 186 · payment 168 · notification 45 ·
+common-auth 52 · user 61). 로컬 전체 스위트가 반복 중단돼 **모듈별로 나눠 실행**했다.
+**변이 14종 전부 red** · lint 7종 green(parity self-test 10종 → **18종**).
+
+**최종 CI 전면 green** — test 6종 · lint · guards · gate · images 6종 · **e2e**. e2e 가
+`EXPECTED_MIGRATIONS`(order 1~9 · product 1~7 · payment 1~7 · notification 1~5)를 실제 스택에서
+대조하므로 **4 DB 마이그레이션과 notification outbox 신설의 실적용**이 확인됐다.
+
+### CI 후속 — 테스트 하네스 결함 4건 (운영 코드 결함 0)
+
+최초 push 의 CI 에서 `test (order-service)` 가 실패했다. **원인은 전부 이 PR 이 새로 만든 테스트의
+결함**이었고, 확정까지 가설 4개가 실측으로 반증됐다(재스터빙 경합=참이나 부분적 · 배경 잡 단독 원인
+아님 · 30s 타임아웃으로도 실패 · 컨테이너 불일치 반증).
+
+**결정적 증거**: 실패 시 `brokerEndOffsets` 가 **전부 0** — 소비를 못 한 것이 아니라 **1사이클의 send 가
+실제로 실패**했다. 컨테이너가 여럿 뜬 느린 실행에서 토픽 생성이 끝나기 전에 첫 send 가 나가 타임아웃한다.
+
+수정 4건: Mockito 재스터빙 → `AtomicBoolean` 단일 answer(**CI 실패의 직접 원인**) · `awaitTopicReady` ·
+측정을 소비 → **broker end offset** · **1사이클 ack 명시적 단언**(이 단언이 없어 첫 발행이 조용히
+사라져도 통과했고, 실제로 이 단언이 원인을 특정했다).
+
+**진단 중 내가 틀렸던 추론 2건**: ① `hasMessage("DB down")` 은 send 성공의 증거가 아니다 —
+`handlePublishFailure` 끝의 save 가 같은 예외를 덮어쓴다(이 착각이 진단을 한 라운드 지연시켰다)
+② `fixedDelay` 는 **간격**만 정하고 첫 실행을 막지 못한다(`[scheduling-1]` ERROR 로그가 증거).
+
+**계획 C-9 판단을 뒤집었다** — `@Scheduled` 리터럴 유지 → `fixedDelayString` 설정화. 배경 잡이 도는
+상태에서는 발행 횟수를 세는 테스트가 구조적으로 성립하지 않는다. 운영 기본값 5s 불변.
+
+**검증**: 두 클래스 동시 실행 **6회 연속 통과**(6m20s·8m15s 짜리 느린 실행 포함 — 예전에 실패하던 구간이
+정확히 그것이다). 1회 통과로 넘어간 것이 이 결함을 CI 까지 보낸 직접적 원인이다.
+
+### 미충족
+
+1. **Codex diff 리뷰 미실행** — `usage limit`. **P0/P1 = 0 이 아니라 미측정**이다.
+   이번 PR 이 새로 만든 계약 표면(reconciler · `DLQ-PARITY-014` · `OutboxEventStatus` 2집합)이 적지 않고,
+   **CI green 이 리뷰를 대신하지 않는다**
+2. 신규 테스트는 order·notification 에만 (product/payment 는 byte 동일 복제 + parity lint)
+3. **replay 행은 fixture 로만 생성** — 진입점·fence 6종·좌표 검증은 ④-c-2b-4
+4. `record_kind` **`NOT NULL` contract 미수행**(계획 §10 R1) — backfill 이후 별도 마이그레이션
+5. `docs/05-data-design.md:177` 정정은 P24 소관 · **운영 클러스터 미적용**
+6. gateway 는 로컬 미재실행(무관 모듈, CI 에서는 pass)
+
+> **해소된 항목**: ~~로컬 전체 스위트 완주 없음~~·~~E2E 로컬 미실행~~ → CI 전 모듈 pass + e2e pass 로 해소.
+
+**다음**: ④-c-2b-3 (재실패 상관 + 재개방, 계획 P14~P17)

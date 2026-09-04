@@ -261,3 +261,15 @@ self-test 9b(“reconciler drift 를 잡는가”)는 **내가 기억한 그 파
   발행 횟수를 세는 테스트가 구조적으로 성립하지 않는다. 운영 기본값 5s 불변, 4서비스 복제 유지(parity green).
 - **검증**: 두 클래스 동시 6회 연속 green(느린 실행 포함) · notification 2종 green · parity self-test 18종 green.
 - **남은 것**: CI 재확인. Codex diff 리뷰는 여전히 **미측정**(usage limit).
+
+## 2026-09-04 — CI green 확인 + 미충족 갱신 (④-c-2b-2, PR #102)
+
+- **CI 전면 green**: test 6종 · lint · guards · gate · images 6종 · **e2e**. (`publish` 는 main 전용 skip.)
+- **해소된 미충족 2건**:
+  · ~~로컬 전체 스위트 1회 완주 없음~~ → CI 전 모듈 pass
+  · ~~E2E 로컬 미실행~~ → CI **e2e pass**. `EXPECTED_MIGRATIONS` 를 실제 스택에서 대조하므로
+    4 DB 마이그레이션·notification outbox 신설의 **실적용**이 확인됐다
+- **남은 미충족**: Codex diff 리뷰 **미측정**(usage limit — CI green 이 리뷰를 대신하지 않는다) ·
+  신규 테스트는 order·notification 만 · replay 행은 fixture 로만 · `NOT NULL` contract(R1) ·
+  `05:177`(P24) · 운영 클러스터 미적용 · gateway 로컬 미재실행
+- 반영처: PR #102 본문(`gh pr edit`) · `docs/TASKS.md` ④ 행 · `docs/progress/PHASE4.md` · 본 audit

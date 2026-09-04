@@ -1578,19 +1578,47 @@ fixture 안에서만 byte 동일해지던 것, `$TMP` 를 지우지 않아 앞 �
 ### 검증
 
 **902 tests 0 실패** (common 73 · order 317 · product 186 · payment 168 · notification 45 ·
-common-auth 52 · user 61). 로컬 전체 스위트가 반복 중단돼 **모듈별로 나눠 실행**했고, gateway 80 은
-`:common` 미의존 + UP-TO-DATE 라 **재실행되지 않았다**. **변이 14종 전부 red** · lint 7종 green
-(parity self-test 10종 → **18종**).
+common-auth 52 · user 61). 로컬 전체 스위트가 반복 중단돼 **모듈별로 나눠 실행**했다.
+**변이 14종 전부 red** · lint 7종 green(parity self-test 10종 → **18종**).
+
+**최종 CI 전면 green** — test 6종 · lint · guards · gate · images 6종 · **e2e**. e2e 가
+`EXPECTED_MIGRATIONS`(order 1~9 · product 1~7 · payment 1~7 · notification 1~5)를 실제 스택에서
+대조하므로 **4 DB 마이그레이션과 notification outbox 신설의 실적용**이 확인됐다.
+
+### CI 후속 — 테스트 하네스 결함 4건 (운영 코드 결함 0)
+
+최초 push 의 CI 에서 `test (order-service)` 가 실패했다. **원인은 전부 이 PR 이 새로 만든 테스트의
+결함**이었고, 확정까지 가설 4개가 실측으로 반증됐다(재스터빙 경합=참이나 부분적 · 배경 잡 단독 원인
+아님 · 30s 타임아웃으로도 실패 · 컨테이너 불일치 반증).
+
+**결정적 증거**: 실패 시 `brokerEndOffsets` 가 **전부 0** — 소비를 못 한 것이 아니라 **1사이클의 send 가
+실제로 실패**했다. 컨테이너가 여럿 뜬 느린 실행에서 토픽 생성이 끝나기 전에 첫 send 가 나가 타임아웃한다.
+
+수정 4건: Mockito 재스터빙 → `AtomicBoolean` 단일 answer(**CI 실패의 직접 원인**) · `awaitTopicReady` ·
+측정을 소비 → **broker end offset** · **1사이클 ack 명시적 단언**(이 단언이 없어 첫 발행이 조용히
+사라져도 통과했고, 실제로 이 단언이 원인을 특정했다).
+
+**진단 중 내가 틀렸던 추론 2건**: ① `hasMessage("DB down")` 은 send 성공의 증거가 아니다 —
+`handlePublishFailure` 끝의 save 가 같은 예외를 덮어쓴다(이 착각이 진단을 한 라운드 지연시켰다)
+② `fixedDelay` 는 **간격**만 정하고 첫 실행을 막지 못한다(`[scheduling-1]` ERROR 로그가 증거).
+
+**계획 C-9 판단을 뒤집었다** — `@Scheduled` 리터럴 유지 → `fixedDelayString` 설정화. 배경 잡이 도는
+상태에서는 발행 횟수를 세는 테스트가 구조적으로 성립하지 않는다. 운영 기본값 5s 불변.
+
+**검증**: 두 클래스 동시 실행 **6회 연속 통과**(6m20s·8m15s 짜리 느린 실행 포함 — 예전에 실패하던 구간이
+정확히 그것이다). 1회 통과로 넘어간 것이 이 결함을 CI 까지 보낸 직접적 원인이다.
 
 ### 미충족
 
-1. **Codex diff 리뷰 미실행** — `usage limit`(3:00 AM 리셋). **P0/P1 = 0 이 아니라 미측정**이다.
-   이번 PR 이 새로 만든 계약 표면(reconciler · `DLQ-PARITY-014` · `OutboxEventStatus` 2집합)이 적지 않다
-2. **로컬 전체 스위트 1회 완주 없음** — 모듈별 그린 합산. CI 확인 필요
-3. **gateway 80건 미재실행** — 무관 모듈이나 "돌렸다" 고 말할 수 없다
-4. 신규 테스트는 order·notification 에만 (product/payment 는 byte 동일 복제 + parity lint)
-5. **replay 행은 fixture 로만 생성** — 진입점·fence 6종·좌표 검증은 ④-c-2b-4
-6. `record_kind` **`NOT NULL` contract 미수행**(계획 §10 R1) — backfill 이후 별도 마이그레이션
-7. `docs/05-data-design.md:177` 정정은 P24 소관 · E2E 로컬 미실행 · 운영 클러스터 미적용
+1. **Codex diff 리뷰 미실행** — `usage limit`. **P0/P1 = 0 이 아니라 미측정**이다.
+   이번 PR 이 새로 만든 계약 표면(reconciler · `DLQ-PARITY-014` · `OutboxEventStatus` 2집합)이 적지 않고,
+   **CI green 이 리뷰를 대신하지 않는다**
+2. 신규 테스트는 order·notification 에만 (product/payment 는 byte 동일 복제 + parity lint)
+3. **replay 행은 fixture 로만 생성** — 진입점·fence 6종·좌표 검증은 ④-c-2b-4
+4. `record_kind` **`NOT NULL` contract 미수행**(계획 §10 R1) — backfill 이후 별도 마이그레이션
+5. `docs/05-data-design.md:177` 정정은 P24 소관 · **운영 클러스터 미적용**
+6. gateway 는 로컬 미재실행(무관 모듈, CI 에서는 pass)
+
+> **해소된 항목**: ~~로컬 전체 스위트 완주 없음~~·~~E2E 로컬 미실행~~ → CI 전 모듈 pass + e2e pass 로 해소.
 
 **다음**: ④-c-2b-3 (재실패 상관 + 재개방, 계획 P14~P17)

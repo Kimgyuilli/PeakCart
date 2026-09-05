@@ -273,3 +273,38 @@ self-test 9b(“reconciler drift 를 잡는가”)는 **내가 기억한 그 파
   신규 테스트는 order·notification 만 · replay 행은 fixture 로만 · `NOT NULL` contract(R1) ·
   `05:177`(P24) · 운영 클러스터 미적용 · gateway 로컬 미재실행
 - 반영처: PR #102 본문(`gh pr edit`) · `docs/TASKS.md` ④ 행 · `docs/progress/PHASE4.md` · 본 audit
+
+## 2026-09-05 — 계획 리뷰 라운드 1 (④-c-2b-3 구간)
+- 항목: 17건 (P0:0, P1:12, P2:5)
+- 처리: 반영 17건 / 기각 0건
+- 뒤집힌 전제: 착수 전 코드 검증(C-15~C-28)이 초안 전제 3건을 먼저 뒤집었고(pc-replay-* 상수 부재 · DlqHeaders allowlist 자료구조 부재 · replay 앵커 컬럼 미매핑), 리뷰가 **그 검증 표 자체를 4건 반증**했다:
+  - C-18 "마이그레이션 0" → payload digest 컬럼 신설로 철회 (4서비스 additive)
+  - C-24 "호출부 2곳" → 실측 44곳 · notification 에 quarantine consumer 없음 → 시그니처 확대 폐기, LedgerOwner 빈 주입
+  - C-27 "누락은 자동으로 막힌다" → DLQ-PARITY-014 는 4벌이 이미 동일할 때만 신고 (과장)
+  - P15 "기존 best-effort 계약" → 현재 record() 는 @Transactional 안에서 Slack 호출 (javadoc 이 이미 거짓)
+- 구현했으면 false-green 이었을 것: insertIfAbsent 의 clearAutomatically 가 잠근 root 를 detach → 재개방 UPDATE 미발생 (#2) · attempt-id TOCTOU (#3)
+- ADR 충돌 확인: ADR-0020 §D5-4 가 record_kind=REPLAY 대조를 요구하면서 같은 절에서 outbox 를 정본으로 쓸 수 없다고 적는다 → P14(f) 가 이 PR 에서 개정
+- raw: .cache/codex-reviews/plan-task-impl4-c2b-dlq-replay-2b3-r1b.json
+
+## 2026-09-05 — 계획 리뷰 라운드 2 (④-c-2b-3 구간)
+- 항목: 9건 (P0:0, P1:6, P2:3) — 전부 1R 수정이 만든 새 표면을 겨냥
+- 처리: 반영 9건 / 기각 0건
+- 1R 수정이 만든 새 결함 6건:
+  - digest 컬럼 신설하고 writer 미배정 → 실제 replay 에서 root digest 영구 NULL, 대조 축 9가 늘 통과 (fixture 때문에 green)
+  - digest 마이그레이션 번호가 P23 backfill 과 충돌 (V10/V8/V8/V6 중복) → P23 을 V11/V9/V9/V7 로
+  - 송신 allowlist 를 "부분집합" 으로 규정 → 헤더 0~3개짜리 REPLAY 통과, 발행 측에서 N11 파손
+  - ADR 개정을 Update Log 로 하려 함 → adr/README.md:14 가 명시적으로 금지 (트레이드오프 변경은 새 ADR) → ADR-0021 신설 + ADR-0020 Partially Superseded
+  - 롤백 drain 을 REQUESTED==0 으로 판정 → ack 시 PUBLISHED 로 바뀌므로 재시도 중/DLT 이동 중 레코드를 못 잡음 → 4조건으로 확대
+  - "lint 본실행이 digest parity 를 강제" → 거짓. replay 축 검사는 glob 1파일만 보고 컬럼 하드코딩 → 최종 스키마 합성 기준으로 전환 (같은 구멍 3번째 재발)
+- 남은 P2 3건: target-group 헤더 죽은 데이터(3자 대조) · V-19 축 중복(V-19a~m ID 배정) · Counter 트랜잭션 의미 미정의(CommitAwareMetrics + bounded reason)
+- 반증되지 않은 것: P14(a)(c) 키 정본·판독 · P15(a) 실행 순서 재정의 · P15(f) LedgerOwner 빈 주입
+- raw: .cache/codex-reviews/plan-task-impl4-c2b-dlq-replay-2b3-r2.json
+
+## 2026-09-05 — 계획 리뷰 라운드 3 (④-c-2b-3 구간) — **미실행 (usage limit)**
+- 항목: 0건 — **측정하지 못했다** (P1=0 이 아니라 미측정)
+- 원인: Codex `usage limit` (재개 가능 시각 2026-09-07 14:45). 탐색은 끝냈으나 최종 JSON 미출력.
+- 수렴 판정: **미달**. 2R 이 P1 6건이었고, 그 수정이 새 계약 표면을 또 만들었다
+  (ADR-0021 신설 · parity lint 를 최종 스키마 합성 기준으로 전환 · 송신 4값 유효성 · Flyway 재배정 ·
+   P21 digest writer + V-30 · group 3자 대조 · drain 4조건 preflight · V-19a~m · CommitAwareMetrics Counter).
+  건수 추세로 종료 판정하지 않는다.
+- raw: .cache/codex-reviews/plan-task-impl4-c2b-dlq-replay-2b3-r3.stderr (JSON 없음)

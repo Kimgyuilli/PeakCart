@@ -1,0 +1,23 @@
+-- 구현 ④-c-2b-3a P14(d)(e): 재발행 대상 payload 전문의 SHA-256 을 root 앵커에 더한다 (ADR-0021 D1)
+--
+-- 왜 payload 컬럼으로 대조하지 못하는가:
+--   dead_letter_records.payload 는 app.dead-letter.payload.max-length(기본 8000자)로 **잘려** 저장된다.
+--   절단분 비교는 상한 밖 변조를 통과시키므로 ADR-0020 D8-3 의 "key·payload·eventId byte-for-byte 동일" 을
+--   주장할 수 없다. 그래서 절단 전 전문의 digest 를 따로 영속한다.
+--
+-- 이 컬럼이 없으면 무슨 일이 생기나 (ADR-0020 D5-4 가 명시적으로 경계한 경로):
+--   같은 eventId·original_key·original_timestamp 를 실은 **변조 payload** 가 같은 토픽에서 실패하면
+--   좌표 대조를 전부 통과해 **남의 사건에 자식으로 붙고 종결된 root 를 재개방**한다.
+--
+-- 왜 record_kind='REPLAY' 로 대조하지 않는가 (ADR-0021 D1):
+--   record_kind 는 outbox_events 에만 있고 PUBLISHED 행은 retention 후 삭제된다. 미결 root 는 무기한 남으므로
+--   **수명 경쟁에서 져서** 정상 attempt 가 대조에 실패하고 독립 incident 로 갈라진다.
+--   ADR-0020 D5-4 가 "outbox 를 정본으로 삼으면 진다" 고 적은 그 이유가 record_kind 에도 그대로 적용된다.
+--
+-- nullable · DEFAULT 없음 — ④-c-2b-1 이 replay 축 9컬럼에 세운 규칙 그대로다.
+--   nullable 은 롤링 배포 중 구버전 writer 의 INSERT 를 살리고, DEFAULT 부재는 "값을 안 쓴 것" 과
+--   "빈 digest" 가 같아 보이는 것을 막는다. writer 는 replay 진입점 하나뿐이다(④-c-2b-4 P21).
+--
+-- 길이 64 = SHA-256 hex. 이 값은 비밀이 아니다 — 인증이 아니라 **오상관 방지**다.
+ALTER TABLE dead_letter_records
+    ADD COLUMN last_replay_payload_digest VARCHAR(64) NULL AFTER last_replay_target_group;

@@ -24,9 +24,13 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>민감정보 정책</b>(P11):
  * <ul>
- *   <li><b>헤더는 저장하지 않는다.</b> {@code DlqOrigin} 이 표준 {@code DLT_*} 에서 뽑은 값만
- *       담으므로 {@code X-User-Id} 등 application 헤더는 애초에 원장에 들어오지 않는다 —
- *       제외 목록을 관리할 필요가 없도록 <b>화이트리스트 구조</b>로 막았다.</li>
+ *   <li><b>임의 헤더는 저장하지 않는다.</b> {@code DlqOrigin} 은 표준 {@code DLT_*} 와
+ *       {@link com.peekcart.global.kafka.ReplayHeaders} allowlist 4종<b>만</b> 담으므로
+ *       {@code X-User-Id} 등 그 밖의 application 헤더는 애초에 원장에 들어오지 않는다 —
+ *       제외 목록을 관리할 필요가 없도록 <b>읽을 키를 명시</b>하는 구조로 막았다.
+ *       <p>replay 상관 4종은 ④-c-2b-3a 가 더했다. <b>application 헤더지만 저장 대상이다</b> —
+ *       원장 앵커와 대조해 재실패를 원래 사건에 잇는 데 쓴다(ADR-0021 §D1). 대조는 ④-c-2b-3b 소관이고,
+ *       이 단계에서는 판독만 한다.</li>
  *   <li><b>payload 는 상한까지만</b> 저장하고 초과분은 잘라 {@code payloadTruncated} 로 표시한다.
  *       진단용이며 replay 원본이 아니다 — replay 는 원본 토픽 좌표에서 읽는다(④-c-2b).</li>
  *   <li><b>Slack 에는 식별자와 runbook 링크만</b> 보낸다. 채널은 원장보다 접근 범위가 넓고

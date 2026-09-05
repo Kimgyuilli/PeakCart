@@ -419,7 +419,8 @@ class DeadLetterIncidentAggregationIntegrationTest extends AbstractIntegrationTe
 
     private DlqOrigin rawOrigin(int partition, long offset) {
         return new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, "payment.completed", partition, offset,
-                GROUP, "order-1", 1_700_000_000_000L, "java.lang.IllegalStateException", "boom", "{}");
+                GROUP, "order-1", 1_700_000_000_000L, "java.lang.IllegalStateException", "boom", "{}",
+                null, null, null, null);
     }
 
     private double gauge(String name) {

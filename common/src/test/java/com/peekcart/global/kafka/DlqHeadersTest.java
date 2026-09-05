@@ -190,4 +190,136 @@ class DlqHeadersTest {
 
         assertThat(origin.payload()).isEqualTo("invalid-json-message");
     }
+
+    @Nested
+    @DisplayName("replay 상관 헤더 (④-c-2b-3a P14-c, ADR-0021 D1)")
+    class ReplayCorrelation {
+
+        private static final String ATTEMPT = "3f2a1b7c-8d9e-4a0b-9c1d-2e3f4a5b6c7d";
+
+        private RecordHeaders withReplay(String attempt, String owner, String group, String rootId) {
+            RecordHeaders h = fullOriginHeaders();
+            if (attempt != null) {
+                h.add(ReplayHeaders.ATTEMPT_ID, attempt.getBytes(StandardCharsets.UTF_8));
+            }
+            if (owner != null) {
+                h.add(ReplayHeaders.LEDGER_OWNER, owner.getBytes(StandardCharsets.UTF_8));
+            }
+            if (group != null) {
+                h.add(ReplayHeaders.TARGET_GROUP, group.getBytes(StandardCharsets.UTF_8));
+            }
+            if (rootId != null) {
+                h.add(ReplayHeaders.ROOT_ID, rootId.getBytes(StandardCharsets.UTF_8));
+            }
+            return h;
+        }
+
+        @Test
+        @DisplayName("4종이 온전하면 전부 판독하고 claimsReplay 가 참이다")
+        void readsAllFour() {
+            DlqOrigin origin = DlqHeaders.parse(
+                    recordWith(withReplay(ATTEMPT, "order", "order-svc-payment-completed-group", "4242"), "order-1", "{}"));
+
+            assertThat(origin.replayAttemptId()).isEqualTo(ATTEMPT);
+            assertThat(origin.replayLedgerOwner()).isEqualTo("order");
+            assertThat(origin.replayTargetGroup()).isEqualTo("order-svc-payment-completed-group");
+            assertThat(origin.replayRootId()).isEqualTo(4242L);
+            assertThat(origin.claimsReplay()).isTrue();
+        }
+
+        @Test
+        @DisplayName("헤더가 없으면 4종이 전부 null 이고 claimsReplay 가 거짓이다 — 최초 실패의 정상 경로")
+        void absentMeansNotReplay() {
+            DlqOrigin origin = DlqHeaders.parse(recordWith(fullOriginHeaders(), "order-1", "{}"));
+
+            assertThat(origin.replayAttemptId()).isNull();
+            assertThat(origin.replayLedgerOwner()).isNull();
+            assertThat(origin.replayTargetGroup()).isNull();
+            assertThat(origin.replayRootId()).isNull();
+            assertThat(origin.claimsReplay()).isFalse();
+        }
+
+        /**
+         * <b>root-id 는 조작 가능한 외부 입력이다.</b> 파싱 실패에 예외를 던지면 헤더 하나로 DLQ 적재 자체를
+         * 막을 수 있게 된다 — 판독 실패는 "상관하지 않음" 이지 "적재하지 않음" 이 아니다.
+         */
+        @Test
+        @DisplayName("root-id 가 숫자가 아니면 null 로 떨어지고 적재는 계속된다 — 예외를 던지지 않는다")
+        void malformedRootIdDoesNotThrow() {
+            DlqOrigin origin = DlqHeaders.parse(
+                    recordWith(withReplay(ATTEMPT, "order", "g", "not-a-number"), "order-1", "{}"));
+
+            assertThat(origin.replayRootId()).isNull();
+            assertThat(origin.claimsReplay()).isFalse();
+            assertThat(origin.originTopic()).isEqualTo("payment.completed");   // 적재 입력은 온전하다
+        }
+
+        @Test
+        @DisplayName("root-id 가 0 이하면 null 로 떨어진다 — auto-increment id 는 항상 양수다")
+        void nonPositiveRootIdIsNull() {
+            assertThat(DlqHeaders.parse(recordWith(withReplay(ATTEMPT, "order", "g", "0"), "k", "{}"))
+                    .replayRootId()).isNull();
+            assertThat(DlqHeaders.parse(recordWith(withReplay(ATTEMPT, "order", "g", "-1"), "k", "{}"))
+                    .replayRootId()).isNull();
+        }
+
+        /**
+         * {@code DlqHeaders} 는 <b>판독만</b> 한다. UUID 형식 강제는 발행 측
+         * ({@link ReplayHeaders#requireComplete}) 소관이고, 여기서 던지면 위와 같은 이유로 적재가 막힌다.
+         * 형식이 틀린 attempt 는 원장 앵커와 대조에서 걸러진다(④-c-2b-3b P15).
+         */
+        @Test
+        @DisplayName("attempt-id 가 UUID 가 아니어도 그대로 판독한다 — 형식 강제는 발행 측 소관")
+        void malformedAttemptIsReadAsIs() {
+            DlqOrigin origin = DlqHeaders.parse(
+                    recordWith(withReplay("not-a-uuid", "order", "g", "1"), "k", "{}"));
+
+            assertThat(origin.replayAttemptId()).isEqualTo("not-a-uuid");
+        }
+
+        @Test
+        @DisplayName("일부만 있으면 claimsReplay 가 거짓이다 — 부분 헤더로 상관을 시도하지 않는다")
+        void partialHeadersDoNotClaim() {
+            DlqOrigin origin = DlqHeaders.parse(
+                    recordWith(withReplay(ATTEMPT, "order", null, "1"), "k", "{}"));
+
+            assertThat(origin.replayTargetGroup()).isNull();
+            assertThat(origin.claimsReplay()).isFalse();
+        }
+
+        /**
+         * {@code appendOriginalHeaders} 가 기본 true 라 재-DLQ 시 헤더가 누적된다. 유효한 것은 최근 값이다 —
+         * 좌표 헤더와 같은 규칙을 상관 헤더에도 적용한다.
+         */
+        @Test
+        @DisplayName("같은 키가 여러 번이면 마지막 값을 쓴다")
+        void lastValueWins() {
+            RecordHeaders h = withReplay(ATTEMPT, "order", "g", "1");
+            h.add(ReplayHeaders.ROOT_ID, "999".getBytes(StandardCharsets.UTF_8));
+            h.add(ReplayHeaders.LEDGER_OWNER, "payment".getBytes(StandardCharsets.UTF_8));
+
+            DlqOrigin origin = DlqHeaders.parse(recordWith(h, "k", "{}"));
+
+            assertThat(origin.replayRootId()).isEqualTo(999L);
+            assertThat(origin.replayLedgerOwner()).isEqualTo("payment");
+        }
+
+        /**
+         * 이 단언이 없으면 "allowlist 만 읽는다" 가 주장으로만 남는다 — {@code DlqOrigin} 에 임의 헤더를
+         * 담는 필드가 생겨도 아무 테스트가 실패하지 않기 때문이다.
+         */
+        @Test
+        @DisplayName("allowlist 밖의 application 헤더는 무시한다")
+        void ignoresOtherApplicationHeaders() {
+            RecordHeaders h = withReplay(ATTEMPT, "order", "g", "1");
+            h.add("X-User-Id", "42".getBytes(StandardCharsets.UTF_8));
+            h.add("pc-replay-unknown", "x".getBytes(StandardCharsets.UTF_8));
+
+            DlqOrigin origin = DlqHeaders.parse(recordWith(h, "k", "{}"));
+
+            // 판독 결과는 계약된 4종 + 표준 DLT_* 뿐이다. 임의 헤더가 들어올 자리가 없다.
+            assertThat(origin.replayAttemptId()).isEqualTo(ATTEMPT);
+            assertThat(origin.payload()).isEqualTo("{}");
+        }
+    }
 }

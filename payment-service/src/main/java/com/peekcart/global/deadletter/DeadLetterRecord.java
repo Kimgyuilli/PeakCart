@@ -125,6 +125,39 @@ public class DeadLetterRecord {
     @Column(name = "outbox_event_id")
     private Long outboxEventId;
 
+    // --- replay 상관 앵커 (④-c-2b-3a P14-d, ADR-0021 §D1) ---
+
+    /**
+     * 이 root 가 가장 최근에 개시한 replay 시도의 UUID. <b>대조의 정본은 outbox 가 아니라 여기다.</b>
+     *
+     * <p>{@code outbox_events.record_kind} 로 대조하지 않는 이유(ADR-0021 §D1): {@code PUBLISHED} outbox 행은
+     * retention 후 삭제되는데 <b>미결 root 는 무기한 남는다</b> — 수명 경쟁에서 져서 정상 attempt 가
+     * 대조에 실패하고 독립 incident 로 갈라진다.
+     *
+     * <p>컬럼은 ④-c-2b-1 V8 이 만들었고, <b>읽는 주체가 없어 매핑하지 않았다</b>. 여기서 처음 매핑한다.
+     */
+    @Column(name = "last_replay_attempt_id", length = 36)
+    private String lastReplayAttemptId;
+
+    /** 그 시도가 표적한 업무 consumer group. 실제 실패 group·헤더와 3자 대조한다. */
+    @Column(name = "last_replay_target_group", length = 120)
+    private String lastReplayTargetGroup;
+
+    /**
+     * 재발행 대상 payload <b>전문</b>의 SHA-256 hex (④-c-2b-3a P14-e).
+     *
+     * <p><b>{@link #payload} 컬럼으로 대조할 수 없어서 따로 둔다.</b> 그 값은 {@code maxLength} 로 잘려
+     * 저장되므로 상한 밖 변조를 통과시킨다 — "byte-for-byte 동일"(ADR-0020 §D8-3)을 주장할 수 없다.
+     *
+     * <p>이 값이 없으면 같은 {@code eventId}·key·timestamp 를 실은 <b>변조 payload</b> 가 좌표 대조를 전부
+     * 통과해 <b>남의 사건에 자식으로 붙고 종결된 root 를 재개방</b>한다.
+     *
+     * <p><b>writer 는 replay 진입점 하나다</b>(④-c-2b-4 P21) — 원본 토픽에서 실제로 읽어온 payload 로 계산한다.
+     * 3a 는 컬럼과 매핑만 만들고 값을 쓰지 않는다.
+     */
+    @Column(name = "last_replay_payload_digest", length = 64)
+    private String lastReplayPayloadDigest;
+
     // --- 상태 ---
 
     /**
@@ -158,6 +191,20 @@ public class DeadLetterRecord {
 
     @Column(name = "resolved_by", length = 120)
     private String resolvedBy;
+
+    // --- 재개방 (④-c-2b-3a P14-d 매핑 · 전이는 ④-c-2b-3b P15, ADR-0020 §D6-2b I-2) ---
+
+    /**
+     * 종결됐던 root 가 늦은 자식 때문에 다시 열린 시각.
+     *
+     * <p><b>{@link #resolvedAt}/{@link #discardedAt} 는 지우지 않는다</b> — 감사 이력이고, purge 는
+     * <b>현재 상태에 해당하는 시각만</b> 본다({@code findPurgeableRootIds} 의 상태별 분기).
+     */
+    @Column(name = "reopened_at")
+    private LocalDateTime reopenedAt;
+
+    @Column(name = "reopened_reason", length = 500)
+    private String reopenedReason;
 
     @Column(name = "note", length = 1000)
     private String note;

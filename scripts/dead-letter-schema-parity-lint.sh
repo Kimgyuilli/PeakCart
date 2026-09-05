@@ -61,6 +61,45 @@ def extract(path):
     return body
 
 
+def table_columns(service, table):
+    """서비스의 <table> 최종 컬럼 정의를 {컬럼명: 정의} 로 돌려준다. CREATE 를 못 찾으면 None.
+
+    **파일명이 아니라 db/migration 전체를 번호 순으로 훑는다.** glob 으로 특정 파일만 보면 신규
+    마이그레이션이 같은 테이블을 건드려도 검사에 들어오지 않는다 — ④-c-2b-1(glob 미확장),
+    ④-c-2b-2(java 목록 누락), ④-c-2b-3(replay 축 glob) 에서 연속으로 난 구멍이다.
+    """
+    paths = sorted(
+        glob.glob(os.path.join(root, service, "src/main/resources/db/migration/V*.sql")),
+        key=lambda x: int(re.match(r"V(\d+)__", os.path.basename(x)).group(1)))
+    columns = {}
+    seen_create = False
+    for path in paths:
+        with open(path, encoding="utf-8") as f:
+            body = normalize(f.read())
+
+        m = re.search(r"CREATE TABLE %s \((.*?)\n\)" % re.escape(table), body, re.S)
+        if m:
+            seen_create = True
+            for line in m.group(1).splitlines():
+                line = line.strip().rstrip(",").strip()
+                if not line or line.upper().startswith(("CONSTRAINT", "PRIMARY KEY", "UNIQUE", "KEY ", "INDEX")):
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    columns[parts[0]] = re.sub(r"\s+", " ", parts[1]).upper()
+
+        for alter in re.finditer(r"ALTER TABLE %s(.*?);" % re.escape(table), body, re.S):
+            for line in alter.group(1).splitlines():
+                line = line.strip().rstrip(",").strip()
+                m2 = re.match(r"ADD COLUMN\s+(\S+)\s+(.*)$", line)
+                if m2:
+                    # AFTER <col> 은 물리 배치일 뿐 계약이 아니다 — 서비스마다 컬럼 순서가 달라도
+                    # 스키마는 같으므로 정의에서 떼어낸다.
+                    definition = re.sub(r"\s+AFTER\s+\S+$", "", m2.group(2).strip(), flags=re.I)
+                    columns[m2.group(1)] = re.sub(r"\s+", " ", definition).strip().upper()
+    return columns if seen_create else None
+
+
 fingerprints = {}
 for service in services:
     matches = glob.glob(os.path.join(root, service, "src/main/resources/db/migration/V*__dead_letter_records.sql"))
@@ -164,6 +203,63 @@ if len(alter_prints) == len(services):
                                   "(롤링 배포 중 구버전 INSERT 가 깨지고 expand→backfill 순서가 성립하지 않는다)"
                                   % (service, column))
 
+# --- (2b) dead_letter_records **최종 스키마** parity (④-c-2b-3a P14 f-2) ---
+#
+# 왜 (2) 로 부족한가:
+#   (2) 는 V*__dead_letter_replay_axis.sql **한 파일**만 본다. 그 뒤에 같은 테이블을 건드리는 마이그레이션이
+#   새로 생기면 파일명이 달라 glob 에 걸리지 않고, 컬럼 목록도 하드코딩이라 **본실행도 self-test 도 green**
+#   이다 — ④-c-2b-1(glob 미확장) · ④-c-2b-2(java 목록 누락) 에 이은 같은 구멍의 세 번째다.
+#   그래서 파일 단위가 아니라 **db/migration 전체를 합성한 최종 스키마**를 대조한다.
+#   (2) 는 지우지 않는다 — 그쪽은 "4벌이 서로의 사본" 이라는 더 강한 성질(주석·공백 포함 원문 동일)을 지킨다.
+dlr_schemas = {}
+for service in services:
+    columns = table_columns(service, "dead_letter_records")
+    if columns is None:
+        violations.append("[DLQ-PARITY-015] %s: CREATE TABLE dead_letter_records 가 없다" % service)
+        continue
+    dlr_schemas[service] = columns
+
+if len(dlr_schemas) == len(services):
+    baseline_service = services[0]
+    baseline = dlr_schemas[baseline_service]
+    for service, columns in sorted(dlr_schemas.items()):
+        if service == baseline_service or columns == baseline:
+            continue
+        violations.append("[DLQ-PARITY-016] %s 의 dead_letter_records 최종 스키마가 %s 와 다르다:"
+                          % (service, baseline_service))
+        for name in sorted(set(columns) | set(baseline)):
+            here, there = columns.get(name), baseline.get(name)
+            if here != there:
+                violations.append("    %-28s %s  vs  %s" % (name, here, there))
+
+# replay 상관 앵커는 **전부 nullable · DEFAULT 없음** 이어야 한다.
+#   nullable: 롤링 배포 중 구버전 writer 의 INSERT 를 살린다.
+#   DEFAULT 부재: "값을 안 썼다" 와 "빈 값" 이 같아 보이면 판별자 누락이 조용히 삼켜진다(ADR-0020 D3).
+# 타입까지 못박는 이유: digest 는 SHA-256 hex 라 64자다. 짧으면 잘려 저장되고, 잘린 digest 는
+#   서로 다른 payload 를 같다고 말한다 — 오상관 방지를 표방하면서 정확히 그 반대를 한다.
+ANCHOR_COLUMNS = {
+    "last_replay_attempt_id": "VARCHAR(36)",
+    "last_replay_target_group": "VARCHAR(120)",
+    "last_replay_payload_digest": "VARCHAR(64)",   # ④-c-2b-3a P14, ADR-0021 D1
+}
+for service, columns in sorted(dlr_schemas.items()):
+    for column, expected_type in ANCHOR_COLUMNS.items():
+        definition = columns.get(column)
+        if definition is None:
+            violations.append("[DLQ-PARITY-017] %s: 상관 앵커 컬럼 %s 가 최종 스키마에 없다 "
+                              "(없으면 재실패가 root 로 수렴하지 못하고 독립 incident 로 갈라진다)"
+                              % (service, column))
+            continue
+        if not definition.startswith(expected_type.upper()):
+            violations.append("[DLQ-PARITY-018] %s: %s 의 타입이 %s 가 아니다 — %s"
+                              % (service, column, expected_type, definition))
+        if "NOT NULL" in definition:
+            violations.append("[DLQ-PARITY-019] %s: %s 가 NOT NULL 이다 "
+                              "(롤링 배포 중 구버전 INSERT 가 깨진다)" % (service, column))
+        if "DEFAULT" in definition:
+            violations.append("[DLQ-PARITY-020] %s: %s 에 DEFAULT 가 있다 "
+                              "(기본값은 앵커 미기록을 조용히 삼킨다 — ADR-0020 D3)" % (service, column))
+
 # --- (3) global/deadletter java 복제 parity (④-c-2b-1 P1-b) ---
 java_files = ["DeadLetterRecord", "DeadLetterStatus", "PublicationStatus", "DeadLetterRecorder",
               "DeadLetterRecordJpaRepository", "DeadLetterEndpoint", "DeadLetterMetrics",
@@ -223,38 +319,9 @@ REPLAY_OUTBOX_COLUMNS = ["record_kind", "destination_topic", "destination_partit
                          "replay_root_record_id", "target_consumer_group"]
 
 
-def outbox_columns(service):
-    """서비스의 outbox_events 최종 컬럼 정의를 {컬럼명: 정의} 로 돌려준다. 없으면 None."""
-    paths = sorted(glob.glob(os.path.join(root, service, "src/main/resources/db/migration/V*.sql")))
-    columns = {}
-    seen_create = False
-    for path in paths:
-        with open(path, encoding="utf-8") as f:
-            body = normalize(f.read())
-
-        m = re.search(r"CREATE TABLE outbox_events \((.*?)\n\)", body, re.S)
-        if m:
-            seen_create = True
-            for line in m.group(1).splitlines():
-                line = line.strip().rstrip(",").strip()
-                if not line or line.upper().startswith(("CONSTRAINT", "PRIMARY KEY", "UNIQUE", "KEY ", "INDEX")):
-                    continue
-                parts = line.split(None, 1)
-                if len(parts) == 2:
-                    columns[parts[0]] = re.sub(r"\s+", " ", parts[1]).upper()
-
-        for alter in re.finditer(r"ALTER TABLE outbox_events(.*?);", body, re.S):
-            for line in alter.group(1).splitlines():
-                line = line.strip().rstrip(",").strip()
-                m2 = re.match(r"ADD COLUMN\s+(\S+)\s+(.*)$", line)
-                if m2:
-                    columns[m2.group(1)] = re.sub(r"\s+", " ", m2.group(2)).strip().upper()
-    return columns if seen_create else None
-
-
 outbox_schemas = {}
 for service in services:
-    columns = outbox_columns(service)
+    columns = table_columns(service, "outbox_events")
     if columns is None:
         violations.append("[OUTBOX-PARITY-001] %s: CREATE TABLE outbox_events 가 없다 "
                           "(replay 재발행은 4서비스 공통 경로다 — ADR-0020 D2)" % service)
@@ -353,6 +420,10 @@ if [[ "${1:-}" == "--self-test" ]]; then
                "$TMP/$svc/src/main/resources/db/migration/V1__dead_letter_records.sql"
             cp order-service/src/main/resources/db/migration/V*__dead_letter_replay_axis.sql \
                "$TMP/$svc/src/main/resources/db/migration/V2__dead_letter_replay_axis.sql"
+            # digest 축(④-c-2b-3a P14). **별도 파일로 심는 것이 핵심이다** — replay 축 glob 에 걸리지 않는
+            # 파일이 최종 스키마 검사에는 걸린다는 것이 이 축의 존재 이유다.
+            cp order-service/src/main/resources/db/migration/V*__dead_letter_replay_payload_digest.sql \
+               "$TMP/$svc/src/main/resources/db/migration/V5__dead_letter_replay_payload_digest.sql"
             cp order-service/src/main/java/com/peekcart/global/deadletter/*.java \
                "$TMP/$svc/src/main/java/com/peekcart/global/deadletter/"
             # **per-service 파일은 fixture 에서도 서비스마다 달라야 한다.** 전부 order 사본으로 채우면
@@ -563,7 +634,66 @@ if [[ "${1:-}" == "--self-test" ]]; then
         echo "self-test 15 실패: 2집합 계약을 지킨 정상 fixture 를 위반으로 판정"; exit 1
     fi
 
-    echo "dead-letter-schema-parity-lint self-test 18종 통과"
+    # --- ④-c-2b-3a P14(f-2): 최종 스키마 축 (2R #6) ---
+    # 이 4종의 요점은 **replay 축 glob 밖의 파일**을 건드린다는 것이다. 이전 구조라면 전부 green 이었다.
+
+    # self-test 16: 한 서비스에서만 digest 컬럼 제거 → 016(스키마 차이) + 017(앵커 부재)
+    seed_fixture
+    rm "$TMP/payment-service/src/main/resources/db/migration/V5__dead_letter_replay_payload_digest.sql"
+    OUT="$(python3 "$LINT_PY" "$TMP" 2>&1 || true)"
+    if ! grep -q "DLQ-PARITY-017" <<<"$OUT"; then
+        echo "self-test 16 실패: 상관 앵커 컬럼 부재를 검출하지 못했다 (glob 밖 파일이라 놓쳤나?)"; exit 1
+    fi
+    if ! grep -q "DLQ-PARITY-016" <<<"$OUT"; then
+        echo "self-test 16 실패: 최종 스키마 차이를 검출하지 못했다"; exit 1
+    fi
+
+    # self-test 17~19 는 **4서비스를 함께** 변이시킨다. 그래야 016(서비스 간 차이)이 아니라
+    # 해당 검사 자신이 red 를 만든 것이 증명된다 — 016 에 업혀 가는 검사는 검사가 아니다.
+    # self-test 17: digest 를 VARCHAR(32) 로 → 018
+    seed_fixture
+    for svc in order-service product-service payment-service notification-service; do
+        sed -i.bak 's/last_replay_payload_digest VARCHAR(64) NULL/last_replay_payload_digest VARCHAR(32) NULL/' \
+            "$TMP/$svc/src/main/resources/db/migration/V5__dead_letter_replay_payload_digest.sql"
+    done
+    OUT="$(python3 "$LINT_PY" "$TMP" 2>&1 || true)"
+    if ! grep -q "DLQ-PARITY-018" <<<"$OUT"; then
+        echo "self-test 17 실패: digest 타입 축소를 검출하지 못했다 (잘린 digest 는 다른 payload 를 같다고 말한다)"; exit 1
+    fi
+    if grep -q "DLQ-PARITY-016" <<<"$OUT"; then
+        echo "self-test 17 실패: 4서비스 동시 변이인데 스키마 차이로 잡혔다 (018 이 016 에 업혀 있다)"; exit 1
+    fi
+
+    # self-test 18: digest 를 NOT NULL 로 → 019
+    seed_fixture
+    for svc in order-service product-service payment-service notification-service; do
+        sed -i.bak 's/last_replay_payload_digest VARCHAR(64) NULL/last_replay_payload_digest VARCHAR(64) NOT NULL/' \
+            "$TMP/$svc/src/main/resources/db/migration/V5__dead_letter_replay_payload_digest.sql"
+    done
+    OUT="$(python3 "$LINT_PY" "$TMP" 2>&1 || true)"
+    if ! grep -q "DLQ-PARITY-019" <<<"$OUT"; then
+        echo "self-test 18 실패: 앵커 컬럼 NOT NULL 을 검출하지 못했다"; exit 1
+    fi
+
+    # self-test 19: digest 에 DEFAULT 부여 → 020
+    seed_fixture
+    for svc in order-service product-service payment-service notification-service; do
+        sed -i.bak "s/last_replay_payload_digest VARCHAR(64) NULL/last_replay_payload_digest VARCHAR(64) NULL DEFAULT ''/" \
+            "$TMP/$svc/src/main/resources/db/migration/V5__dead_letter_replay_payload_digest.sql"
+    done
+    OUT="$(python3 "$LINT_PY" "$TMP" 2>&1 || true)"
+    if ! grep -q "DLQ-PARITY-020" <<<"$OUT"; then
+        echo "self-test 19 실패: 앵커 컬럼 DEFAULT 를 검출하지 못했다 (기본값은 앵커 미기록을 삼킨다)"; exit 1
+    fi
+
+    # self-test 20: **음성 대조군** — digest 를 지키는 정상 fixture 는 통과해야 한다.
+    #   17~19 가 항상 red 를 내는 검사가 아님을 고정한다.
+    seed_fixture
+    if ! python3 "$LINT_PY" "$TMP" >/dev/null; then
+        echo "self-test 20 실패: 정상 digest fixture 를 위반으로 판정"; exit 1
+    fi
+
+    echo "dead-letter-schema-parity-lint self-test 23종 통과"
     exit 0
 fi
 

@@ -1,6 +1,8 @@
 # ADR-0020: DLQ replay 계약 — 재발행 보장·발행 권한 예외·좌표 유효성·종결 축 분리
 
-- **Status**: Accepted
+- **Status**: Partially Superseded by [ADR-0021](./0021-dlq-replay-correlation-anchor.md)
+  - **무효화된 범위**: §D5-4 의 **"판독 조건 = 한 트랜잭션 안의 원자 대조"** 중 **`record_kind=REPLAY` 대조**와, 같은 절 음성 테스트 목록의 **`record_kind` 불일치** 항목. `record_kind` 는 `outbox_events` 전속 컬럼이라 **같은 절이 배제한 수명 경쟁에 그대로 걸린다** — ADR-0021 이 그 축을 원장 앵커(`last_replay_attempt_id`·`last_replay_target_group`·`last_replay_payload_digest`) + fingerprint 대조로 대체한다.
+  - **유지되는 범위**: §D5-4 의 나머지 전부(대조의 정본은 원장 · 헤더 불신 · 수명 경쟁 · 실제 DLT group 대조 · 어긋나면 독립 행) · §D3 · §D5-2 · §D6 · §D8. ADR-0021 은 이 원칙들의 **귀결**이지 반박이 아니다.
 - **Date**: 2026-09-01
 - **Deciders**: 프로젝트 오너
 - **관련 Phase**: Phase 4 (MSA 분리) — 구현 ④ Choreography Saga (④-c-2b)

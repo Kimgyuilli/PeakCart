@@ -157,7 +157,8 @@ class DeadLetterLedgerIntegrationTest extends AbstractIntegrationTest {
     void recordsMessageWithoutEventId() {
         DlqOrigin origin = new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, "payment.completed", 2, 200L,
                 OWNED_GROUP, "k", null, "java.lang.IllegalArgumentException",
-                "eventId 필드가 없습니다", "invalid-json-message");
+                "eventId 필드가 없습니다", "invalid-json-message",
+                null, null, null, null);
 
         assertThat(recorder.record(origin)).isTrue();
 
@@ -170,7 +171,8 @@ class DeadLetterLedgerIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("origin 헤더 판독 불가 → DLQ 자신의 좌표로 적재되고 6컬럼 어디에도 NULL 이 없다")
     void recordsDlqOriginWithoutNulls() {
         DlqOrigin origin = new DlqOrigin(DlqOriginKind.DLQ_ORIGIN, "payment.completed.dlq", 0, 5L,
-                DlqOrigin.UNKNOWN_CONSUMER_GROUP, null, null, null, null, "garbage");
+                DlqOrigin.UNKNOWN_CONSUMER_GROUP, null, null, null, null, "garbage",
+                null, null, null, null);
 
         assertThat(recorder.record(origin)).isTrue();
 
@@ -196,7 +198,8 @@ class DeadLetterLedgerIntegrationTest extends AbstractIntegrationTest {
     void truncatesOversizedPayload() {
         String huge = "x".repeat(20_000);
         DlqOrigin origin = new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, "payment.completed", 4, 400L,
-                OWNED_GROUP, "k", null, "E", "m", huge);
+                OWNED_GROUP, "k", null, "E", "m", huge,
+                null, null, null, null);
 
         recorder.record(origin);
 
@@ -209,7 +212,8 @@ class DeadLetterLedgerIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("미등록 토픽은 부팅이 아니라 적재 시점에 예외 — 기본값으로 조용히 떨어지지 않는다")
     void unregisteredTopicFailsLoudly() {
         DlqOrigin origin = new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, "totally.unknown.topic", 0, 1L,
-                OWNED_GROUP, null, null, null, null, "{}");
+                OWNED_GROUP, null, null, null, null, "{}",
+                null, null, null, null);
 
         assertThat(repository.findAll()).isEmpty();
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> recorder.record(origin))
@@ -239,7 +243,8 @@ class DeadLetterLedgerIntegrationTest extends AbstractIntegrationTest {
 
     private DlqOrigin resolvedOrigin(int partition, long offset, String group) {
         return new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, "payment.completed", partition, offset,
-                group, "order-1", 1_700_000_000_000L, "java.lang.IllegalStateException", "boom", "{}");
+                group, "order-1", 1_700_000_000_000L, "java.lang.IllegalStateException", "boom", "{}",
+                null, null, null, null);
     }
 
     private void send(String dlqTopic, String originTopic, int partition, long offset,

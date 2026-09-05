@@ -153,6 +153,7 @@ class DeadLetterRunbookRehearsalTest extends AbstractIntegrationTest {
     private DlqOrigin origin(int partition, long offset) {
         return new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, "payment.completed", partition, offset,
                 "order-svc-payment-completed-group", "order-1", 1_700_000_000_000L,
-                "java.lang.IllegalArgumentException", "eventId 필드가 없습니다", "{}");
+                "java.lang.IllegalArgumentException", "eventId 필드가 없습니다", "{}",
+                null, null, null, null);
     }
 }

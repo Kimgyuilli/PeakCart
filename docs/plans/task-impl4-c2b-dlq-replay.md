@@ -131,7 +131,7 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 |---|---|---|
 | 2b-1 | P1 · P1-b · P2 · P3 · P4 · P5 · P6 · P7 | ✅ **완료** — diff 리뷰 3R(12건 전량 반영, 3R P1=0) · 918 tests 0 failed · 변이 8종 red |
 | 2b-2 | P8 · **P9 · P9-b · P9-c** · P10 ~ P13 | 🔄 구현 완료 · 902 tests 0 실패(모듈별) · 변이 14종 red · lint 7종 green(parity self-test 18종) · **Codex diff 리뷰 미실행(quota)** |
-| 2b-3a | **P14** | 🔄 착수 — 계획 확정(C-15~C-28 · 리뷰 1R 17건 + 2R 9건 전량 반영 · **3R 미실행/quota**) |
+| 2b-3a | **P14** | 🔄 구현 완료 — ADR-0021 신설 · 4서비스 digest 마이그레이션 · 송신 allowlist 강제 · parity lint 최종 스키마 전환(self-test 18→23종) |
 | 2b-3b | **P15 ~ P17** | 🔲 (3a 머지 후. 착수 시 3a diff 포함 재리뷰 선행) |
 | 2b-4 | P18 ~ P25 | 🔲 |
 

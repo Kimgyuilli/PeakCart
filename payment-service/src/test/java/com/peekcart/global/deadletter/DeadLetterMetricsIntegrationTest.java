@@ -120,7 +120,8 @@ class DeadLetterMetricsIntegrationTest extends AbstractIntegrationTest {
     private DlqOrigin origin(int partition, long offset) {
         return new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, "order.created", partition, offset,
                 "payment-svc-order-created-group", "order-1", 1_700_000_000_000L,
-                "java.lang.IllegalStateException", "boom", "{}");
+                "java.lang.IllegalStateException", "boom", "{}",
+                null, null, null, null);
     }
 
     private double gauge(String name) {

@@ -95,7 +95,8 @@
 |---|---|---|---|
 | **④-c-2b-1** | 원장 축 확장 + incident 집계 정정 | P1~P7 | 두 축 분리·`RESOLVED`·root-only 집계·종결 전파 (**replay 는 아직 불가**) |
 | **④-c-2b-2** | 발행 표면 — outbox replay kind + notification outbox | P8~P13 | replay 레코드를 **발행할 수 있는** poller (진입점 없음 → replay 행이 생기지 않는다) |
-| **④-c-2b-3** | 재실패 상관 + 재개방 | P14~P17 | 재실패가 root 로 수렴하는 경로가 **먼저** 선다 (아직 replay 개시 불가) |
+| **④-c-2b-3a** | 상관 표면 — 헤더 계약 · 매핑 · ADR-0021 · lint | P14 | 헤더가 **정의·강제·판독**되고 앵커가 매핑된다 (아직 상관하지 않는다) |
+| **④-c-2b-3b** | 원자 상관 + 재개방 | P15~P17 | 재실패가 root 로 수렴하는 경로가 **먼저** 선다 (아직 replay 개시 불가) |
 | **④-c-2b-4** | 좌표 reader + 진입점 + fence + backfill + 문서 | P18~P25 | replay **개시 가능** — 그 시점에 상관·재개방이 이미 배포돼 있다 |
 
 > **순서 정정 (리뷰 1R #2)**: 초안은 진입점(2b-3)을 상관·재개방(2b-4)보다 **먼저** 열었다.
@@ -104,7 +105,19 @@
 > **계약을 지키는 코드 대신 운영 규율에 기대는 것**이라 채택하지 않았다. 상관 경로를 먼저 세우면
 > replay 가 열리는 순간 이미 계약이 성립한다.
 
-**되돌리기**: 2b-1~2b-3 은 앞 PR 만 배포된 상태에서 정지해도 기존 동작이 유지된다 — 신규 컬럼은 전부
+> **2b-3 을 3a/3b 로 재분할했다 (2026-09-06, 사용자 승인)**. 이유는 두 가지다.
+> ① **범위** — 계획 리뷰 2라운드가 2b-3 에 ADR 신설(ADR-0021) · 4서비스 digest 마이그레이션 ·
+> parity lint 재구조화 · 송신 측 검증 · Counter 2종을 더했다. P14 하나가 이미 앞선 PR 한 개 분량이다.
+> ② **리뷰 예산** — 계획 3R 이 Codex `usage limit` 으로 미실행이라 **수렴 조건(P1=0 + 새 표면 무추가)이
+> 미달인 채로 남았다**. 한 덩어리로 구현하면 diff 리뷰도 같은 한도에 걸려 #102 의 "리뷰 미측정" 이 반복된다.
+> 자르면 각 PR 이 한도 안에서 리뷰된다.
+>
+> **3a 가 단독 배포돼도 안전하다** — 판독은 아무도 보내지 않는 헤더를 읽는 no-op 이고, 매핑·컬럼은 additive 이며,
+> 송신 검증은 `record_kind='REPLAY'` 행에만 걸리는데 그 행을 만드는 진입점이 아직 없다.
+> **ADR-0021 이 코드보다 한 PR 앞서는 것은 의도된 순서다** — 이 저장소의 규약이 "새 결정 시 ADR 을 먼저"다
+> (2b-2 의 ADR-0012 D1 표가 **뒤늦게** 따라간 것이 오히려 예외였다).
+
+**되돌리기**: 2b-1~2b-3b 는 앞 PR 만 배포된 상태에서 정지해도 기존 동작이 유지된다 — 신규 컬럼은 전부
 nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를 흡수하며, 진입점이 없으면 replay 행
 자체가 생기지 않는다. **2b-4 배포 이후는 다르다** — replay 행이 존재하는 상태의 롤백은 P24 의 별도 절차를 따른다.
 
@@ -117,8 +130,9 @@ nullable 이고, `record_kind IS NULL → DOMAIN` 해석이 구버전 writer 를
 | PR | 항목 | 상태 |
 |---|---|---|
 | 2b-1 | P1 · P1-b · P2 · P3 · P4 · P5 · P6 · P7 | ✅ **완료** — diff 리뷰 3R(12건 전량 반영, 3R P1=0) · 918 tests 0 failed · 변이 8종 red |
-| 2b-2 | P8 · **P9 · P9-b · P9-c** · P10 ~ P13 | 🔄 구현 완료 · 902 tests 0 실패(모듈별) · 변이 14종 red · lint 7종 green(parity self-test 18종) · **Codex diff 리뷰 미실행(quota)** |
-| 2b-3 | P14 ~ P17 | 🔲 |
+| 2b-2 | P8 · **P9 · P9-b · P9-c** · P10 ~ P13 | ✅ **완료** [#102](https://github.com/Kimgyuilli/PeakCart/pull/102) — 902 tests 0 실패(모듈별) · 변이 14종 red · lint 7종 green(parity self-test 18종) · **Codex diff 리뷰 미실행(quota)** |
+| 2b-3a | **P14** | ✅ **완료** [#103](https://github.com/Kimgyuilli/PeakCart/pull/103) — ADR-0021 신설 · 4서비스 digest 마이그레이션 · 송신 allowlist 강제 · parity lint 최종 스키마 전환(self-test 18→23종) · 1006 tests 0 실패 · lint 15종 · 변이 1종 red · **계획 3R·diff 리뷰 미실행(quota)** |
+| 2b-3b | **P15 ~ P17** | 🔲 (3a 머지 후. 착수 시 3a diff 포함 재리뷰 선행) |
 | 2b-4 | P18 ~ P25 | 🔲 |
 
 ### PR ④-c-2b-1 — 원장 축 확장 + incident 집계 정정
@@ -357,46 +371,323 @@ outbox 상태를 조회해 `PUBLISHED`/`PUBLISH_FAILED` 로 전이한다. `@Sche
 따라서: 해당 사이클의 **두 save 를 모두 실패**시키고 → DB 재조회로 행이 `PENDING` 임을 확인 → 장애 복구 후
 다음 poll 실행 → **broker 에 서로 다른 2개 레코드**가 있고 **같은 `eventId` 의 `processed_events` 증가분이 1**임을 확인한다.
 
-### PR ④-c-2b-3 — 재실패 상관 + 재개방
+### PR ④-c-2b-3 — 재실패 상관 + 재개방 (**3a / 3b 로 분할**)
 
-**P14.** replay 상관 헤더 — 발행 측(P11) allowlist 4종: `pc-replay-attempt-id`(UUID) ·
-`pc-replay-ledger-owner`(서비스) · `pc-replay-target-group` · `pc-replay-root-id`.
-판독 측: `DlqOrigin` 에 상관 필드 4개 추가 + `DlqHeaders.parse()` 가 **allowlist 키만** 읽는다(V9 의 화이트리스트 구조 유지).
-> **`record_kind=REPLAY` 는 헤더로 판정하지 않는다 (리뷰 1R #3)**: 헤더 값은 조작 가능하고, outbox 행은
-> `PUBLISHED` cleanup 으로 먼저 사라질 수 있어 정본이 될 수 없다(D5-4 수명 경쟁). 대조 정본은 **원장**이다.
->
-> **다만 "attempt 기록이 있다" 만으로는 부족하다 (2R #4)**: 유효한 attempt 가 살아 있는 동안 **같은 헤더를 붙인
-> 도메인 레코드**가 그 토픽·group 에서 실패하면 owner/group/topic 대조를 전부 통과한다. ADR §D5-4 가 요구한
-> `record_kind=REPLAY` 대조를 "attempt 존재" 로 치환한 것은 **동치가 아니었다**.
-> 따라서 root 에 **replay 대상의 durable fingerprint** 를 함께 보존하고 그것과 대조한다 —
-> root 는 이미 `event_id`·`original_key`·`original_timestamp`·`origin_topic` 을 갖고 있으므로
-> **자식의 그 4값이 root 와 일치**해야 상관한다(재발행분은 원본과 같은 key·payload·eventId·timestamp 를 싣는다 — D8-3).
-> 이 대조는 outbox 수명과 무관하게 성립한다.
+> **3a = P14** (헤더 계약 · 판독 · 매핑 · digest 마이그레이션 · ADR-0021 · parity lint 확장 · javadoc)
+> **3b = P15~P17** (원자 대조 · 재개방 · 검증 매트릭스 · DLT 계약 · 배포/롤백 순서)
+> 아래 착수 전 코드 검증 표(C-15~C-28)는 **양쪽 공통**이다.
 
-**P15.** `DeadLetterRecorder` 원자 대조 — 자식 적재 트랜잭션 안에서
-① 헤더 `attempt-id` 로 **자기 서비스 원장의 `last_replay_attempt_id`** 가 일치하는 root 를 찾고
-② `SELECT ... FOR UPDATE` 로 잠근 뒤
-③ **ledger owner(현재 서비스)** · **실제 DLT consumer group ↔ `last_replay_target_group`** ·
-`destination_topic ↔ origin_topic` · 헤더 `root-id ↔ root.id` ·
-**fingerprint 4값 — 자식의 `event_id`·`original_key`·`original_timestamp`·`origin_topic` 이 root 와 일치**
-(`original_key` 는 nullable 이므로 **null-safe 일치**로 비교한다: 둘 다 NULL 이면 일치) 를 **전부** 대조하고
-④ 통과하면 자식 INSERT(`root_record_id = root.id`) + root 가 terminal 이면 **재개방**(`status='OPEN'`,
-`reopened_at`/`reopened_reason` 기록, **기존 `resolved_at`/`discarded_at` 은 지우지 않는다** — 감사 이력이고
-purge 는 P4 의 `CASE` 로 현재 상태 시각만 본다)를 **같은 트랜잭션**에서 수행한다.
-**Slack 알림은 트랜잭션 밖 best-effort 다 (2R #11)** — 외부 webhook 은 rollback 대상이 아니므로
-"원자적 · 정확히 1회" 는 성립하지 않는다. 기존 계약(`DeadLetterRecorder:20-23` — 내구적 신호는 원장 행)을 그대로
-따르고, **commit 후 시도 · 0회 가능**을 명시한다.
-하나라도 어긋나면 **상관하지 않고 독립 root 행**으로 적재한다.
+#### 착수 전 코드 검증 (2026-09-05) — 계획이 바뀐 곳
 
-**P16.** 음성·경쟁 테스트 — 위조 attempt · 타 서비스 소유 attempt · 존재하지 않는 attempt ·
-attempt 기록 없는 root(= replay 아님) · **유효 attempt + 다른 group** · **유효 attempt + 다른 root** ·
-**다른 destination topic** · **유효 attempt + fingerprint 불일치**(같은 헤더를 붙인 도메인 레코드 —
-`event_id`/`original_key`/`original_timestamp` 중 하나가 root 와 다름, 2R #4) → **8종** 전부 **독립 행**이 되어야 한다. 대조 조건을 하나씩 제거하면 해당 케이스만 red.
-추가로 **수명 경쟁**: outbox `PUBLISHED` cleanup 을 먼저 돌린 뒤 지연 DLQ 적재를 주입해
-**같은 root 로 상관되고 backlog 가 1** 임을 확인한다(N11).
+> 원칙: 전제는 ADR 이 아니라 **현재 코드**다. 아래는 P14~P17 초안의 진술을 직접 grep/파일·바이트코드 확인한 결과다.
 
-**P17.** DLT 계약 고정 — `DlqIntegrationTest` 계열에 **정상 DLT 유입에서 `original_timestamp` 가 원장까지 저장됨**을
-단언으로 추가한다(현재 미단언, ADR C1). **이것은 계약 고정이지 NULL 비율 측정이 아니다** — 측정은 P22 소관이다.
+| # | 초안의 진술 | 확인 결과 | 처분 |
+|---|---|---|---|
+| C-15 | 재발행 레코드에 실은 `pc-replay-*` 커스텀 헤더가 **재실패 시 DLT 레코드까지 살아남는다** (P14 의 대전제) | **참 — 바이트코드로 확인**. `spring-kafka-3.3.14` 의 `DeadLetterPublishingRecoverer.accept()` 는 `new RecordHeaders(record.headers().toArray())` 로 **원본 헤더 전량을 복사한 뒤** `addAndEnhanceHeaders` 로 `DLT_*` 를 얹는다(`javap -c` 오프셋 170~192). `stripPreviousExceptionHeaders`(기본 true)는 **예외 헤더만** 지운다 | 유지 — P14 성립 |
+| C-16 | 발행 측(P11)이 `pc-replay-*` allowlist 4종을 싣는다 | **거짓 — 그런 상수는 존재하지 않는다**. `grep -rn "pc-replay"` 결과는 **계획서 2줄뿐**이고 코드 0건이다. P11 이 만든 것은 `replay_headers` **JSON 을 그대로 헤더로 푸는 일반 메커니즘**(`OutboxPollingService:169-181`)이고, 어떤 키를 넣을지는 정하지 않았다 | **P14 를 확대** — 키 정본(상수 클래스)을 이 PR 이 신설한다. 발행 측은 진입점(2b-4)이 이 상수로 JSON 을 만든다 |
+| C-17 | `DlqHeaders.parse()` 의 "V9 화이트리스트 구조" 를 유지해 allowlist 키만 읽는다 | 표현이 부정확했다 — `DlqHeaders` 에는 allowlist **자료구조가 없다**. 표준 `KafkaHeaders.DLT_*` 상수 6개를 **개별 호출로 읽는 코드**일 뿐이다(`parse():43-70`). "화이트리스트" 는 `DeadLetterRecorder` javadoc 의 **정책 서술**이다 | **표현 정정** — 구조를 유지하는 게 아니라 같은 방식(상수 개별 판독)으로 4종을 더 읽는다 |
+| C-18 | root 에 상관 앵커 컬럼이 있다 | 정확. V8(order)/V6·V6/V4 가 `last_replay_attempt_id VARCHAR(36)` · `last_replay_target_group VARCHAR(120)` · `reopened_at DATETIME(6)` · `reopened_reason VARCHAR(500)` 을 이미 만들었고 `idx_dead_letter_records_attempt` 도 있다 | ~~**마이그레이션 0**~~ → **정정 (리뷰 1R #1)**: 기존 앵커만으로는 **payload 변조를 걸러내지 못한다**. `last_replay_payload_digest` 1컬럼을 additive 로 더한다 — order **V10** · product **V8** · payment **V8** · notification **V6**. 근거는 P14(e) |
+| C-19 | (초안 무언급) 그 컬럼들이 **엔티티에 매핑돼 있는가** | **아니다**. `DeadLetterRecord` 는 `rootRecordId`·`publicationStatus`·`outboxEventId`·`resolvedAt/By` 만 매핑했다. `lastReplayAttemptId`·`lastReplayTargetGroup`·`reopenedAt`·`reopenedReason` 은 **미매핑**(`replayDeadline`·`replayPolicy` 는 2b-4 소관이라 이 PR 도 매핑하지 않는다) | **P14 에 매핑 4종 추가** |
+| C-20 | P15 가 `SELECT ... FOR UPDATE` 로 root 를 잠근다 | 잠금 API 는 이미 있다 — `findByIdForUpdate`(PESSIMISTIC_WRITE). **다만 attempt-id 로 root 를 찾는 조회가 없다** | **P15 에 조회 1종 추가**. 2b-1 이 `findRootIdOf` 에 남긴 계약(**엔티티가 아니라 id 만** 돌려줘야 `FOR UPDATE` 가 stale 인스턴스를 보지 않는다)을 그대로 따른다 |
+| C-21 | 자식을 root 에 잇는 수단이 있다 | 정확. `DeadLetterRecord.linkToRoot(Long)` 이 2b-1 산출물로 **이미 존재하나 운영 코드에서 호출되는 곳이 0** 이다(현재 호출자는 `DeadLetterIncidentAggregationIntegrationTest:359` 하나) | 유지 — 이 PR 이 첫 운영 호출자다 |
+| C-22 | 재개방 전이가 있다 | **없다**. `DeadLetterRecord` 에 `reopen(...)` 이 없고 `DeadLetterTransitionService` 는 `acknowledge`/`resolve`/`discard` 3종뿐이다 | **P15 에 `reopen()` 신설** |
+| C-23 | purge 가 재개방과 안전하게 겹친다 | 정확 — `findPurgeableRootIds` 가 이미 `COALESCE` 를 피하고 **현재 상태에 해당하는 시각만** 본다(`status='DISCARDED' AND discarded_at<t` OR `status='RESOLVED' AND resolved_at<t`). 재개방이 `resolved_at`/`discarded_at` 을 지우지 않아도 `status='OPEN'` 이면 purge 대상에서 빠진다 | 유지 — **V-21c 검증을 이 PR 에서 수행**(2b-1 이 이연) |
+| C-24 | `DeadLetterRecorder` 가 ledger owner(현재 서비스)를 안다 | **모른다**. 이 파일은 4서비스 **byte 동일 복제**라 `PeekcartService` 를 하드코딩할 수 없다. 서비스 정체성을 가진 것은 per-service 인 `DeadLetterConsumer`/`DeadLetterQuarantineConsumer` 의 `private static final PeekcartService SELF` 다 | ~~`record(DlqOrigin, PeekcartService self)` 로 시그니처 확대 — 호출부 2곳~~ → **정정 (리뷰 1R #13)**: 호출부는 **2곳이 아니라 실측 44곳**(main+test)이고, **notification 에는 quarantine consumer 가 없어** 서비스마다 수가 다르다. 인자로 받으면 호출자가 소유자를 고를 수 있어 신뢰 경계도 약해진다 → **`LedgerOwner` 빈 주입**, `record(DlqOrigin)` 시그니처 **불변**. 상세는 P15(f) |
+| C-25 | fingerprint 4값이 재발행분에서 원본과 같게 유지된다 | 참 — P11 이 `destinationTopic`·`sourceRecordTimestamp`·`recordKey`·원본 `payload` 를 그대로 싣는다(`buildReplayRecord:155-167`). `event_id` 는 payload 에서 뽑으므로 동일. `message.timestamp.type` 은 `CreateTime`(Apache 기본, ④-c-2b-1 P4 실측) 이라 producer timestamp 가 보존된다 | 유지 |
+| C-26 | P17 대상인 `DlqIntegrationTest` 가 `original_timestamp` 를 단언하지 않는다 | 정확. 해당 파일에 `originalTimestamp`/`TIMESTAMP` 문자열 **0건**. 다만 이 테스트는 **payment-service 에만** 있다(`DlqIntegrationTest` 는 1벌) | 유지 — P17 은 payment 판본 1곳 |
+| C-27 | (초안 무언급) 신규 복제 파일이 parity 목록에서 누락될 위험 | ~~자동으로 막힌다~~ → **과장이었다 (리뷰 1R #14)**. `DLQ-PARITY-014`(`:183-201`)는 **네 벌의 해시가 이미 전부 같을 때만** 누락을 신고한다. 복제 의도인 파일이 **생성 시점부터 한 벌이라도 다르면** 서비스별 파일로 오인돼 그대로 통과한다 | **신규 상수 클래스는 `common` 에 둔다**(1벌) — 4벌 복제를 늘리지 않는다. 이번에 고치는 `DeadLetterRecord`/`DeadLetterRecordJpaRepository`/`DeadLetterRecorder` 가 `java_files` 목록에 **이미 있음**을 확인했고, **완료 조건에 parity lint 본실행 + `--self-test` 를 명시**한다 |
+| C-28 | (초안 무언급) 재발행분이 **대상 group 이 아닌 다른 group** 에서도 재실패할 수 있다 | 그렇다. replay 는 업무 토픽에 실리므로 그 토픽을 구독하는 **모든** group 이 다시 소비한다. `stock.reservation.result` 처럼 다수 구독 토픽이 실재한다 | **의도된 동작으로 명시** — P16 의 음성 케이스 "유효 attempt + 다른 group" 이 정확히 이 경우이고, **독립 root** 가 맞다. replay 는 한 group 을 표적한 행위이고 다른 group 의 실패는 다른 사건이다. 발행 자체를 막는 것(fence)은 2b-4 소관 |
+
+**이 PR 은 4서비스 additive 마이그레이션 1종을 동반한다** (C-18 정정) — `last_replay_payload_digest`.
+`EXPECTED_MIGRATIONS` → `order 1~10 · product 1~8 · payment 1~8 · notification 1~6`.
+
+
+#### ④-c-2b-3a — P14
+
+**P14.** replay 상관 표면 — **키 정본 · 송신 강제 · 판독 · 매핑** 4층을 이 PR 이 함께 연다.
+
+**(a) 키 정본 (C-16 — 초안이 "P11 이 이미 싣는다" 고 적었으나 코드에 0건이었다).**
+`common` 에 `ReplayHeaders` 상수 클래스를 신설한다 — `pc-replay-attempt-id`(UUID) ·
+`pc-replay-ledger-owner`(`PeekcartService.prefix()`) · `pc-replay-target-group` · `pc-replay-root-id`.
+**`common` 에 두는 이유**: `global/deadletter` 에 두면 4벌 복제 자산이 하나 더 늘고, 발행 측(2b-4 진입점)과
+판독 측이 **같은 문자열을 두 곳에 적게** 된다. 갈라지면 모든 상관이 조용히 실패한다.
+이 클래스가 **허용 키 집합(`Set<String> ALLOWED`)을 함께 노출**한다 — (b) 가 그것으로 강제한다.
+
+**(b) 송신 강제 (리뷰 1R #4 — 신설).** `OutboxPollingService.replayHeaders()` 는 현재 `replay_headers` JSON 의
+**모든 키를 그대로 발행**한다(`:169-181`). C-16 은 그 사실을 적어놓고도 P14 를 판독 측에만 걸어,
+**임의 application 헤더·표준 `DLT_*` 주입 표면이 그대로 남아 있었다** — ADR §D5-4 의 "allowlist 에 replay 상관
+헤더를 명시" 계약 위반이다. `buildReplayRecord` 가 헤더를 싣기 전에 검증한다:
+- **키 집합이 `ReplayHeaders.ALLOWED` 와 정확히 같아야 한다.** 부분집합 허용은 **불충분하다 (리뷰 2R #3)**:
+  `replayHeaders()` 는 JSON 이 null/blank 면 **빈 Map** 을 돌려주고 `addHeaderIfPresent` 는 값이 null/blank 면
+  **조용히 헤더를 생략**한다(`:169-185`). 부분집합만 요구하면 **헤더 0~3개짜리 REPLAY 가 그대로 발행**되고,
+  재실패 시 상관 축이 없어 독립 incident 로 갈라진다 — N11 을 발행 측에서 깨는 경로다.
+- **네 값이 전부 유효해야 한다** — non-blank · `attempt-id` 는 UUID 파싱 가능 · `root-id` 는 양의 정수 ·
+  `ledger-owner` 는 `PeekcartService.prefix()` 집합의 원소. 하나라도 어긋나면 `IllegalStateException`
+  (삼키지 않고 실패시켜 재시도/`PUBLISH_FAILED` 로 드러낸다).
+- `KafkaHeaders.DLT_*` 접두사 키는 **명시적으로 거부**한다. 실리면 재실패 시 원본 좌표가 덮여 상관 정본이 사라진다.
+- 이 파일은 `global/outbox` **4벌 byte 동일 복제**이므로 notification 판본을 포함해 4벌을 함께 고친다.
+
+**(c) 판독 (C-17 정정).** `DlqOrigin` 에 상관 필드 4개(`replayAttemptId`·`replayLedgerOwner`·
+`replayTargetGroup`·`replayRootId`)를 추가하고 `DlqHeaders.parse()` 가 그 4키를 **UTF-8 문자열로** 읽는다.
+초안은 "V9 의 화이트리스트 구조 유지" 라고 적었으나 `DlqHeaders` 에 allowlist **자료구조는 없다** —
+표준 `KafkaHeaders.DLT_*` 상수를 개별 호출로 읽는 코드이고, 4종도 같은 방식으로 더한다.
+**판독 실패는 예외가 아니다** — 없으면 null 이고, null 이면 상관하지 않는다(기존 §2.6-C 계약 유지).
+`pc-replay-root-id` 는 문자열로 읽어 파싱 실패 시 null 로 떨어뜨린다(숫자가 아닌 조작 값에 예외를 던지면
+**DLQ 적재 자체가 막혀 유실**된다 — 조작 가능한 입력이 적재를 실패시켜서는 안 된다).
+
+**(d) 매핑 + 마이그레이션 (C-19 · C-18 **정정**).** `DeadLetterRecord` 에 `lastReplayAttemptId`·
+`lastReplayTargetGroup`·`reopenedAt`·`reopenedReason` 4컬럼을 매핑한다(V8 이 이미 만든 컬럼 — 마이그레이션 불필요).
+**신규 `lastReplayPayloadDigest` 도 함께 매핑한다 (리뷰 2R #1)** — 1R 수정이 컬럼 DDL 만 적고 **엔티티 매핑과
+writer 를 배정하지 않아**, 실제 replay 에서 root digest 가 영원히 `NULL` 로 남아 P15 의 대조 축 9가
+**늘 통과하는(= 아무것도 검사하지 않는)** 상태가 될 뻔했다. writer 는 P21 이 배정한다.
+**여기에 신규 컬럼 1종이 더 붙는다** — `last_replay_payload_digest VARCHAR(64)`(SHA-256 hex).
+근거는 (e). 4서비스 additive 마이그레이션 **order V10 · product V8 · payment V8 · notification V6**
+(**P23 backfill 을 V11/V9/V9/V7 로 밀어냈다 — 리뷰 2R #2**: 1R 이 배정한 번호가 P23 과 정확히 겹쳐,
+두 파일이면 Flyway duplicate-version 으로 부팅이 깨지고 한 파일로 합치면 2b-3/2b-4 의 독립 배포 경계가 사라진다),
+**nullable · DEFAULT 없음**(2b-1 이 replay 축 9컬럼에 세운 규칙 그대로).
+`EXPECTED_MIGRATIONS` → `order 1~10 · product 1~8 · payment 1~8 · notification 1~6`.
+`replayDeadline`·`replayPolicy` 는 매핑하지 않는다 — 읽는 주체가 2b-4 에 생긴다.
+
+**(e) 왜 payload digest 가 필요한가 (리뷰 1R #1 — 초안 반증).**
+초안의 fingerprint 4값(`event_id`·`original_key`·`original_timestamp`·`origin_topic`)에는
+**payload 동일성을 묶는 값이 없다**. 같은 `eventId`·key·timestamp 를 실은 **변조 payload** 가 그 토픽에서
+실패하면 대조를 전부 통과해 **남의 사건에 자식으로 붙고 종결된 root 를 재개방**한다.
+ADR §D5-4 가 "헤더 값 자체를 신뢰하지 않는다 … 조작된 메시지가 임의 root 연결·재개방을 유발" 이라고
+명시적으로 경계한 바로 그 경로다. §D8-3 의 fence 도 `key`·`payload`·`eventId` **byte-for-byte 동일**을 요구한다.
+- **원장의 `payload` 컬럼으로 대조하지 않는 이유**: 그 값은 `maxLength=8000` 으로 **잘려 저장**된다
+  (`DlqPayloads.truncate` · `DeadLetterProperties.Payload:118`). 절단분 비교는 상한 밖 변조를 통과시키므로
+  "byte-for-byte" 를 주장할 수 없다.
+- 따라서 **replay 요청 시점에 재발행 대상 payload 전문의 SHA-256 을 root 에 기록**하고(2b-4 진입점),
+  재실패 적재는 `sha256(origin.payload())` 와 대조한다. 절단과 무관하게 정확하다.
+- **digest 는 비밀이 아니다** — 이것은 인증이 아니라 **오상관 방지**다. 업무 토픽에 쓸 수 있는 주체는
+  이미 더 나쁜 일을 할 수 있고, ADR 이 그 경우의 격상 경로(서명/MAC)를 §D5-4 말미에 이미 남겨 두었다.
+- **`origin.payload()` 가 null 인 경우(tombstone)**: digest 도 null 로 두고 **양쪽 null 이면 일치**로 본다
+  (`original_key` 와 같은 null-safe 규칙).
+
+**(f) 신규 ADR 로 §D5-4 의 대조 범위를 supersede 한다 (리뷰 1R #5 발견 · 2R #4 방식 정정).**
+ADR-0020 §D5-4 의 대조 목록은 `record_kind=REPLAY` 를 요구하는데, `record_kind` 는 **`outbox_events` 에만
+있고 `PUBLISHED` cleanup 으로 먼저 사라진다** — 같은 §D5-4 가 "outbox 를 정본으로 삼으면 수명 경쟁에서
+진다" 고 적은 **그 이유로 대조 축으로 쓸 수 없다**. ADR 내부가 스스로 충돌한다.
+대체안은 **원장 앵커(`last_replay_attempt_id` + `last_replay_target_group` + `last_replay_payload_digest`) +
+fingerprint 대조**다.
+
+> **~~Update Log + `fix(adr):`~~ 는 규약 위반이다 (2R #4).** `docs/adr/README.md:11-14` 는 Update Log 를
+> **사실 오류(파일명·Phase 귀속·수치)에만** 허용하고, `:14` 가 **"의사결정의 트레이드오프 변경, 대안 추가,
+> Consequences 재해석은 본문 정정이 아니라 새 ADR 작성 사유 (Update Log 로 우회 금지)"** 라고 못박는다.
+> 신규 컬럼과 대조 알고리즘 도입은 명백히 후자다. 1R 수정이 2b-2 P9-c 선례(그건 표의 **사실** 정정이었다)를
+> 잘못 유추했다.
+
+따라서 **ADR-0021 (`dlq-replay-correlation-anchor`)** 을 신설한다:
+- ADR-0021 이 ADR-0020 §D5-4 의 **"판독 조건 = 한 트랜잭션 안의 원자 대조"** 항목과 그 **음성 테스트 목록**만
+  무효화한다. §D5-4 의 나머지(원장이 정본 · 헤더 불신 · 수명 경쟁)는 **유지**된다 — ADR-0021 은 그 원칙의 귀결이다.
+- ADR-0020 Status → **`Partially Superseded by ADR-0021`**, Status 줄 바로 아래에 **무효화 범위** 명시.
+- `docs/adr/README.md` 인덱스에 ADR-0021 행 추가 + ADR-0020 Status 갱신.
+- 커밋은 `docs(adr):` (신규 ADR) 과 Status 변경 — `fix(adr):` 를 쓰지 않는다.
+
+**이 PR 에서 하는 이유**: 코드가 정본과 갈라진 채로 머지되면 2b-4 까지 두 PR 동안 ADR 이 거짓을 말한다.
+
+> **대조의 정본은 원장이다 (outbox 가 아니다)** — 위 (f) 가 그 원칙의 귀결이다.
+> **fingerprint 가 실제로 보존됨은 C-25 로 확인했다** — P11 의 `buildReplayRecord` 가 topic·timestamp·key·payload 를
+> 그대로 싣고, `message.timestamp.type=CreateTime` 이라 producer timestamp 가 broker 에 덮이지 않는다.
+> **커스텀 헤더가 재실패 시 DLT 까지 살아남는 것은 C-15 로 확인했다**(`DeadLetterPublishingRecoverer` 가
+> 원본 헤더 전량을 복사한 뒤 `DLT_*` 를 얹는다 — 바이트코드 실측).
+
+**(f-2) parity lint 확장 (리뷰 2R #6 — 신설).**
+1R 은 "완료 조건에 lint 본실행을 명시" 하는 것으로 digest parity 가 강제된다고 적었으나 **거짓이다**.
+현 lint 의 replay 축 검사는 `V*__dead_letter_replay_axis.sql` **glob 이 서비스당 정확히 1개**인지 보고
+(`:125-143`), 검사 컬럼 목록도 **하드코딩**돼 있다(`:155-159`). 신규 digest 를 **별도 V10/V8/V8/V6 파일**에
+넣으면 그 파일은 glob 에 걸리지 않아 **본실행도 `--self-test` 도 전부 green** 이다 — ④-c-2b-1 의 glob 미확장,
+④-c-2b-2 의 목록 누락에 이어 **같은 구멍의 세 번째 재발**이다.
+→ 검사를 **파일 glob 기준에서 최종 스키마 기준으로 바꾼다**: 서비스별 `db/migration/V*.sql` 을 **번호 순으로
+합성**해 `dead_letter_records` 의 최종 컬럼 집합(이름 → 타입 · nullability · DEFAULT 유무)을 만들고 4서비스를 대조한다
+(2b-2 P9-b 가 `outbox_events` 에 이미 쓴 방식 — 생성 경로가 서비스마다 다를 때 원문 해시가 성립하지 않는다는
+같은 이유다). `last_replay_payload_digest` 의 **존재 · `VARCHAR(64)` · nullable · DEFAULT 없음**까지 검사한다.
+**self-test 변이 4종**: 한 서비스 누락 · 타입 변경 · `NOT NULL` · `DEFAULT` 추가 → 각각 red.
+
+**(g) javadoc 정정 (리뷰 1R #17).** P14 는 `DlqOrigin` 에 **application 헤더**를 처음 들여온다.
+그래서 지금의 서술이 거짓이 된다 — `DeadLetterRecorder:25-29` 의 "`DlqOrigin` 이 표준 `DLT_*` 에서 뽑은 값만
+담으므로 application 헤더는 애초에 원장에 들어오지 않는다" · `DlqOrigin` 의 `@param` 목록(현재 10필드) ·
+`DlqHeaders` 클래스 주석. 셋을 **"표준 `DLT_*` 와 replay allowlist 4종만 판독하고 그 밖의 application 헤더는
+제외한다"** 로 고친다.
+
+**3a 완료 조건**: 4서비스 digest 마이그레이션 적용 · `DlqHeadersTest` 확장(정상/부재/malformed/중복 last-value/무관
+헤더 무시) · 송신 거부 테스트(키 집합 불일치 · `DLT_*` · 4값 무효) · **parity lint 본실행 + `--self-test`
+(신규 변이 4종 포함)** · `saga_e2e.py` `EXPECTED_MIGRATIONS` `10/8/8/6` · ADR-0021 신설 + ADR-0020 Status 변경 +
+README 인덱스 갱신. **상관 로직은 이 PR 에 없다** — 판독한 4필드를 아직 아무도 쓰지 않는다.
+
+---
+
+#### ④-c-2b-3b — P15~P17
+
+> **착수 조건**: 3a 머지 + **3a diff 를 포함한 재리뷰 선행**(#92→#93 선례).
+
+**P15.** `DeadLetterRecorder` 원자 대조. 순서를 **초안에서 바꿨다** — 아래 (a) 가 이유다.
+
+**(a) 실행 순서 (리뷰 1R #2 — 초안 반증).**
+초안은 "root 잠금 → 대조 → 자식 INSERT + 재개방" 이었다. 그러면 **재개방이 저장되지 않는다**:
+`insertIfAbsent` 는 `@Modifying(clearAutomatically = true, flushAutomatically = true)` 라
+(`DeadLetterRecordJpaRepository:28`) INSERT 직후 **영속성 컨텍스트를 비우고**, 앞서 잠가 둔 root 인스턴스가
+**detach** 된다. 그 뒤의 `reopen()` 은 dirty checking 대상이 아니어서 UPDATE 가 나가지 않는다 —
+자식 연결만 보는 테스트라면 **green 인 채로 재개방이 사라진다**.
+채택한 순서(잠금 순서 규약은 그대로 지킨다 — root 를 **가장 먼저** 잠근다):
+
+1. `origin.replayAttemptId` 로 **root id 만** 조회한다(엔티티 아님 — C-20).
+2. `findByIdForUpdate(rootId)` 로 root 를 잠근다. **DB 행 잠금은 트랜잭션 끝까지 유지되므로 이후의
+   컨텍스트 clear 와 무관하다.**
+3. 대조(아래 (b))를 수행한다.
+4. 자식 `insertIfAbsent` → 컨텍스트가 비워진다.
+5. **root 와 자식을 다시 읽는다.** root 재조회는 이미 잠금을 쥐고 있어 **대기하지 않는다**.
+   재조회한 root 에서 `lastReplayAttemptId` 를 **한 번 더 확인**한다((c) TOCTOU).
+6. `child.linkToRoot(root.id)` + root 가 terminal 이면 `root.reopen(...)`.
+
+**`clearAutomatically` 를 떼는 선택지는 채택하지 않는다** — 그 플래그는 ④-c-1a 가 native INSERT 와 JPA 캐시의
+불일치를 막으려고 붙인 것이고, 이 PR 이 그 판단을 뒤집을 근거가 없다. **재조회가 국소적이고 비용이 없다.**
+
+**(b) 대조 항목.** 잠근 root 에 대해 **전부** 일치해야 한다. 하나라도 어긋나면 상관하지 않고 **독립 root 행**으로 적재한다.
+
+| # | 축 | 자식(입력) | root(원장) | 비고 |
+|---|---|---|---|---|
+| 1 | attempt | 헤더 `pc-replay-attempt-id` | `last_replay_attempt_id` | 잠금 **후** 재확인 (c) |
+| 2 | owner | 현재 서비스 | 헤더 `pc-replay-ledger-owner` | 원장 소유 서비스에서만 상관 |
+| 3 | group | `origin.failedConsumerGroup` (실제 DLT group) **=== 헤더 `pc-replay-target-group`** | `last_replay_target_group` | **3자 대조 (리뷰 2R #7)** — 헤더를 빼고 둘만 비교하면 `pc-replay-target-group` 판독이 **죽은 데이터**가 되어(지워도 결과 동일) 4헤더 계약 중 하나가 아무것도 지키지 않는다. 세 값이 전부 같아야 한다 |
+| 4 | root-id | 헤더 `pc-replay-root-id` | `root.id` | |
+| 5 | topic | `origin.originTopic` | `root.originTopic` | fingerprint 겸 destination 대조 (리뷰 1R #7 — 초안은 이 둘을 별개 축으로 셌으나 **같은 비교**다) |
+| 6 | eventId | `origin` payload 의 `eventId` | `root.eventId` | null-safe |
+| 7 | key | `origin.originalKey` | `root.originalKey` | **null-safe** (둘 다 NULL 이면 일치) |
+| 8 | timestamp | `origin.originalTimestamp` | `root.originalTimestamp` | |
+| 9 | **payload digest** | `sha256(origin.payload())` | `last_replay_payload_digest` | P14(e). null-safe(tombstone) |
+
+**(c) TOCTOU 재확인 (리뷰 1R #3).** 초안은 잠금 **전** 조회에서만 attempt-id 를 봤다. 그 사이 2b-4 가 같은 root 에
+**새 attempt 를 기록**하면 **오래된 attempt 의 재실패가 최신 attempt 인 것처럼** 상관된다. 잠금 후 재확인이
+그 창을 닫는다. 조회 자체도 **canonical root 로 한정**한다(자식 행에 앵커가 실릴 일은 없지만, 조건을 좁혀 둔다).
+
+**(d) 재개방.** `status='OPEN'` + `reopened_at`/`reopened_reason` 기록. **기존 `resolved_at`/`discarded_at` 은
+지우지 않는다** — 감사 이력이고, purge 는 P4 의 `CASE` 로 현재 상태에 해당하는 시각만 본다(C-23 실측).
+
+**(e) 중복 유입(`inserted == 0`)에서는 상관·재개방을 하지 않는다.** 이미 있는 행은 첫 적재 때 상관 판정이 끝났고,
+재전달마다 재개방하면 운영자가 닫은 root 를 **broker 재전달만으로 다시 여는 경로**가 생긴다.
+기존 계약대로 `attempt_count` 만 올린다.
+
+**(f) ledger owner 는 주입한다 (C-24 **정정** · 리뷰 1R #13).**
+초안은 `record(DlqOrigin, PeekcartService)` 로 시그니처를 넓히고 "호출부 2곳" 이라고 적었다. **둘 다 틀렸다** —
+실측 `record(` 호출부는 main/test 합계 **44곳**이고, **notification 에는 quarantine consumer 가 없어**
+서비스마다 호출부 수가 다르다(`DlqTopology` 의 quarantine 매핑은 3서비스뿐). 게다가 owner 를 인자로 받으면
+**호출자가 매번 소유자를 고를 수 있어** 내부 API 의 신뢰 경계가 약해진다.
+→ `common` 에 불변 `LedgerOwner(PeekcartService service)` 를 두고 **서비스별 `@Configuration` 이 빈으로 제공**하며
+`DeadLetterRecorder` 는 생성자로 주입받는다. `record(DlqOrigin)` 시그니처가 **불변**이라 44개 호출부가 그대로다.
+그 config 클래스는 서비스마다 값이 달라 `DLQ-PARITY-014` 에 걸리지 않는다(그 검사는 4벌이 **byte 동일할 때만** 신고한다).
+**`DeadLetterProperties` 에 owner 키를 두지 않는다** — 코드에 이미 있는 사실을 설정에 복제하면
+둘이 어긋날 때 **설정이 이겨서 남의 사건에 자식을 붙인다**.
+
+**(g) 알림은 commit 후로 옮긴다 (리뷰 1R #6 — 초안 반증).**
+초안은 "기존 계약(best-effort)을 그대로 따른다" 고 적었으나 **현재 코드는 그 계약을 지키지 않는다**:
+`record()` 는 `@Transactional` 메서드 **안에서** `notifyBestEffort()` 를 호출한다(`DeadLetterRecorder:52·93`).
+즉 **commit 실패 전에 Slack 이 먼저 나갈 수 있다** — javadoc 이 서술하는 "commit 후" 와 다르다.
+`TransactionSynchronizationManager` 의 `afterCommit` 으로 옮긴다(④-d-1 의 `CommitAwareMetrics` 선례).
+**callback 예외는 격리한다** — ④-d-1 3R #2 에서 `afterCommit` 예외가 호출자에게 전파돼 **이미 커밋된 이벤트를
+listener 가 재처리**한 전례가 있다.
+
+**(h) 재개방 알림·관측 (리뷰 1R #16 — 신설).** ADR §D6-2b I-2 는 **"재개방은 운영 알림 대상"** 을 명시한다 —
+사람이 닫은 것을 시스템이 되돌리는 유일한 경로다. 현재 알림 문구는 "신규 미결 1건" 하나뿐이라
+재개방이 **신규 적재와 구분되지 않는다**. (g) 의 afterCommit 경로에 **재개방 전용 문구**(root-id · attempt-id ·
+group · 직전 상태)를 추가하고, `DeadLetterMetrics` 에 **재개방 Counter** 와 **상관 결과 Counter** 를 더한다.
+상관 실패에 관측 표면이 없으면 **N11 파손과 "다른 group 이라 독립 사건" (C-28)이 운영에서 구분되지 않는다.**
+
+**두 Counter 도 `CommitAwareMetrics` 를 쓴다 (리뷰 2R #9).** 1R 은 Slack 만 afterCommit 으로 옮기고
+Counter 의 트랜잭션 의미를 정의하지 않아, **트랜잭션 안에서 증가시켜 rollback 된 상관까지 세도 green** 이었다 —
+④-d-1 3R #1 이 정확히 그 결함이었고 `CommitAwareMetrics` 가 그때 만들어졌다. callback 예외 격리도 같다(3R #2).
+**`reason` 태그는 bounded 리터럴 집합으로 못박는다** — `no_attempt_header` · `attempt_not_found` ·
+`owner_mismatch` · `group_mismatch` · `root_id_mismatch` · `topic_mismatch` · `fingerprint_mismatch` ·
+`digest_mismatch` · `attempt_changed`. **헤더 값·group 명 등 입력에서 온 문자열을 태그로 쓰지 않는다**
+(cardinality 폭발 — ADR-0015). 테스트는 commit/rollback/callback 예외 3종과 함께
+**meter 검색으로 허용 집합 밖 태그가 생기지 않음**을 단언한다.
+
+**P16.** 대조 축 ↔ 음성 fixture **1:1 매트릭스** (리뷰 1R #7·#11 — 초안 재작성).
+초안의 "8종" 은 독립 축이 아니었다. `다른 destination topic` 과 fingerprint 의 `origin_topic` 불일치는 **같은 비교**이고,
+fingerprint 불일치가 "셋 중 하나" 로만 적혀 있어 **각 조건을 지워도 red 가 되지 않는다**.
+아래는 P15(b) 표의 **9축을 각각 독립 변이**시킨다 — 대조 조건을 하나 제거하면 **정확히 그 행만** red 다.
+
+**각 행은 정확히 한 입력만 바꾼다** — 그래야 "대조 조건 하나를 지우면 정확히 그 행만 red" 가 성립한다
+(리뷰 2R #8: 1R 표는 `타 서비스 소유 attempt` 가 축 1+2 를 동시에 바꿔 이 성질이 깨져 있었고,
+§6 의 V-19 는 여전히 "8종" 이라 완료 조건의 범위가 계획서와 어긋났다).
+
+| V-ID | 케이스 | 변이 축 | 기대 |
+|---|---|---|---|
+| **V-19a** | 정상 상관 (양성 대조군) | — (전 축 일치) | 자식이 root 에 연결, backlog **1** |
+| **V-19b** | attempt-id 불일치 | 1 | 독립 root |
+| **V-19c** | owner 불일치 | 2 | 독립 root |
+| **V-19d** | group 불일치 | 3 | 독립 root — **오류가 아니라 정상 경로다 (C-28)** |
+| **V-19e** | root-id 불일치 | 4 | 독립 root |
+| **V-19f** | topic 불일치 | 5 | 독립 root |
+| **V-19g** | eventId 불일치 | 6 | 독립 root |
+| **V-19h** | key 불일치 (**null↔값 조합 포함**) | 7 | 독립 root |
+| **V-19i** | timestamp 불일치 | 8 | 독립 root |
+| **V-19j** | **payload digest 불일치** (eventId·key·ts 동일, payload 만 변조) | 9 | 독립 root — **ADR §D5-4 조작 경계** |
+
+**시나리오 케이스** (단일축 변이가 아니므로 별도 ID 로 분리한다):
+
+| V-ID | 케이스 | 기대 |
+|---|---|---|
+| **V-19k** | 타 서비스 원장의 attempt-id 를 그대로 재사용 (축 1+2 동시) | 독립 root. 축 2 만 지워도 축 1 이 잡아야 하므로 **V-19b·V-19c 를 대체하지 않는다** |
+| **V-19l** | root 에 앵커 자체가 없음 (= replay 가 아닌 최초 실패) | 독립 root. **회귀 방지용** — 기존 경로가 상관 코드 추가로 바뀌지 않았음을 고정 |
+| **V-19m** | TOCTOU — 조회 후 잠금 전 root 에 **새 attempt** 기록 | 독립 root. P15(c) 잠금 후 재확인을 빼면 red |
+
+**상태 전이 케이스** (초안 누락 — §6 의 V-15·V-15b·V-16 을 P16 에 배정한다):
+
+| 케이스 | 기대 | 대응 |
+|---|---|---|
+| `RESOLVED` root 에 늦은 자식 | root 재개방(`OPEN`), `resolved_at` **유지**, `reopened_at` 기록 | V-15 |
+| `DISCARDED` root 에 늦은 자식 | 위와 동일, `discarded_at` 유지 | V-15 |
+| 재개방 commit 후 알림 callback 실패 | 원장 재개방 **유지**, 알림 **0회 허용**, 소비 트랜잭션 **재처리 없음** | V-15b · P15(g) |
+| **같은 DLT 재전달**(중복) | `attempt_count` 만 +1, **닫힌 root 는 재개방되지 않는다** | P15(e) |
+| 3회 재실패(자식 3, fixture) | 행 4(root+자식3), **backlog = 1**, root 종결 시 0 | V-16 (진입점을 도는 전체 루프는 2b-4) |
+| **재개방 영속 확인** | commit **후 별도 트랜잭션에서 재조회**해 `status='OPEN'`·`reopened_at` 이 **DB 에 있음**을 단언 | P15(a) — 이 단언이 없으면 detach 결함이 green 이다 |
+
+**헤더 판독 경로 고정 (리뷰 1R #8).** 위 매트릭스가 `DlqOrigin` 을 **fixture 로 직접 만들면**
+`ReplayHeaders` 문자열·UTF-8 판독·파싱 실패 정책이 전부 깨져도 green 이다. `common` 의 `DlqHeadersTest` 에
+**정상 판독 · 부재 · malformed UUID/root-id · 중복 헤더 last-value · 무관 application 헤더 무시** 를 추가하고,
+`DlqIntegrationTest` 에서 **실제 DLT 를 거친 4헤더 판독**을 1회 관통 검증한다.
+
+**송신 거부 고정 (리뷰 1R #4).** `replay_headers` 에 allowlist 밖 키 · `DLT_*` 키가 있으면
+**발행이 거부**되는 것을 테스트한다(4서비스 parity 는 lint 가 강제).
+
+**수명 경쟁 N11 (리뷰 1R #9 — 초안 보강).** 초안은 "cleanup 을 먼저 돌린 뒤" 상관만 단언해,
+**ShedLock 때문에 잡이 아예 안 돌아도 통과**한다. 기존 `OutboxReplayPublicationIntegrationTest:223-230` 이
+lock 을 만료시키고 삭제를 직접 확인하는 방식을 따른다:
+① replay outbox 행 id 가 **DB 에서 사라졌음**을 별도 단언 → ② root 의 attempt/group/digest 앵커는 **남아 있음** 확인
+→ ③ 지연 DLQ 적재 주입 → ④ 자식 수 · 자식 `root_record_id` · **독립 root 부재** · backlog **1** 을 각각 단언.
+
+**V-21c 경합 (C-23 · 리뷰 1R #10 — 초안 보강).** 2b-1 이 "재개방 경로가 2b-3 에 생기므로 검증도 그 PR 소관" 으로
+이연한 행이다. 초안대로 **재개방 후 purge 를 호출하면** root 는 애초에 후보에서 빠져 **race 를 시험하지 않는
+vacuous 테스트**가 된다(실제 purge 는 `findPurgeableRootIds` 직후 root 를 잠근다 —
+`DeadLetterMaintenanceScheduler:71-76·92-101`). repository spy/테스트 seam 으로 **후보 조회 반환 직후 latch 로 멈추고**,
+다른 트랜잭션이 root 잠금·재개방·자식 삽입을 commit 한 뒤 purge 를 재개한다.
+**purge 가 stale id 를 실제로 쥐고 있었다는 것**과 **최종적으로 root·자식이 살아남는 것**을 모두 단언한다.
+
+**P17.** DLT 계약 고정 — `DlqIntegrationTest`(payment-service 1벌, C-26)에
+**정상 DLT 유입에서 `original_timestamp` 가 원장까지 저장됨**을 단언으로 추가한다(현재 미단언, ADR C1).
+**non-null 단언으로는 부족하다 (리뷰 1R #12)** — 재발행 시각이나 엉뚱한 헤더 값을 저장해도 green 이다.
+기존 테스트는 `kafkaTemplate.send(topic, key, value)` 로 timestamp 를 지정하지 않으므로,
+**고정 timestamp 를 실은 `ProducerRecord`** 로 발행하고 **DLT 헤더 값과 원장 `original_timestamp` 가 그 값과
+정확히 같은지**를 단언한다.
+**이것은 계약 고정이지 NULL 비율 측정이 아니다** — 측정은 P22 소관이다.
+fingerprint 대조가 이 값에 의존하므로, 이 값이 조용히 NULL 이 되면 **모든 상관이 실패해 사건이 갈라진다**.
+
+**배포·롤백 순서 (리뷰 1R #15 — 초안 누락).**
+2b-3 은 **소비 측**만 바꾸고 진입점은 2b-4 에 있다. 그래서 순서가 계약이다:
+- **활성화**: **4서비스 전부** 2b-3 배포 완료 → 그 다음 2b-4 진입점 활성화. 한 서비스라도 구버전이면
+  그 서비스의 재실패가 `pc-replay-*` 를 무시하고 **독립 root** 로 적재돼 backlog=1 보장이 그 자리에서 깨진다.
+- **롤백**: ① replay 진입점 **비활성화** → ② **drain 확인** → ③ 그 다음 2b-3 롤백.
+  역순으로 하면 발행된 재실패분이 상관되지 않는 창이 생긴다.
+  > **`publication_status='REQUESTED' == 0` 은 drain 판정으로 불충분하다 (리뷰 2R #5).** 그 값은
+  > **broker ack 시점에 `PUBLISHED` 로 바뀐다** — 이미 업무 토픽에 실렸지만 아직 **소비 재시도 중**이거나
+  > **DLT 로 이동 중**인 레코드는 이 조건으로 잡히지 않는다. 그 상태에서 구버전 consumer 로 내리면
+  > 늦게 도착한 DLT 가 `pc-replay-*` 를 무시당해 **독립 root** 가 된다.
+  > drain 조건을 넷으로 확대한다: ⓐ `publication_status='REQUESTED'` **0** · ⓑ replay 대상 **업무 토픽의
+  > target consumer group lag 0** · ⓒ 해당 **`.dlq` 토픽의 DLQ intake group lag 0** ·
+  > ⓓ 마지막 replay attempt 이후 **재시도 상한(backoff × maxAttempts) 이상 경과**.
+  > 넷을 **자동 preflight** 로 만들고 롤백 검증에 포함한다.
+- 2b-3 단독 배포는 안전하다 — 앵커를 쓰는 주체가 없어 상관 경로가 아예 타지지 않는다.
 
 ### PR ④-c-2b-4 — 좌표 reader + 진입점 + fence + backfill + 문서
 
@@ -456,7 +747,7 @@ consumer group 을 만들지 않도록 `assign` 만 쓰고 offset 을 커밋하�
 | 축 | 어느 행에 쓰나 |
 |---|---|
 | `publication_status` · `outbox_event_id` | **target row** = incident 의 **가장 최근 활성 행**(자식이 없으면 root, 있으면 최신 `OPEN` 자식) |
-| `last_replay_attempt_id` · `last_replay_target_group` · `replay_deadline` · `replay_policy` | **canonical root** (상관 앵커는 하나여야 P15 가 찾을 수 있다) |
+| `last_replay_attempt_id` · `last_replay_target_group` · **`last_replay_payload_digest`** · `replay_deadline` · `replay_policy` | **canonical root** (상관 앵커는 하나여야 P15 가 찾을 수 있다) |
 
 **잠금 순서는 canonical root → target child 로 고정**한다(P5·P15·purge 와 같은 진입 순서라 순환이 없다).
 **I-1 은 incident 단위로 본다** — root 또는 **활성 자식 중 하나라도** `REQUESTED` 면 종결을 거부한다.
@@ -468,7 +759,12 @@ consumer group 을 만들지 않도록 `assign` 만 쓰고 offset 을 커밋하�
    **AND status IN ('OPEN','ACKED')`**
    → 영향 행 0 이면 **거부하고 즉시 반환**(아직 outbox 를 만들지 않았으므로 orphan 이 없다)
 2b. **root 앵커 UPDATE** — `SET last_replay_attempt_id=:attempt, last_replay_target_group=:group,
-   replay_policy=:policy, replay_deadline=COALESCE(replay_deadline, :calculated) WHERE id=:root`
+   **last_replay_payload_digest=:digest**, replay_policy=:policy,
+   replay_deadline=COALESCE(replay_deadline, :calculated) WHERE id=:root`
+   > **digest 는 P18 이 원본 토픽에서 실제로 읽어온 payload 전문의 SHA-256 이다 (2b-3 리뷰 2R #1)** —
+   > 원장의 절단된 `payload` 컬럼이 아니다. 이 UPDATE 가 **digest 의 유일한 writer** 이고, 여기서 빠지면
+   > root digest 가 영원히 `NULL` 이라 P15 의 대조 축 9가 **늘 통과해 아무것도 검사하지 않는다**.
+   > **2b-3 은 이 값을 fixture 로만 심는다** — 진입점을 거친 실제 기록·상관은 아래 V-30 이 관통 검증한다.
    > **`COALESCE` 가 계약이다 (3R #4)**: 초안은 "root 에서 1회 계산하고 상속" 이라고만 적고 **그 값을 어디에
    > 영속하는지 정의하지 않았다** — 구현자가 매 요청마다 transient 계산해도 V-11·V-13b 가 green 이었다.
    > 첫 claim 이 값을 박고 이후 요청은 **덮어쓰지 않는다**. 자식 INSERT(P15)는 root 의 값을 **복사**한다.
@@ -497,10 +793,11 @@ ADR §D5-2 가 미측정이라고 지적한 것은 **네 실제 원장 DB 의 �
 replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evidence/` 에 남긴다.
 **운영 데이터가 0건이면 "표본 0 — 미측정" 이라고 그대로 기록한다** (0건을 "NULL 0%" 로 적지 않는다).
 
-**P23.** backfill 마이그레이션 (D3·D6-3 3단계) — **order V10 · product V8 · payment V8 · notification V6**.
+**P23.** backfill 마이그레이션 (D3·D6-3 3단계) — **order V11 · product V9 · payment V9 · notification V7**
+(리뷰 2R #2 로 **V10/V8/V8/V6 에서 밀어냈다** — 그 번호는 2b-3 P14(d) 의 digest 마이그레이션이 쓴다).
 `UPDATE dead_letter_records SET root_record_id = id WHERE root_record_id IS NULL` ·
 `UPDATE outbox_events SET record_kind='DOMAIN' WHERE record_kind IS NULL` + **NULL 잔여 0 검증**(잔여가 있으면 실패).
-재실행 안전(idempotent)해야 한다. `EXPECTED_MIGRATIONS` → `order 1~10 · product 1~8 · payment 1~8 · notification 1~6`.
+재실행 안전(idempotent)해야 한다. `EXPECTED_MIGRATIONS` → `order 1~11 · product 1~9 · payment 1~9 · notification 1~7`.
 집계 조건의 `IS NULL` 분기는 **남겨둔다** — `NOT NULL` contract 는 이번 범위가 아니다(§10 R1).
 
 **P24.** 문서 + **replay 개방 후 롤백 절차**(신규 — 리뷰 1R #15).
@@ -562,7 +859,7 @@ replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evid
 | **V-16** | N8 | 같은 사건을 **3회** replay → 3회 재실패 (**첫 발행이 성공한 뒤의 2·3회차 포함**) | 원장 행 4(root+자식3), **backlog = 1**. root 종결 → 0. target row 분리를 되돌리면 **2회차 claim 이 거부되어** red (3R #1) |
 | **V-17** | N8 | 자식 id 로 `resolve` 요청 | root 로 정규화되어 root + 활성 자식이 함께 종결. 자식만 닫히면 red |
 | **V-18** | N9 | 마이그레이션 **전** 미결 3건 적재 → 마이그레이션 → 집계 | 전후 건수 동일(3). 조건을 `root_record_id = id` 로 곧바로 바꾸면 0 이 되어 red |
-| **V-19** | N10 | **8종** 위조 상관 헤더(P16) — **유효 attempt + fingerprint 불일치** 포함 | 전부 독립 root 행. 대조 조건을 하나 빼면 해당 케이스가 잘못 상관되어 red |
+| **V-19a~V-19m** | N10 | 대조 축 ↔ 음성 fixture **1:1 매트릭스 13종**(P16). 단일축 변이 **V-19b~V-19j 9종** + 시나리오 **V-19k/l/m** + 양성 대조군 **V-19a** | 양성만 상관되고 나머지는 전부 **독립 root 행**. **대조 조건을 하나 빼면 정확히 그 행만** red (2R #8 — 초안의 "8종" 은 축이 겹쳐 이 성질이 성립하지 않았다) |
 | **V-20** | N10 | **소유 fence 는 아키텍처 테스트로 고정한다** (2R #12 — endpoint 는 숫자 id 만 받고 자기 datasource 만 조회하므로 "타 서비스 행 id" 라는 입력이 표현되지 않는다. 같은 숫자가 로컬에 있으면 로컬 행이 선택될 뿐이다) | `DeadLetterEndpoint` 가 타 서비스 datasource·repository 에 접근하지 않음을 정적으로 검사 |
 | **V-21** | N11 | outbox cleanup 선행 실행 후 지연 DLQ 적재 | 같은 root 상관 + backlog 1 |
 | **V-21b** | N11 | **reconciler 장기 중단 → cleanup 실행 → reconciler 복구** | cleanup 이 해당 replay outbox 를 **건너뛴다**(제외 조건). 행이 남아 있어 reconciler 복구 시 정상 전이. 제외 조건을 빼면 red (2R #6) |
@@ -581,6 +878,7 @@ replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evid
 | **V-31** | C-5 | parity 대조기(P9-b) **self-test** — ① notification `outbox_events` 에서 컬럼 1개 제거 ② P8 신설 컬럼 1개에 `DEFAULT 'DOMAIN'` 부여 ③ 신설 컬럼 1개를 `NOT NULL` 로 ④ `OutboxEvent.java` 한 벌만 1바이트 변경 ⑤ `OutboxEventStatus` 를 order 판본으로 notification 에 복사 | 4종은 red, ⑤는 **green**(2집합 계약). 대조 축을 하나 빼면 해당 fixture 가 통과해 self-test 가 red. **정상 트리에서 lint 가 green 임도 함께 확인**한다 — 항상 red 인 lint 는 검사가 아니다 |
 | **V-32** | D2 | notification `outbox_events` 에 **도메인 행 1건을 fixture 로 직접 INSERT** 후 poller 사이클 실행 (실제 DB + Kafka) | broker 에 해당 레코드가 도착하고 행이 `PUBLISHED` 로 전이. **poller 빈 배선을 지우면 red**. (replay 행은 진입점이 없어 이 PR 에서 만들 수 없으므로, 발행 표면이 실제로 도는지는 도메인 행으로 관측한다 — V-25 로 미루면 이 PR 이 "배선됐다" 수준의 판정으로 끝난다) |
 | **V-33** | D6-4 | 원장 행 `publication_status='REQUESTED'` + 연결된 outbox 행을 **① `PUBLISHED` ② `FAILED` ③ `PENDING`** 세 상태로 두고 reconciler 실행 | ①→`PUBLISHED` ②→`PUBLISH_FAILED` ③→**전이 없음**(`REQUESTED` 유지). ③을 빼고 "REQUESTED 가 아니면 전이" 로 되돌리면 **발행 중인 건이 조기 종결**되어 red |
+| **V-30** | N10 | **2b-4** — P21 claim 을 실제로 거쳐 root 에 digest 가 기록된 뒤, 그 재발행분이 재실패해 P15 가 상관한다 | fixture 주입 없이 **진입점→발행→재실패→상관** 전 구간이 한 번 돈다. 2b-3 은 digest 를 fixture 로만 심으므로 **writer 누락(2R #1)이 이 행 없이는 관측되지 않는다** |
 | **V-29** | N17 | **변이 목록 전수** — V-1~V-28b 가 지목한 각 변이 | 각 변이가 red → 복원 후 green. 변이 목록과 red 테스트 id 를 PR 본문에 **열거**한다. 자기대조 0건 |
 
 **모듈별 그린 기준**: 각 PR 에서 `common` + 변경된 서비스 모듈 전체 테스트 0 실패 +
@@ -590,14 +888,17 @@ replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evid
 
 ## 7. 완료 조건
 
-1. §1 의 **N1~N17 이 전부 거짓**임이 §6 의 V-1~V-29(V-13b·V-15b·V-21b·V-21c·V-21d·V-28b·V-28c 포함)로 확인된다.
+1. §1 의 **N1~N17 이 전부 거짓**임이 §6 의 V-1~V-30(V-13b·V-15b·**V-19a~V-19m**·V-21b·V-21c·V-21d·V-28b·V-28c·**V-30** 포함)로 확인된다.
    단 **N16 은 "런타임 DB 제약" 이 아니라 "코드 경로 강제" 로 축소 판정**한다 — `NOT NULL` contract 를 이번 범위에서
    제외했으므로(§10 R1), 팩토리를 우회한 직접 INSERT 는 DB 가 막지 못한다. 이 한계를 완료 보고에 명시한다
 2. 4 PR 전부 머지되고, 각 PR 의 diff 리뷰가 **P1 = 0 이며 직전 라운드가 새 계약 표면을 추가하지 않았다**
    (수렴 판정 — 건수 추세로 종료하지 않는다)
 3. `docs/runbooks/dlq-recovery.md` §6 이 **실행 가능한 절차**로 재작성되고 **§6-R 롤백 절차**를 포함하며,
    리허설이 **공개 진입점만** 사용한다 (직접 SQL 상태 변경 0 — ④-c-2a 재발 방지, P25 lint 로 강제)
-4. `dead-letter-schema-parity-lint` 가 4 DB 신규 컬럼 parity 를 강제한다
+4. `dead-letter-schema-parity-lint` 가 4 DB 신규 컬럼 parity 를 강제한다.
+   **각 PR 은 `bash scripts/dead-letter-schema-parity-lint.sh` 본실행과 `--self-test` 를 모두 통과해야 한다**
+   (리뷰 1R #14 — `DLQ-PARITY-014` 는 4벌이 **이미 동일할 때만** 목록 누락을 신고하므로, 목록에 이미 있는 파일을
+   고칠 때는 본실행이 유일한 방어선이다)
 5. `original_timestamp` NULL 비율 증적이 **실제 원장 집계**로 남는다(표본 0이면 "미측정" 으로 기록).
    비율이 높으면 **가용성 손실 수용 기준**을 ADR-0020 Update Log 에 기록한다
 
@@ -608,12 +909,15 @@ replay 후보* 각각의 **분자·분모·기준시각**을 `docs/progress/evid
 | 모듈 | 변경 |
 |---|---|
 | `common` | `DlqOrigin`(+상관 4필드) · `DlqHeaders`(allowlist 판독) · `OriginalRecordReader`(신규) · `ReplayEligibility`+정책 레지스트리(신규) |
-| `order-service` | 마이그레이션 **V8 · V9 · V10** · outbox 4파일 · deadletter 6파일 · reconciler |
-| `product-service` | 마이그레이션 **V6 · V7 · V8** · 동일 |
-| `payment-service` | 마이그레이션 **V6 · V7 · V8** · 동일 |
-| `notification-service` | 마이그레이션 **V4 · V5 · V6** · **outbox 8파일 신설**(7파일 byte 동일 · `OutboxEventStatus` 는 payment 판본) · deadletter 6파일 · reconciler · yml `app.outbox.*` |
+| `order-service` | 마이그레이션 **V8 · V9 · V10 · V11** · outbox 4파일 · deadletter 6파일 · reconciler |
+| `product-service` | 마이그레이션 **V6 · V7 · V8 · V9** · 동일 |
+| `payment-service` | 마이그레이션 **V6 · V7 · V8 · V9** · 동일 |
+| `notification-service` | 마이그레이션 **V4 · V5 · V6 · V7** · **outbox 8파일 신설**(7파일 byte 동일 · `OutboxEventStatus` 는 payment 판본) · deadletter 6파일 · reconciler · yml `app.outbox.*` |
+
+> **단계별 `EXPECTED_MIGRATIONS`** (리뷰 2R #2): 2b-1 후 `8/6/6/4` → 2b-2 후 `9/7/7/5` →
+> **2b-3 후 `10/8/8/6`** → 2b-4 후 `11/9/9/7`. 갱신은 **4회**다(2b-1·2b-2·**2b-3**·2b-4).
 | `user-service` | **무변경** (Kafka consumer 없음) |
-| scripts | `scripts/e2e/saga_e2e.py` `EXPECTED_MIGRATIONS` **3회 갱신**(2b-1 · 2b-2 · 2b-4) · lint 2종 + **`dead-letter-schema-parity-lint.sh` 에 `outbox_events` 축 확장**(P9-b) |
+| scripts | `scripts/e2e/saga_e2e.py` `EXPECTED_MIGRATIONS` **4회 갱신**(2b-1 · 2b-2 · **2b-3** · 2b-4) · lint 2종 + **`dead-letter-schema-parity-lint.sh` 에 `outbox_events` 축 확장**(P9-b) |
 | docs | runbook §6 + §6-R · 05-data-design · 02-architecture · PHASE4 · grafana-alerts 주석 · **ADR-0012 D1 표 + Update Log**(P9-c, 2b-2 에서 선행) |
 
 ---
@@ -709,6 +1013,76 @@ replay 행이 남은 채 구버전으로 내려가면 안 된다.
 
 > **3R 이 확인해 준 것**: P5·P15·purge 는 전부 canonical root 를 먼저 잠그므로 **잠금 순환이 없다**.
 > 다만 3R #1 이 target child 를 도입했으므로 **root → target child 순서를 명문화**했다(P21).
+
+---
+
+## 12. 정정 이력 — ④-c-2b-3 계획 리뷰 1라운드 (2026-09-05, 17건 전량 반영)
+
+착수 전 코드 검증(C-15~C-28)이 이미 초안 전제 3건을 뒤집은 뒤에 돌린 라운드다.
+그런데도 **P1 이 12건 나왔고, 그중 4건은 검증 표 자신이 틀렸다는 지적**이다.
+
+### 12.1 내 검증 표를 반증한 것 (4건)
+
+| # | 내가 적은 것 | 반증 |
+|---|---|---|
+| #1 | fingerprint 4값이면 상관 정본으로 충분 | **payload 동일성을 묶는 값이 없다**. 같은 eventId·key·ts 를 실은 변조 payload 가 전 축을 통과해 **남의 사건을 재개방**한다. ADR §D5-4 가 경계한 바로 그 경로이고 §D8-3 은 payload byte-for-byte 를 요구한다 → **digest 컬럼 신설**, C-18 "마이그레이션 0" 철회 |
+| #13 | C-24 "호출부 2곳" | **실측 44곳**(main+test). **notification 에는 quarantine consumer 가 없어** 서비스마다 수도 다르다 → 시그니처 확대 폐기, `LedgerOwner` **빈 주입** |
+| #14 | C-27 "신규 복제 누락은 자동으로 막힌다" | **과장**. `DLQ-PARITY-014` 는 4벌이 **이미 byte 동일할 때만** 신고한다 — 생성 시점부터 갈라진 복제본은 서비스별 파일로 오인돼 통과한다 |
+| #6 | P15 "기존 best-effort 계약을 따른다" | **현재 코드가 그 계약을 안 지킨다**. `record()` 는 `@Transactional` **안에서** Slack 을 부른다(`DeadLetterRecorder:52·93`) — javadoc 의 "commit 후" 가 이미 거짓 → afterCommit 이전 |
+
+### 12.2 구현했으면 false-green 이 됐을 것 (2건)
+
+- **#2 detach** — 초안 순서(잠금 → 대조 → INSERT + 재개방)는 `insertIfAbsent` 의
+  `clearAutomatically=true` 가 **잠근 root 를 detach** 시켜 **재개방 UPDATE 가 나가지 않는다**.
+  자식 연결만 보는 테스트는 green 이다. → 순서 재정의(P15(a)) + **commit 후 별도 트랜잭션 재조회 단언**
+- **#3 TOCTOU** — 잠금 **전** 조회에서만 attempt-id 를 봐서, 그 사이 2b-4 가 새 attempt 를 기록하면
+  **오래된 attempt 의 재실패가 최신인 것처럼** 상관된다. → 잠금 후 재확인
+
+### 12.3 검증 설계가 주장을 관측하지 못한 것 (4건)
+
+- **#7** P16 "8종" 이 독립 축이 아니었다 — `다른 destination topic` 과 fingerprint 의 `origin_topic` 은
+  **같은 비교**이고, fingerprint 불일치가 "셋 중 하나" 라 각 조건을 지워도 red 가 안 된다 → **9축 1:1 매트릭스**
+- **#9** N11 이 "cleanup 을 먼저 돌린 뒤" 만 요구해 **ShedLock 으로 잡이 안 돌아도 통과**한다
+  → outbox 행 **삭제 자체를 단언**(기존 `OutboxReplayPublicationIntegrationTest:223-230` 방식)
+- **#10** V-21c 가 경합 지점을 정의하지 않아, 재개방 후 purge 를 부르면 **후보에서 빠질 뿐** race 를 시험하지 않는
+  vacuous 테스트가 된다 → **후보 조회 직후 latch**, stale id 보유까지 단언
+- **#12** P17 이 non-null 만 요구해 **재발행 시각을 저장해도 green** → 고정 timestamp 정확 일치 단언
+
+### 12.4 누락 (7건)
+
+#4 송신 측 allowlist 미강제(임의 헤더·`DLT_*` 주입 표면 존속) · #5 ADR-0020 §D5-4 의 `record_kind=REPLAY`
+대조와 코드의 의도적 불일치를 같은 PR 에서 개정하지 않음 · #8 `ReplayHeaders` 판독 경로 미고정
+(fixture 로 `DlqOrigin` 을 만들면 헤더 문자열이 깨져도 green) · #11 P16 에 중복 유입·양 terminal 재개방·
+V-15/V-15b/V-16 미배정 · #15 배포·롤백 순서 부재(2b-4 선행 시 backlog=1 즉시 파손) ·
+#16 재개방 알림·상관 실패 관측 표면 부재(ADR §D6-2b 필수) · #17 javadoc 이 거짓이 됨.
+
+**#5 는 ADR 내부 충돌을 드러냈다** — §D5-4 는 `record_kind=REPLAY` 대조를 요구하면서 같은 절에서
+"outbox 를 정본으로 삼으면 수명 경쟁에서 진다" 고 적는다. `record_kind` 는 `outbox_events` 에만 있으므로
+**요구된 대조 축이 요구된 이유로 쓸 수 없다.** P14(f) 가 이 PR 에서 개정한다.
+
+---
+
+### 12.5 2라운드 — 9건 전량 반영 (**1R 수정이 만든 새 결함 6건**)
+
+1R 이 17건을 반영하며 만든 8개 신규 표면(digest 컬럼·ADR 개정·송신 allowlist·`LedgerOwner` 빈·P15 순서 재정의·
+afterCommit 알림/Counter·P16 재작성·롤백 순서)을 겨냥한 라운드다. **P1 6 · P2 3.**
+
+| # | 1R 수정이 만든 결함 | 반증 |
+|---|---|---|
+| #1 | digest 컬럼을 신설하고 **writer 를 배정하지 않았다** | P14(d)는 기존 4필드만 매핑하고, 2b-4 P21 의 root 앵커 UPDATE 에도 digest 가 없다. 실제 replay 에서 root digest 가 **영원히 NULL** → 대조 축 9가 **늘 통과**. 2b-3 이 fixture 로 심으므로 **green 인 채로 검사만 사라진다** → P14(d) 매핑 + P21 writer + **V-30**(진입점 관통) |
+| #2 | digest 마이그레이션에 **V10/V8/V8/V6** 배정 | P23 backfill 이 **정확히 같은 번호**를 쓰고 있었다. 두 파일이면 Flyway duplicate-version 으로 부팅이 깨지고, 합치면 2b-3/2b-4 독립 배포 경계가 사라진다 → P23 을 **V11/V9/V9/V7** 로, `EXPECTED_MIGRATIONS` 갱신 **3회 → 4회** |
+| #3 | 송신 allowlist 를 **부분집합**으로 규정 | `replayHeaders()` 는 JSON 이 비면 **빈 Map**, `addHeaderIfPresent` 는 blank 값을 **조용히 생략**한다 — 헤더 0~3개짜리 REPLAY 가 통과해 **발행 측에서 N11 을 깬다** → **정확 일치 + 4값 유효성** |
+| #4 | ADR-0020 을 **Update Log** 로 개정 | `adr/README.md:14` 가 **"트레이드오프 변경·대안 추가는 Update Log 로 우회 금지, 새 ADR 작성 사유"** 로 못박는다. 2b-2 P9-c 선례는 표의 **사실** 정정이라 유추가 틀렸다 → **ADR-0021 신설 + ADR-0020 `Partially Superseded`** |
+| #5 | 롤백 drain 을 `REQUESTED == 0` 으로 판정 | 그 값은 **broker ack 시 `PUBLISHED` 로 바뀐다** — 이미 발행됐지만 소비 재시도 중이거나 DLT 이동 중인 레코드를 못 잡는다. 그 상태로 롤백하면 늦은 DLT 가 독립 root 가 된다 → **4조건(REQUESTED 0 · target group lag 0 · DLQ intake lag 0 · 재시도 상한 경과)** |
+| #6 | "완료 조건에 lint 본실행 명시" 로 digest parity 가 강제된다 | **거짓**. lint 의 replay 축 검사는 `V*__dead_letter_replay_axis.sql` **glob 1개**만 보고 컬럼 목록도 하드코딩이다 — **별도 V10 파일은 본실행·self-test 모두 green**. ④-c-2b-1(glob 미확장)·2b-2(목록 누락)에 이은 **같은 구멍 세 번째 재발** → 검사를 **최종 스키마 합성 기준**으로 전환(P14(f-2)) |
+
+**남은 3건(P2)**: #7 `pc-replay-target-group` 헤더가 상관 판단에 **쓰이지 않아** 죽은 데이터였다(지워도 결과 동일)
+→ **3자 대조** · #8 P16 의 "9축 1:1" 이 축 중복으로 성립하지 않고 §6 V-19 는 "8종" 으로 남아 있었다
+→ **V-19a~V-19m 고유 ID 배정** · #9 신규 Counter 의 트랜잭션 의미 미정의(트랜잭션 안에서 올려 rollback 분까지 세도
+green) → **`CommitAwareMetrics` 명시 + bounded reason 리터럴 9종**.
+
+> **이 라운드가 확인해 준 것**: P14(a)(c) 키 정본·판독, P15(a) 실행 순서 재정의, P15(f) `LedgerOwner` 빈 주입은
+> 반증되지 않았다. P14.~P17. id 규약도 준수 판정.
 
 ---
 

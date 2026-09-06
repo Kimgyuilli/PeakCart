@@ -6,6 +6,7 @@ import com.peekcart.global.deadletter.DeadLetterRecord;
 import com.peekcart.global.deadletter.DeadLetterRecorder;
 import com.peekcart.global.deadletter.PublicationStatus;
 import com.peekcart.global.kafka.DlqOrigin;
+import com.peekcart.global.kafka.ReplayHeaders;
 import com.peekcart.global.kafka.DlqOriginKind;
 import com.peekcart.support.AbstractIntegrationTest;
 import com.peekcart.support.IntegrationTestConfig;
@@ -92,6 +93,14 @@ class OutboxReplayPublicationIntegrationTest extends AbstractIntegrationTest {
 
     private static final String GROUP = "order-svc-payment-completed-group";
     private static final String ORIGIN_TOPIC = "payment.completed";
+    private static final String ATTEMPT_ID = "3f2a1b7c-8d9e-4a0b-9c1d-2e3f4a5b6c7d";
+
+    /** allowlist 4종을 전부 채운 정상 헤더 (④-c-2b-3a P14-b). */
+    private static final String REPLAY_HEADERS_JSON =
+            "{\"" + ReplayHeaders.ATTEMPT_ID + "\":\"" + ATTEMPT_ID + "\","
+            + "\"" + ReplayHeaders.LEDGER_OWNER + "\":\"order\","
+            + "\"" + ReplayHeaders.TARGET_GROUP + "\":\"" + GROUP + "\","
+            + "\"" + ReplayHeaders.ROOT_ID + "\":\"42\"}";
 
     @BeforeEach
     void setUp() {
@@ -135,25 +144,88 @@ class OutboxReplayPublicationIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("replay 행은 destination 좌표·원본 timestamp·allowlist 헤더로 발행된다")
     void replayRecordCarriesItsOwnCoordinates() {
         long sourceTimestamp = 1_700_000_000_000L;
-        OutboxEvent replay = OutboxEvent.replay(
-                42L, ORIGIN_TOPIC, 0, "order-9", "{\"eventId\":\"target-1\"}",
-                sourceTimestamp, "target-1", "{\"x-replay-root\":\"42\"}", 42L, GROUP, null, null);
-        outboxEventRepository.save(replay);
+        outboxEventRepository.save(replayRow("order-coords", REPLAY_HEADERS_JSON, sourceTimestamp));
 
         pollingService.pollAndPublish();
 
         // 개수가 아니라 **좌표**가 계약이다(위 테스트와 같은 이유). 중복이 나와도 전부 같은 좌표여야 한다.
-        List<ConsumerRecord<String, String>> records = drain(ORIGIN_TOPIC, 1);
+        List<ConsumerRecord<String, String>> records = drainByKey("order-coords");
         assertThat(records).isNotEmpty();
         assertThat(records).allSatisfy(record -> {
             assertThat(record.partition()).isEqualTo(0);
-            assertThat(record.key()).isEqualTo("order-9");
             // 원본 timestamp 를 그대로 실어야 재실패 시 DLT_ORIGINAL_TIMESTAMP 가 원본을 가리킨다(D5-3).
             assertThat(record.timestamp()).isEqualTo(sourceTimestamp);
-            assertThat(header(record, "x-replay-root")).isEqualTo("42");
+            // allowlist 4종이 그대로 실린다 — 재실패 시 이 값들이 원장 앵커와 대조된다(ADR-0021 D1).
+            assertThat(header(record, ReplayHeaders.ATTEMPT_ID)).isEqualTo(ATTEMPT_ID);
+            assertThat(header(record, ReplayHeaders.LEDGER_OWNER)).isEqualTo("order");
+            assertThat(header(record, ReplayHeaders.TARGET_GROUP)).isEqualTo(GROUP);
+            assertThat(header(record, ReplayHeaders.ROOT_ID)).isEqualTo("42");
             // 표준 DLT_* 는 싣지 않는다 — 재실패 시 원본 좌표가 오염된다.
             assertThat(record.headers().lastHeader("kafka_dlt-original-topic")).isNull();
         });
+    }
+
+    // ---------- 발행 측 allowlist 강제 (④-c-2b-3a P14-b) ----------
+    //
+    // 여기서 막지 않으면 헤더가 모자란 replay 가 발행되고, 재실패 시 상관 축이 없어 독립 incident 로
+    // 갈라진다 — 발행 측에서 ADR-0020 §D5-4 를 깨는 경로다.
+    //
+    // **"broker 에 없다" 로 단언하지 않는다.** 음성 증명은 폴링 창을 얼마나 길게 잡아도 "아직 안 왔다" 와
+    // 구분되지 않아, 발행이 실제로 일어나도 통과할 수 있다. 대신 **발행 시도가 실패했다는 양성 증거**를
+    // 본다 — 계약 위반은 buildRecord 단계에서 던져지므로 handlePublishFailure 가 retry_count 를 올리고
+    // 행은 PENDING 으로 남는다(재시도 대상). 발행에 성공했다면 PUBLISHED 이고 retry_count 는 0이다.
+
+    @Test
+    @DisplayName("헤더가 모자란 replay 행은 발행되지 않는다 — 부분집합은 통과가 아니다")
+    void rejectsIncompleteReplayHeaders() {
+        assertReplayRejected("order-incomplete",
+                "{\"" + ReplayHeaders.ATTEMPT_ID + "\":\"" + ATTEMPT_ID + "\"}");
+    }
+
+    @Test
+    @DisplayName("replay_headers 가 비어 있으면 발행되지 않는다 — 빈 Map 이 조용히 통과하던 경로")
+    void rejectsEmptyReplayHeaders() {
+        assertReplayRejected("order-empty", null);
+    }
+
+    @Test
+    @DisplayName("표준 DLT_* 를 실은 replay 행은 발행되지 않는다 — 실으면 원본 좌표가 덮인다")
+    void rejectsStandardDltHeaders() {
+        assertReplayRejected("order-dlt", REPLAY_HEADERS_JSON.substring(0, REPLAY_HEADERS_JSON.length() - 1)
+                + ",\"kafka_dlt-original-topic\":\"" + ORIGIN_TOPIC + "\"}");
+    }
+
+    @Test
+    @DisplayName("root-id 가 숫자가 아닌 replay 행은 발행되지 않는다")
+    void rejectsMalformedRootId() {
+        assertReplayRejected("order-badroot", REPLAY_HEADERS_JSON.replace("\"42\"", "\"not-a-number\""));
+    }
+
+    /**
+     * <b>음성 대조군</b> — 계약을 지킨 행은 실제로 발행돼야 한다.
+     * 이것이 없으면 위 4종은 "replay 를 전부 막는 코드" 로도 green 이다.
+     */
+    @Test
+    @DisplayName("계약을 지킨 replay 행은 발행된다 — 위 4종이 replay 전체를 막는 것이 아니다")
+    void acceptsCompleteReplayHeaders() {
+        OutboxEvent saved = outboxEventRepository.save(
+                replayRow("order-accepted", REPLAY_HEADERS_JSON, 1_700_000_000_000L));
+
+        pollingService.pollAndPublish();
+
+        assertThat(outboxStatusOf(saved.getId())).isEqualTo(OutboxEventStatus.PUBLISHED.name());
+        assertThat(outboxRetryCountOf(saved.getId())).isZero();
+        assertThat(drainByKey("order-accepted")).isNotEmpty();
+    }
+
+    private void assertReplayRejected(String recordKey, String replayHeadersJson) {
+        OutboxEvent saved = outboxEventRepository.save(
+                replayRow(recordKey, replayHeadersJson, 1_700_000_000_000L));
+
+        pollingService.pollAndPublish();
+
+        assertThat(outboxStatusOf(saved.getId())).isEqualTo(OutboxEventStatus.PENDING.name());
+        assertThat(outboxRetryCountOf(saved.getId())).isGreaterThanOrEqualTo(1);
     }
 
     // ---------- V-33: reconciler 는 발행 축만, 종착만 ----------
@@ -244,7 +316,8 @@ class OutboxReplayPublicationIntegrationTest extends AbstractIntegrationTest {
     /** 원장 행 1건을 {@code REQUESTED} 로 두고, 지정한 상태의 outbox 행에 연결한다. */
     private Long requestedLedgerWithOutbox(long offset, OutboxEventStatus outboxStatus) {
         recorder.record(new DlqOrigin(DlqOriginKind.RESOLVED_ORIGIN, ORIGIN_TOPIC, 0, offset,
-                GROUP, "order-1", 1_700_000_000_000L, "java.lang.IllegalStateException", "boom", "{}"));
+                GROUP, "order-1", 1_700_000_000_000L, "java.lang.IllegalStateException", "boom", "{}",
+                null, null, null, null));
         DeadLetterRecord record = ledgerRepository.findAll().stream()
                 .filter(r -> r.getOriginOffset() == offset).findFirst().orElseThrow();
 
@@ -290,6 +363,31 @@ class OutboxReplayPublicationIntegrationTest extends AbstractIntegrationTest {
         List<String> rows = jdbcTemplate.queryForList(
                 "SELECT status FROM outbox_events WHERE event_id = ?", String.class, eventId);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private String outboxStatusOf(Long id) {
+        return jdbcTemplate.queryForObject("SELECT status FROM outbox_events WHERE id = ?", String.class, id);
+    }
+
+    private Integer outboxRetryCountOf(Long id) {
+        return jdbcTemplate.queryForObject("SELECT retry_count FROM outbox_events WHERE id = ?", Integer.class, id);
+    }
+
+    /**
+     * replay outbox 행. {@code recordKey} 를 케이스마다 다르게 주는 것이 <b>격리 장치다</b> —
+     * 이 클래스의 여러 테스트가 같은 토픽에 쓰므로, key 로 거르지 않으면 한 테스트가 남긴 레코드가
+     * 다른 테스트의 {@code allSatisfy} 를 깨서 **엉뚱한 곳에서 red 가 난다**(발행 측 검증을 제거하는
+     * 변이 실험에서 실제로 관측됐다).
+     */
+    private OutboxEvent replayRow(String recordKey, String replayHeadersJson, long sourceTimestamp) {
+        return OutboxEvent.replay(
+                42L, ORIGIN_TOPIC, 0, recordKey, "{\"eventId\":\"target-1\"}",
+                sourceTimestamp, "target-1", replayHeadersJson, 42L, GROUP, null, null);
+    }
+
+    /** 이 테스트가 발행한 레코드만 고른다. 다른 테스트의 잔여물과 섞이지 않게 한다. */
+    private List<ConsumerRecord<String, String>> drainByKey(String key) {
+        return drain(ORIGIN_TOPIC, 1).stream().filter(r -> key.equals(r.key())).toList();
     }
 
     private String header(ConsumerRecord<String, String> record, String key) {

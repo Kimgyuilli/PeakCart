@@ -23,6 +23,15 @@ import java.nio.charset.StandardCharsets;
  *
  * <p>헤더 인코딩은 recoverer 구현과 맞춘다 — topic·group 은 UTF-8, partition 은 4바이트 int,
  * offset·timestamp 는 8바이트 long (big-endian).
+ *
+ * <p><b>표준 {@code DLT_*} 와 {@link ReplayHeaders} allowlist 4종만 판독하고, 그 밖의 application 헤더는
+ * 제외한다</b>(④-c-2b-3a P14-c). 제외 목록을 관리하지 않아도 되도록 <b>읽을 키를 명시</b>하는 구조다 —
+ * {@code X-User-Id} 같은 헤더는 애초에 {@link DlqOrigin} 에 들어오지 않는다.
+ *
+ * <p><b>replay 헤더가 재실패 시에도 살아남는 근거</b>: {@code spring-kafka-3.3.14} 의
+ * {@code DeadLetterPublishingRecoverer.accept()} 는 {@code new RecordHeaders(record.headers().toArray())} 로
+ * <b>원본 헤더 전량을 복사한 뒤</b> {@code DLT_*} 를 얹는다(바이트코드 실측).
+ * {@code stripPreviousExceptionHeaders}(기본 true)는 예외 헤더만 지운다.
  */
 public final class DlqHeaders {
 
@@ -61,8 +70,35 @@ public final class DlqHeaders {
                 readLong(headers, KafkaHeaders.DLT_ORIGINAL_TIMESTAMP),
                 readString(headers, KafkaHeaders.DLT_EXCEPTION_FQCN),
                 readString(headers, KafkaHeaders.DLT_EXCEPTION_MESSAGE),
-                record.value()
+                record.value(),
+                readString(headers, ReplayHeaders.ATTEMPT_ID),
+                readString(headers, ReplayHeaders.LEDGER_OWNER),
+                readString(headers, ReplayHeaders.TARGET_GROUP),
+                readRootId(headers)
         );
+    }
+
+    /**
+     * {@code pc-replay-root-id} 를 long 으로 읽는다. <b>파싱 실패는 null 이다 — 예외를 던지지 않는다.</b>
+     *
+     * <p>이 값은 <b>조작 가능한 외부 입력</b>이다. 숫자가 아닌 값에 예외를 던지면 <b>DLQ 적재 자체가 막혀
+     * 실패 사실이 유실</b>된다 — 누구든 헤더 하나로 원장 적재를 무력화할 수 있게 된다.
+     * 판독 실패는 "상관하지 않음" 이지 "적재하지 않음" 이 아니다(§2.6-C).
+     *
+     * <p>UTF-8 문자열로 읽는 이유는 발행 측이 그렇게 싣기 때문이다 —
+     * {@code OutboxPollingService} 는 {@code replay_headers} JSON 의 값을 UTF-8 로만 인코딩한다.
+     */
+    private static Long readRootId(Headers headers) {
+        String raw = readString(headers, ReplayHeaders.ROOT_ID);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            long parsed = Long.parseLong(raw.trim());
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static String readString(Headers headers, String key) {

@@ -3,6 +3,7 @@ package com.peekcart.global.outbox;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.peekcart.global.kafka.KafkaTraceHeaders;
+import com.peekcart.global.kafka.ReplayHeaders;
 import com.peekcart.global.port.SlackPort;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -146,7 +147,8 @@ public class OutboxPollingService {
      *   <li><b>timestamp 를 원본 값으로 싣는다</b> — 지정하지 않으면 broker 가 재발행 시각을 찍고,
      *       재실패 시 DLT_ORIGINAL_TIMESTAMP 가 원본을 가리키지 않아 멱등 안전창 계산이 오염된다(D5-3).</li>
      *   <li><b>헤더는 allowlist JSON 에서만 만든다</b> — trace/user 헤더도 붙이지 않는다. 표준 DLT_* 를
-     *       실으면 재실패 시 원본 좌표가 덮여 상관 대조의 정본이 사라진다(D3).</li>
+     *       실으면 재실패 시 원본 좌표가 덮여 상관 대조의 정본이 사라진다(D3).
+     *       <b>키 집합 정확 일치와 4값 유효성을 발행 전에 강제한다</b>(④-c-2b-3a P14-b).</li>
      * </ul>
      *
      * <p>좌표 유효성(destination == origin)은 <b>여기서 검사하지 않는다</b> — 행을 만드는 진입점이
@@ -159,24 +161,43 @@ public class OutboxPollingService {
                 event.getSourceRecordTimestamp(),
                 event.getRecordKey(),
                 event.getPayload());
-        replayHeaders(event).forEach((key, value) ->
-                addHeaderIfPresent(record, key, value));
+        Map<String, String> headers = replayHeaders(event);
+        // **addHeaderIfPresent 를 쓰지 않는다.** 그 메서드는 blank 값을 조용히 생략하는데, 여기서는
+        // requireComplete 가 이미 네 값의 유효성을 보장했으므로 생략이 일어나면 그건 계약 위반의 은폐다.
+        headers.forEach((key, value) ->
+                record.headers().add(key, value.getBytes(StandardCharsets.UTF_8)));
         return record;
     }
 
-    // allowlist JSON({"k":"v"}) 만 헤더가 된다. 판독 실패는 삼키지 않는다 — 헤더 없이 발행하면 재실패분이
-    // 원래 사건에 상관되지 못하고 독립 incident 로 갈라진다(D5-4). 실패시키면 재시도/PUBLISH_FAILED 로 드러난다.
+    /**
+     * allowlist JSON({@code {"k":"v"}}) 만 헤더가 된다. <b>판독 실패도 계약 위반도 삼키지 않는다</b> —
+     * 헤더가 없거나 모자란 채로 발행하면 재실패분이 원래 사건에 상관되지 못하고 독립 incident 로
+     * 갈라진다(ADR-0020 D5-4). 실패시키면 재시도/{@code PUBLISH_FAILED} 로 드러난다.
+     *
+     * <p><b>키 집합은 정확히 일치해야 한다</b>(④-c-2b-3a P14-b). "부분집합이면 허용" 으로 두면
+     * JSON 이 비었을 때의 빈 Map 과 blank 값 생략이 겹쳐 <b>헤더 0~3개짜리 replay 가 그대로 발행</b>된다 —
+     * 발행 측에서 상관 계약을 깨는 경로이므로 판독 측 관대함과 대칭이 아니다.
+     */
     private Map<String, String> replayHeaders(OutboxEvent event) {
         String json = event.getReplayHeaders();
+        Map<String, String> headers;
         if (json == null || json.isBlank()) {
-            return Map.of();
+            headers = Map.of();
+        } else {
+            try {
+                headers = objectMapper.readValue(json, new TypeReference<Map<String, String>>() {});
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                        "replay_headers 판독 실패 — eventId=" + event.getEventId(), e);
+            }
         }
         try {
-            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() {});
-        } catch (Exception e) {
+            ReplayHeaders.requireComplete(headers);
+        } catch (IllegalStateException e) {
             throw new IllegalStateException(
-                    "replay_headers 판독 실패 — eventId=" + event.getEventId(), e);
+                    "replay_headers 계약 위반 — eventId=" + event.getEventId() + ": " + e.getMessage(), e);
         }
+        return headers;
     }
 
     // null/blank 모두 미주입 — Consumer 측 MdcRecordInterceptor.headerValue() 의 isBlank ? null 분기와 정합 (ADR-0008)

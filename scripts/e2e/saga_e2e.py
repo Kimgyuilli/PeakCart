@@ -61,13 +61,14 @@ DLQ_INTAKE_GROUPS = [
 # 개수만 비교하면 **같은 개수로 구성이 바뀐 경우**(V6 이 다른 V6 으로 교체 등)를 못 잡는다
 # — 최신 적용 계약을 증명하는 건 버전 집합이다(#92 후속 리뷰 #4).
 EXPECTED_MIGRATIONS = {
-    # V8/V6/V6/V4 = DLQ 원장 replay 축 (구현 ④-c-2b-1 P1)
-    # V9/V7/V7    = outbox_events replay 컬럼 (구현 ④-c-2b-2 P8)
+    # V8/V6/V6/V4  = DLQ 원장 replay 축 (구현 ④-c-2b-1 P1)
+    # V9/V7/V7     = outbox_events replay 컬럼 (구현 ④-c-2b-2 P8)
     # notification V5 = outbox_events 신설 (구현 ④-c-2b-2 P9, ADR-0020 D2)
-    "order": ["1", "2", "3", "4", "5", "6", "7", "8", "9"],  # V7 = 커서 페이지네이션 인덱스 (구현 ⑥)
-    "product": ["1", "2", "3", "4", "5", "6", "7"],
-    "payment": ["1", "2", "3", "4", "5", "6", "7"],
-    "notification": ["1", "2", "3", "4", "5"],
+    # V10/V8/V8/V6 = last_replay_payload_digest (구현 ④-c-2b-3a P14, ADR-0021 D1)
+    "order": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],  # V7 = 커서 페이지네이션 인덱스 (구현 ⑥)
+    "product": ["1", "2", "3", "4", "5", "6", "7", "8"],
+    "payment": ["1", "2", "3", "4", "5", "6", "7", "8"],
+    "notification": ["1", "2", "3", "4", "5", "6"],
 }
 
 DLQ_QUARANTINE_GROUPS = [

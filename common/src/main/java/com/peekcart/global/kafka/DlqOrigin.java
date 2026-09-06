@@ -21,6 +21,10 @@ package com.peekcart.global.kafka;
  * @param exceptionType      실패 예외 FQCN. 헤더 부재 시 null
  * @param exceptionMessage   실패 예외 메시지. 헤더 부재 시 null
  * @param payload            원본 메시지 본문. null 가능(tombstone)
+ * @param replayAttemptId    replay 상관 — 시도 UUID. 헤더 부재·판독 실패 시 null
+ * @param replayLedgerOwner  replay 상관 — 원장 소유 서비스 prefix. 헤더 부재 시 null
+ * @param replayTargetGroup  replay 상관 — 표적 consumer group. 헤더 부재 시 null
+ * @param replayRootId       replay 상관 — canonical root 의 원장 행 id. 헤더 부재·파싱 실패 시 null
  */
 public record DlqOrigin(
         DlqOriginKind originKind,
@@ -32,7 +36,15 @@ public record DlqOrigin(
         Long originalTimestamp,
         String exceptionType,
         String exceptionMessage,
-        String payload
+        String payload,
+
+        // --- replay 상관 (ADR-0021 · 구현 ④-c-2b-3a P14-c) ---
+        // 전부 nullable 이다. 이 넷은 조작 가능한 application 헤더이므로 **지시자일 뿐 판정 근거가 아니다** —
+        // 실제 판정은 원장 앵커와의 대조가 한다(④-c-2b-3b P15). 여기서 null 이면 상관 시도조차 하지 않는다.
+        String replayAttemptId,
+        String replayLedgerOwner,
+        String replayTargetGroup,
+        Long replayRootId
 ) {
 
     /**
@@ -53,6 +65,17 @@ public record DlqOrigin(
         if (failedConsumerGroup == null || failedConsumerGroup.isBlank()) {
             throw new IllegalArgumentException("failedConsumerGroup 은 필수입니다 (부재 시 UNKNOWN_CONSUMER_GROUP)");
         }
+    }
+
+    /**
+     * replay 재발행분으로 <b>주장하는</b> 레코드인가 (④-c-2b-3a P14-c).
+     *
+     * <p><b>"주장" 이다.</b> 네 헤더가 다 있어도 그것만으로는 replay 가 아니다 — 원장 앵커 대조를 통과해야
+     * 상관된다(ADR-0021 §D1). 이 메서드는 <b>대조를 시도할 가치가 있는지</b>만 가른다.
+     */
+    public boolean claimsReplay() {
+        return replayAttemptId != null && replayLedgerOwner != null
+                && replayTargetGroup != null && replayRootId != null;
     }
 
     /** consumer group 을 판독하지 못한 레코드인가. quarantine listener 의 적재 조건이다. */

@@ -308,3 +308,12 @@ self-test 9b(“reconciler drift 를 잡는가”)는 **내가 기억한 그 파
    P21 digest writer + V-30 · group 3자 대조 · drain 4조건 preflight · V-19a~m · CommitAwareMetrics Counter).
   건수 추세로 종료 판정하지 않는다.
 - raw: .cache/codex-reviews/plan-task-impl4-c2b-dlq-replay-2b3-r3.stderr (JSON 없음)
+
+## 2026-09-06 — diff 리뷰 라운드 1 (④-c-2b-3a) — **미실행 (usage limit)**
+- 항목: 0건 — **측정하지 못했다** (P0/P1=0 이 아니라 미측정)
+- 원인: Codex `usage limit` (재개 2026-09-07 14:45). 계획 리뷰 1R/2R 이 한도를 소진했고 3R 부터 막혔다.
+  **PR 분할이 이 문제를 해소하지 못했다** — 분할의 전제는 "각 조각이 한도 안에서 리뷰된다" 였는데,
+  한도는 조각 크기가 아니라 이미 소진된 잔량에 걸렸다.
+- 검증(리뷰 대체 불가, 별개로 수행): 1006 tests 0 실패(8모듈) · lint 15종 green ·
+  parity self-test 23종 · 변이 1종(requireComplete 제거 → 거부 4종 red, 정확히 그 4종만)
+- raw: .cache/codex-reviews/diff-c2b3a-r1.stderr (JSON 없음)

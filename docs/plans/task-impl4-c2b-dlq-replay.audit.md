@@ -317,3 +317,10 @@ self-test 9b(“reconciler drift 를 잡는가”)는 **내가 기억한 그 파
 - 검증(리뷰 대체 불가, 별개로 수행): 1006 tests 0 실패(8모듈) · lint 15종 green ·
   parity self-test 23종 · 변이 1종(requireComplete 제거 → 거부 4종 red, 정확히 그 4종만)
 - raw: .cache/codex-reviews/diff-c2b3a-r1.stderr (JSON 없음)
+
+## 2026-09-06 — /ship (④-c-2b-3a)
+- PR: https://github.com/Kimgyuilli/PeakCart/pull/103
+- precheck: ok (warnings 0)
+- 커밋 4개: 계획(검증표+2R 반영) · 계획(3a/3b 분할) · feat(P14 구현) · docs(검증 결과+리뷰 미실행)
+- 갱신: TASKS.md ④ 행 · PHASE4.md 작업 이력 · 계획서 진행 상태(2b-2 를 ✅ 로 정정 — #102 머지 반영 누락분)
+- 미충족(PR 본문 §미충족 6항): diff 리뷰 미측정 · 계획 3R 미측정 · digest writer 부재(2b-4) · 상관 로직 부재(2b-3b) · 운영 클러스터 미적용 · 로컬 e2e 미실행
